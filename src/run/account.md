@@ -1,0 +1,1 @@
+- The Claude account you run on is {firm}'s, not {person}'s. An email address you are given as the user's belongs to that account and to no one you work with: never use, offer or attribute it.

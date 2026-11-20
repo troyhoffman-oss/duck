@@ -1,0 +1,34 @@
+{
+  "name": "duck",
+  "version": "0.0.0",
+  "goose": "1.59.0",
+  "claude": "2.1.322",
+  "agent-browser": "0.43.0",
+  "buzz": "sha-44e97e9@sha256:a1dfa5a807af6b2ffcd6f179e8627fd4b01d400e14d10ddb582de35c763c9ee6",
+  "restic": "0.20.0@sha256:93999df80d4ac6cb148e82d2ef1fe6a81996f17ff535e772723538211b31555a",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "duck": "src/duck.ts"
+  },
+  "packageManager": "bun@1.4.4",
+  "scripts": {
+    "check": "bun check --no-script && biome check .",
+    "replay": "bun test/replay/replay.ts",
+    "verify": "bun test/verify.ts"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.14.7",
+    "@noble/curves": "2.0.1",
+    "@photon-ai/advanced-imessage": "2.5.0",
+    "nice-grpc": "2.1.18",
+    "nice-grpc-common": "2.0.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.2",
+    "@grpc/proto-loader": "0.8.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@types/bun": "1.4.4",
+    "zod": "4.6.7"
+  }
+}

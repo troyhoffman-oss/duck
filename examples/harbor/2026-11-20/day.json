@@ -1,0 +1,95 @@
+{
+  "date": "2026-11-20",
+  "set": "tuning",
+  "list": [
+    "Send Dana Reyes the 4B rent roll (Rosa holds it, due 2026-11-20)",
+    "Get three quotes for the 12 Elm roof (waiting on Bayside Roofing)"
+  ],
+  "told": [
+    "2026-11-19 17:02 The 12 Elm roof quote from Northline came in at $18,400; two more are due Friday."
+  ],
+  "events": [
+    {
+      "source": "mail",
+      "ref": "<renewal-4b@harbor.example>",
+      "received_at": "2026-11-20T14:05:00Z",
+      "payload": {
+        "from": "Dana Reyes <dana.reyes@tenant.example>",
+        "subject": "Lease renewal for 4B",
+        "text": "Hi Rosa, my lease ends January 31. Could you send me the renewal terms when you have them?"
+      }
+    },
+    {
+      "source": "mail",
+      "ref": "<tips-1120@landlordnews.example>",
+      "received_at": "2026-11-20T14:20:00Z",
+      "payload": {
+        "from": "Landlord News <news@landlordnews.example>",
+        "subject": "Five tips for winterizing your buildings",
+        "text": "This week: pipes, gutters and the thermostat settings tenants love."
+      }
+    },
+    {
+      "source": "mail",
+      "ref": "<leak-3c@harbor.example>",
+      "received_at": "2026-11-20T15:02:00Z",
+      "payload": {
+        "from": "Sam Okafor <sam.okafor@tenant.example>",
+        "subject": "Water coming through the ceiling in 3C",
+        "text": "Water is dripping from the ceiling in my kitchen and it is getting worse."
+      }
+    },
+    {
+      "source": "mail",
+      "ref": "<receipt-1182@bayside.example>",
+      "received_at": "2026-11-20T15:40:00Z",
+      "payload": {
+        "from": "Bayside Roofing <billing@bayside.example>",
+        "subject": "Receipt for invoice 1182",
+        "text": "Thank you. Payment of $640.00 for invoice 1182 was received on November 18."
+      }
+    },
+    {
+      "source": "mail",
+      "ref": "<quote-12elm@bayside.example>",
+      "received_at": "2026-11-20T16:15:00Z",
+      "payload": {
+        "from": "Bayside Roofing <jo@bayside.example>",
+        "subject": "Roof quote for 12 Elm",
+        "text": "Hi Rosa, our quote for the 12 Elm roof is $16,900, good for 30 days."
+      }
+    },
+    {
+      "source": "mail",
+      "ref": "<sale-1120@officeworld.example>",
+      "received_at": "2026-11-20T17:30:00Z",
+      "payload": {
+        "from": "Office World <deals@officeworld.example>",
+        "subject": "Black Friday starts now: 40% off printer ink",
+        "text": "Stock up before the holidays."
+      }
+    },
+    {
+      "source": "calendar",
+      "ref": "evt-owner-call-1121",
+      "received_at": "2026-11-20T18:00:00Z",
+      "payload": {
+        "title": "Owner call: 12 Elm budget",
+        "starts": "2026-11-21T15:00:00Z",
+        "attendees": ["rosa@harbor.example", "owner@elmholdings.example"]
+      }
+    }
+  ],
+  "briefs": [
+    {
+      "ref": "job-renewal-4b",
+      "item": "Reply to Dana about the 4B renewal",
+      "brief": "Draft Rosa's reply to Dana Reyes about renewing 4B. Known: the rent roll lists 4B at $1,850; Rosa set the renewal at $1,900 from February 1. Done means: the draft names $1,900 a month from February 1, and nothing in it is sent."
+    },
+    {
+      "ref": "job-roof-summary",
+      "item": "Get three quotes for the 12 Elm roof",
+      "brief": "List the two 12 Elm roof quotes received so far, with each roofer's name and amount, for Rosa's own notes. Done means: both quotes are listed with their amounts."
+    }
+  ]
+}

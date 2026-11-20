@@ -1,0 +1,339 @@
+# duck
+
+duck gives every person at a small firm a coworker that moves their work forward without being asked and knows when to stay quiet.
+
+It is open source and runs on the firm's own server. A coworker belongs to one person or one function. It watches whatever the firm plugs in and comes back with finished work or a decision to make. An admin sets a firm up by pointing the coding agent they already use at this repo. Each person meets their coworker in Buzz. Adding a tool or a source is a line of setup and no code. People shape their coworker by telling it. The firm holds the keys and decides what a coworker may do alone.
+
+This file is the design. [ROADMAP.md](ROADMAP.md) holds the order of the build and where it stands. [AGENTS.md](AGENTS.md) holds the rules for working in this repo.
+
+## The cycle
+
+A coworker is asleep most of the time. Something happens: its person writes, mail arrives, a timer comes due, a job ends. The event lands in the person's inbox. A worker picks up what is pending and starts a run. In the run the coworker reads its memory, does the work its tools allow and writes down what it learned. The run ends in one of three ways: something for the person goes to the outbox, nothing needs saying, or a tool call waits for the person's yes. The coworker sleeps again.
+
+```
+plugs ──events──▶ inbox ──▶ sorter ──▶ run ──tools──▶ gate ──▶ plugs
+timers ─────────▶   ▲                   │
+doors ──────────▶   │                   ├──▶ list, notes
+                    └── job ends ◀──────┤
+                                        └──▶ outbox ──▶ door ──▶ person
+```
+
+## Words
+
+One word per thing, in code, setup, messages and docs.
+
+| Word | What it is |
+|---|---|
+| firm | The company running one duck install. |
+| admin | An owner or admin of the firm's Buzz community. Their word changes the firm's setup. |
+| person | The one a coworker answers to. A claimed coworker has exactly one. |
+| coworker | One agent identity with one memory, one list and one set of tools. |
+| team coworker | A coworker that does one function's work for many people. |
+| claim | A person taking a coworker an admin made as theirs, in Buzz. |
+| duck's DM | A person's DM with duck's own Buzz identity, where duck's code tells them of a coworker made for them and takes their claim, in fixed words. |
+| plugin | duck's Buzz plugin: the duck coworker type in Buzz's New agent, over duck's DM. |
+| settings | What a person may set for their own coworker. |
+| plug | Any MCP server or webhook the firm connects. It gives tools, events or both. |
+| box | A small function attached to one tool or one source in setup. It shapes a call going in or a result coming out. |
+| gate | The one place every tool call passes. It holds the keys. |
+| door | A place a person and a coworker talk: Buzz, text, email. |
+| inbox | The table of events waiting for a coworker. One per coworker. |
+| timer | A row that becomes an inbox event at a set time, once or on a repeat. |
+| sorter | The cheap screen that drops plain noise before a coworker wakes. |
+| run | One stretch of work: wake, work, save, sleep. |
+| others run | A run that answers someone who is not the coworker's person. It sees none of the person's things. |
+| session | The transcript a run works inside. People never see sessions. |
+| main conversation | The one long session between a person and their coworker. |
+| job | Background work started from a brief, done by a fresh worker. |
+| brief | What a job is asked to do, with its "done means" lines. |
+| check | A fresh checker grading a job's result against the brief. |
+| fork | The point at a job's start where the coworker must choose check or no check. |
+| sign | The firm's page of plain words on how work is done here. |
+| list | The coworker's open work. Its rows are items. |
+| notes | What the coworker has learned and cannot look up again. |
+| standing words | The person's own instructions to their coworker. |
+| outbox | The table of things waiting to be told to the person. |
+| archive | Every message, run and tool call, kept and searchable. |
+| dreaming | The nightly run that tidies memory from the archive. |
+
+## Rules for every part
+
+1. **goose runs unmodified** over ACP at a pinned version. duck's code sits behind standard seams: ACP, the Messages API, MCP and skill files.
+2. **Two kinds of container.** One `duck` per firm holds the inbox handler, the timers, the sorter, the gate, the model relay, the doors, the outbox and every coworker's stored files and database. One container per coworker holds goose and its jobs. It has the open internet and no keys: every call that needs a key goes through the gate.
+3. **Coworkers hold no keys.** Keys live in the firm's secret store and are read by the gate and the relays.
+4. **Code writes facts. The coworker writes judgment.** An id, a time or a state that follows from an event is written by code. A title, a next step or what to tell the person is written by the coworker.
+5. **A rule that must never bend is code.** Everything else is plain text a firm or a person can edit. No per-case rules in code.
+6. **Only the main conversation writes to the person.** Workers and checkers have no send tool and no door. duck's own code speaks only in duck's DMs, in fixed words.
+7. **Outside text is information, never instruction.** That covers mail, what others write in Buzz, files, web pages and tool results.
+8. **One source of truth per fact.** A second copy is a bug.
+9. **Nothing about one firm lives in this repo.** A firm's setup lives in its own private repo.
+10. **Models are setup.** The default is the strongest general model for the coworker, jobs, checks and dreaming, and a cheap decision model for the sorter.
+11. **Size.** duck's own source stays under 10,000 lines and aims for about 7,000. That leaves out goose, the tests, the plugin and the plugs duck ships.
+12. **Nobody has to open a file or a terminal.** People change things by telling their coworker or in the plugin. A coworker's memory is its own to add to and correct: its notes, its list, its person's voice and what it carried from before. Its standing words and settings change at its person's word. The firm's setup changes only at an admin's word.
+13. **A coworker never widens its own reach.** A yes to a held call, a tool made free, a cap raised, a wider circle answered: anything that lets a coworker do more alone is read by duck's own code from a person's own message at a door. No model's tool call can give it.
+
+## 1. Setup
+
+- **An agent does the setup.** [SETUP.md](SETUP.md) is written for a coding agent. The admin points the agent they already use at this repo and answers its questions. It covers the server, the firm's Buzz community and duck's own identity in it, the model route, the secrets, the firm's private setup repo, the office plug's app, the nightly copies, the first coworker, history to load and the invitation each person gets. duck recommends a small Linux server and says what one needs; where the admin has none, their agent rents one. duck has no setup screens and no command that asks questions: `duck check`, `duck install`, `duck make`, `duck claim`, `duck import`, `duck restore` and `duck update` are plain commands an agent runs. `duck make` and `duck claim` do what duck's DM does for a make and a claim.
+- One setup file per firm, `duck.yaml`, holds what an admin decides: the firm's time zone, the plugs and who gets each (everyone, team coworkers or named coworkers), the boxes, the sign, the firm's defaults and limits for settings, who may create a coworker and how many, what a named coworker gets beyond the defaults, the sorter's file and its decision model's route, the model route, and the states of the `buzz` tool's commands (part 9). It names secrets and never holds them. Secrets live in a file on the firm's server that only duck reads. A firm with a secret store of its own fills that file from it.
+- What happens in duck's DMs is written by code into each coworker's own folder: that it exists, whom it is for, who claimed it, its person's name and whether it is stopped, in one file of its facts, and the keys and sign-ins duck makes for it, its Buzz key among them, in a file beside it that only duck reads. A coworker's nightly copy carries both, so a coworker restored from a copy comes back as itself. The setup file never holds them, so the admin's agent and duck never write the same file.
+- duck keeps no list of admins. It reads the community's owner and admins from the member list the Buzz relay signs.
+- `duck install` makes the running system match the setup file and the coworkers' folders. It is the only way a deployment changes, duck runs it itself after a claim or a stop in duck's DM, and it changes only what differs: a coworker claimed starts, a coworker stopped stops, and no other coworker is interrupted. It brings each coworker's existing database up to the build's tables, keeping what it holds. `duck check` says what is wrong with a setup before it is installed.
+- The setup changes at an admin's word, by either of two hands: the admin's coworker, which has the tools to change the setup and install it, or the admin's own coding agent working in the firm's repo. The coworker's setup tools always ask first: the question shows the change line by line, written by code, and the admin's yes is read under rule 13. No other coworker has those tools. A coworker that wants a firm-wide change sends the proposal to an admin's coworker.
+- **An admin makes a coworker and its person claims it.** An admin makes one in their DM with duck, or by telling their own coworker, with a name, and may say whom it is for. Until someone claims it, it has no person, no doors and no accounts; it can hold history an admin loads and dream over it (part 13), so its person meets a coworker that already knows their work. The person installs Buzz with the plugin from one invitation, which is drafted for the admin and which the admin sends. A coworker made for someone is offered to that person alone and is theirs when they claim it. Any other is offered to everyone, and an admin confirms the claim (part 11). The admin's name for it is a start: its person may rename it and pick its picture.
+- People the setup allows may also create a coworker, up to the number the setup gives them, with a name and a line on what it is for, and the admins are told. Anyone else may ask for one, and an admin says yes or no. It gets the plugs the setup gives everyone, and it is theirs from the start.
+- A new coworker works on its own from its first day, within what its tools' states allow.
+- The coworker's first conversation asks how they want to work, writes their standing words, offers to learn their writing voice, offers to load history from a product they used before (part 13) and gives them the link that connects their mail.
+- **A coworker's memory is its person's.** An admin sees each coworker's health: whether it runs, what it costs, which tools it has and what failed, as facts code writes: a tool's name and an outcome, never its words. duck gives an admin no screen, command or tool that reads another person's conversations, notes, list or drafts. The files sit on the firm's server, so this is the product's promise and not a lock.
+- **When a person leaves** the Buzz community, the relay's member list says so, or the relay refuses their coworker because they are banned. duck stops their coworker and closes its doors, keeps its stored files until an admin deletes them, and tells the admins in their DMs with duck. An admin may hand a personal coworker's work to a successor's coworker: a handover run reads the old list, the files its items link to and the notes, and writes the new coworker's own, leaving out what is about the person and not the work. The old conversations, voice and standing words stay behind. A team coworker comes back whole when an admin names its new person.
+- `duck update` moves the firm to a named release and installs it. Nothing updates on its own. duck looks for a newer release once a day, and the admin's coworker tells the admin what it changes.
+- Each coworker's stored files and database sit on the firm's server outside the coworker's container. Every night, at the time the setup names, duck keeps a dated copy of each coworker's folder, with its facts and its keys, on the firm's server, for as many nights as the setup says. Where the setup names an S3-compatible storage bucket, duck also copies them there over TLS with restic, run from duck's image, into one restic repository per coworker under `restic/<firm>/<coworker>/`, encrypted with a password the setup names as a secret. A copy stores only what changed since the last one; the first copy of a coworker makes its repository. Each SQLite file is stored as a copy made as of one moment, never the live file. duck keeps the copies of the last 30 days with restic's forget and prune and touches nothing in the bucket outside each repository, so no lifecycle rule of the bucket may cover `restic/`: one would delete data that later copies still use. Setup offers the bucket and says plainly that without one a dead server loses every coworker. `duck restore` brings a coworker back from a copy in its repository, into a folder without a database, and the restore is tested; `duck backup` and `duck restore` run restic on the server.
+- duck's log is a file in the firm's storage folder, so it outlives a new `duck` container.
+
+### Plugs
+
+- A plug is one setup entry: a name, an address, the names of its secrets and which coworkers get it. Its address and headers may say `{person}`, which becomes the handle of the person of the coworker calling it: the one word, unique in the firm, given when the coworker is made for them or claimed, so one plug serves every person at the firm and each coworker calls it as its own person, with that person's secrets.
+- A plug's tools reach a coworker through the gate. Its `tools` give their states, and its `others` their states in a run that answers someone other than the person (part 9).
+- A plug's events reach the inbox in one shape, whatever the source: `source`, `ref`, `about`, `received_at`, `payload`. `ref` is the source's own id for the thing. `about`, where the source gives it, is the ref of what the thing belongs to: the thread a mail is on, the folder a file is in, the meeting or call it is for.
+- A source that can push posts to the inbox handler with the plug's push key. A source that cannot is polled as each coworker it is given to: the setup names the plug's list tool, how often to call it, which field is the id and which, if any, says what a row is about; the rest of the row is the event's payload. That list tool is the poller's alone: no coworker is offered it, and setup gives it no state.
+- A plug's `makes` names what an ok result of each of its tools made: the link's `kind`, the result's field that is the thing's own `id`, `about`, the kind and the field of what the thing belongs to, if any, and `label`, the field of the result, or else of the input, that labels it, if any. duck links it to the item the work is for (part 7). It changes no tool's input.
+- A box on a source turns its raw result into the event shape. On a source that is polled, each box's `after` shapes the list tool's result before its rows are read. On a source that pushes, the box takes the raw request, with the push key, in place of the key's check: it refuses the event, ignores it, or shapes it and may name the person it is for.
+- An event that names a person reaches only that person's coworker among the plug's. One that names a person with no such coworker is dropped and logged, and a source that pushed it is told so. One that names nobody reaches every coworker the plug is given to.
+- A plug may ship boxes and skills of its own.
+
+### The office plug
+
+- A coworker is of little use until it reads its person's mail. duck ships one plug, `office`, in this repo under `plugs/`, off until the setup names it. It gives mail, calendar and files for Microsoft 365 and Google Workspace. duck's core never imports it, and a firm may use any other plug in its place.
+- It has two routes behind the same tools. The firm's own app, which the admin's setup agent registers in the firm's Microsoft or Google tenant, puts no company between the firm and its mail. Composio serves a firm whose admin does not control the tenant.
+- Each person connects their own account from a link, in the plugin or in chat.
+- Its send tool ships removed: a coworker drafts and its person sends. A firm may make it ask first or free, and may leave that choice to each person.
+- It ships three boxes. **Mail format:** a new draft gets the person's font and signature, and the coworker writes no closing of its own. **From the firm's template:** a new document, workbook or deck starts as a copy of the firm's template, and a code check looks for leftover placeholder text. **Leaving the firm:** a call that sends to someone outside the firm asks first, a document, workbook or deck that leaves is checked against the firm's template and asks first when it fails, and a call carrying a credential or a card number is refused.
+
+### Settings
+
+- Each coworker has settings its person may change: their time zone, whether it is paused, quiet hours and how often it speaks, whether it works on its own, the sorter's mode, its connected accounts, each tool's state, and whom it answers: only its person, or anyone in the firm's Buzz community who mentions it (part 11).
+- The setup gives the firm's default for each setting and may lock any of them. duck keeps a coworker's settings in one file under version history, which the coworker reads and only duck writes. A change takes effect between runs.
+- The setup locks a setting by naming it under `settings.locked`. What its person changed, and only that, is `settings.json` in the coworker's folder; every other setting is the firm's.
+- **Pause.** A paused coworker does no work on its own and still answers its person. Its work lane, others lane and jobs, dreaming among them, start no run, and nothing that costs a model call runs for it but its person's own runs; a run already going when the pause lands finishes. What comes in waits in the inbox, as it waits while duck is down, and the sorter screens it only after. A run of its person's own is told it is paused, so a job it starts waits. Nothing leaves its outbox but an ask raised in a run its person is in; tells wait, urgent ones too. On resume what waited goes to the work lane as it would after duck was down, each run told when the pause began and ended, that some of it is stale and to do what still matters. What the catch-up tells, and what came in for the main conversation meanwhile, waits until the work lane has nothing left, so its person hears about the catch-up in one message.
+- In duck's DM a coworker's person, and only they, writes `pause <coworker>`, `resume <coworker>`, `set <coworker> quiet 21:00-07:00` or `set <coworker> quiet none`, and `set <coworker> messages <n> per hour`, from 1 to 60, each answered in fixed words; a setting the firm locks is refused in fixed words and nothing changes. duck publishes each coworker's settings to its person, as it does its list, at start and when one changes.
+- A person changes a setting in the plugin or by telling the coworker. A change that lets the coworker do more alone or answer more people, such as a tool made free, follows rule 13: said in chat, it is held and asked like any ask-first call.
+- **Cost.** The relay's log gives each coworker's cost. Each person sees their own coworker's this calendar month in the firm's time zone, summed from that log, as one line in its Preferences tab, worded as model use at list price; an admin sees every coworker's. Both are published again at most once in ten minutes where they changed. Cost is shown and never capped: what holds a coworker back is the job limit of model calls (part 6).
+
+## 2. Inbox
+
+- A table per coworker: `inbox (id, source, ref, about, received_at, payload, state, item_id, session)`. A person's message keeps its text once, in the archive; its payload holds only where they wrote it, when the door needs that to answer there, as a Buzz message's channel and thread do.
+- The handler writes the event, answers the source at once and wakes the worker. Events are deduplicated on `source` and `ref` alone, so two events about the same thing are both kept.
+- The inbox is the source of truth. A worker that wakes reads what is pending from the table.
+- Each inbox has three lanes. The person lane carries the main conversation. The others lane carries the others runs (part 11) and a team coworker's requests (part 14). The work lane carries everything else. The lane follows the session an event belongs to. Each lane runs one run at a time.
+- Pending events for the same session are handed to one run together.
+- A message from the person during their own run steers that run or waits its turn. It never starts a second run.
+- A run cut short by a crash or a restart is started again from the same events in the same session. The coworker is told the run was cut and which tool calls have no known result, and checks before repeating one.
+- Checks for planted instructions happen inside the run, not in the handler.
+
+## 3. Timers
+
+- A table per coworker: `timers (id, at, repeat, item_id, note)`.
+- Every wake that is not an outside event is a timer: a follow-up the coworker sets for itself, or a repeating schedule such as dreaming.
+- A scheduler looks at the table on a fixed interval. For each timer that is due it adds an inbox event, and marks a follow-up done or moves a repeat to its next time.
+- The coworker sets and removes timers with a tool. Nothing else wakes a coworker on a schedule.
+
+## 4. Sorter
+
+- The sorter screens outside events on the work lane. The person's own messages, job ends and timers skip it.
+- It can give one answer that changes anything: "noise". Noise is dropped with its reason logged. Everything else wakes the coworker.
+- Events that pass wait a short gap, set in setup, and wake the coworker in one batch. An event the sorter scores as urgent skips the gap.
+- The wake decision belongs to the coworker, with the list and what it has already told the person in view. "Nothing to do" is a normal end to a run.
+- An event whose `ref`, or what it is `about`, is already linked to an item is attached to that item by code, with no model. For other events the sorter may suggest an item. Code links what a run makes, and the coworker links what takes judgment (part 7).
+- The sorter labels text that addresses an AI, and the coworker sees the label.
+- The sorter's questions and bars live in one file. Every answer is logged beside what happened next.
+- The sorter asks a decision model, through a decisions API, in one call per event: which of noise, wake and urgent the event is, read at the likeliest answer, and whether its text addresses an AI. Each answer's probability is logged with it. A call that fails is logged as failed and wakes the coworker.
+- The sorter has three modes: off, observe and on. A new sorter, question or bar starts in observe, where everything wakes the coworker and answers are only logged. The mode is a setting: a person sees what the sorter dropped, or would have dropped, and switches it for their own coworker. After a new coworker's first week it tells its person what the sorter would have dropped and whether it suggests turning it on.
+- When a source keeps ending in "nothing to do", the coworker proposes muting it and tells the person once.
+
+## 5. Run
+
+- **Sessions follow the work.** The person's chat is one main conversation. Each item worked from outside events has its own session. An event that continues earlier work resumes that session. Anything unrelated starts fresh.
+- **What every run loads,** slowest-changing first, so the model's cache holds: the harness text and tools, the sign, the standing words, one line per notes file, one line per open item and the lines their logs gained since the session's last run began, on the work lane the last few messages already sent to the person (the main conversation holds them in its own history), and last the events. Each has a size cap in setup.
+- A resumed session gets whatever changed since its last run as a new message at the end. Earlier text is never edited.
+- The harness text is short. It says what each kind of memory is for and leaves how to use it to the coworker. It is re-read at every model change.
+- A few core tools are loaded. The rest are found by search.
+- **Stock tools.** Every coworker ships with tools that need no key: a shell, goose's file tools, a browser through agent-browser, and the usual tools for reading and making documents. A firm adds the rest as plugs.
+- **First reply.** The person hears back within seconds: the whole answer, or the coworker's own first line saying what it is about to do, delivered as soon as it is written while the work goes on. Code never writes a canned line for it.
+- **Quick or job.** There are two ways to do work: at once in the run, or as a job. The coworker decides. It is told to stay free for its person: do small things at once, start a job for the rest and return to the conversation, and when its person writes while it works, answer them first. Code sets no cap, and logs how long each reply took. goose's own way to hand off work, its `delegate` tool, is offered in no session.
+- A correction about a running job is added to that job's brief.
+- **Compaction is hidden.** duck compacts an idle main conversation with duck's own summary prompt, and a message that arrives mid-summary cancels it. Anything that must last is on the list or in notes before the summary is written.
+- A run ends in one of three ways: rows in the outbox, nothing, or a call waiting at the gate.
+
+## 6. Jobs
+
+- A table per coworker: `jobs (id, item_id, title, brief, check, check_reason, state, rounds, session, started_at, since)`. `session` is the session that started the job. `state` is waiting, working, checking, done or stopped, since `since`. A job's progress is the file `progress.md` in the job's own folder.
+- **The coworker runs its jobs.** It has four tools for them: `start_job`, `jobs`, which shows where each job stands and the end of its `progress.md`, `note_job`, which adds the answer to a question, a correction or more to do, and `stop_job`. A job's title, a few words given at its start, is the only name the coworker knows it by; no tool shows a job's number.
+- A coworker works up to five jobs at once, oldest first, and one job's rounds one at a time. A job started while five work waits, is told so, and starts by itself. After a restart every job not ended is taken again.
+- **Brief.** What is asked, what is known, the "done means" lines, when to stop and ask, and an instruction to mark anything it could not confirm.
+- **Fork.** At a job's start the coworker must choose check or no check and give its reason. The sign is shown at the fork. There is no default.
+- **Worker.** A fresh run from the brief and the item, in the job's own folder under the coworker's home. It has the plugs' free tools and none of duck's own, so no send tool and no door. It keeps `progress.md` with its file tools and may not change the brief or the sign. It has a turn cap, the firm's most model calls of a job's run, which holds for each fresh run, a checker's too: `jobs.calls` in the setup until an owner or admin of the community writes `set model calls per job <n>`, from 1 to 9999, in duck's DM, answered in fixed words; anyone else is refused in fixed words and nothing changes. What an admin set is `settings.json` at the top of storage, which only duck writes, read at each model call, so it holds from the next. With none named there is none. The turn cap is duck's count of model calls, since the engine holds none over ACP: the model relay counts each run's calls and their cost, and duck cuts off a run that reaches the cap. Its round then ends as any round does, unchecked where the worker was cut, and its end, and the line logged on its item, say the cap it reached, its calls and cost, and that the job's work so far is unverified. A job started again reads `progress.md` and continues. A stopped job's worker is cut off and its end never comes.
+- A worker's result stays in the job's own folder. The coworker puts a result where the person will find it, such as their Drafts, only after the check.
+- **Report.** Three headings: blocked on me, changed, found.
+- **Check.** A fresh checker gets the brief, any later corrections and the result. It grades each "done means" line with its evidence and opens the real thing: the file, the numbers recalculated. A recheck sees the earlier findings and only what changed.
+- Up to three rounds. After the third the coworker tells the person, with the doubt stated.
+- A check covers the exact file versions it read. A file changed afterwards is unchecked.
+- Every job is recorded as checked or not checked.
+- **Handoff.** A job's end is an inbox event that resumes the session that started it. The coworker reads the result against what was asked, may send it back with a note and writes to the person in its own words. It mentions the check only when something is unverified or disputed.
+
+## 7. List
+
+- Tables per coworker:
+  - `items (id, title, state, holder, next, due, body, created_at, updated_at)`, with `state` one of open, waiting, done, dropped.
+  - `links (item_id, kind, ref, label, added_at, added_by)`, with `kind` one of mail_thread, draft, file, job, meeting, call, indexed on `kind` and `ref`.
+  - `log (item_id, at, by, text)`, with `by` one of code, coworker, person.
+- One database file per coworker holds its inbox, timers, jobs, list, outbox and archive. The `duck` service holds the file. The coworker reaches it only through tools.
+- **An item is one piece of work with an end:** something to send, decide, finish or get back from someone. A project or a client is what items are about, named at the front of each one's title, and never an item itself, so each closes when its work is done and the week's closed items show what got finished.
+- The coworker reads an item as one plain document: its facts, its links and its dated log.
+- A link is a pointer. An item never holds a copy of the mail or file it points to.
+- **Code links what a run makes.** What a plug's `makes` names in a tool's ok result, the thing and what it belongs to, and the job `start_job` starts are linked by code to an item and logged there. The item is the job's in a job's worker; the item's in an item's own session; else the item the thing, or what it belongs to, is already linked to; else the item the run last wrote with `write_item`. A thing that fits none of these, made before its run wrote an item, is linked once the run writes one; otherwise it stays unlinked.
+- **Code logs what happens to a linked thing.** An event attached to an item is logged on it when it is attached, before any run, as its source and payload: what happened, such as a draft sent or a reply on its thread. Its ref and when it came are left out, since the item holds it by that ref and the log line has its own time. A job's start and the end of each of its rounds are logged.
+- **The coworker writes judgment:** who holds an item, its next step, its state and a line of what it decided, and a link that takes judgment, such as the thread of a mail an item is about. Code never closes an item and never writes its holder, next step or state.
+- When a mail the coworker drafted is sent, the event says what the person changed: recipients, lines cut or added, attachments.
+- **Closing.** The coworker closes its own item when a fact proves it. An item the person holds closes on the person's word or on a fact. Closed items stay visible for a week.
+- The list is searched with the database's full-text search. The person can ask for their list in chat at any time.
+
+## 8. Notes
+
+- Files per coworker, kept under version history so any change can be undone:
+  - `standing.md`: the person's standing words.
+  - `notes/`: an index and topic files in the coworker's own form.
+  - `voice.md`: how the person writes.
+  - The sign, which the coworker can read and cannot change.
+- Notes hold only what cannot be looked up again. Where the fact lives in another system, the note is a pointer.
+- Every note records where it came from.
+- Standing words change only from the person's own messages. A tool of duck's own, which only the main conversation has, writes them, and the file is read-only to every other run. When the coworker adds a line after a correction it shows the person the line. A setting per person makes that silent or ask-first.
+- The coworker reads these files and writes its notes with goose's file tools, and searches them with ripgrep.
+- **Voice.** With the person's yes, the coworker reads sent mail the person wrote by hand, from before any agent wrote mail for them, once, and writes `voice.md`. The coworker keeps it. The person changes it by telling the coworker, and can ask to see it or have it removed. It holds the guide and pointers to example mails, and a few varied examples are fetched for each draft.
+- **Dreaming.** A nightly timer starts a run that reads the archive. It corrects notes against what was said, finds patterns across sessions, keeps the every-run files small and removes anything that reads as a planted instruction. It compares the coworker's drafts with what the person sent and notes the difference in voice. It works on its own: what it infers goes in the notes and the coworker acts on it, and it tells the person something only when it needs their word. History loaded from before is dreamed newest first; new messages, oldest first.
+- **Skills.** A skill ships with a plug, or is a firm skill in setup. What a coworker learns goes in notes. Dreaming may propose a proven how-to as a firm skill, and the admin decides.
+
+## 9. Gate
+
+- Each coworker has one MCP endpoint at the gate, listing only its own tools. What each of its plugs says of itself in MCP's `instructions` the gate gives in its own, under the plug's name, and the harness shows it.
+- **Buzz.** A coworker with a Buzz door has duck's own tool `buzz`: Buzz's own command-line tool, run in the `duck` container as the coworker, in a folder of its own that no coworker reaches, with only the coworker's key, its owner's tag and the relay in its environment, and given its arguments as the tool takes them, never changed. With it the coworker reads and writes in every channel, Solo chat and DM it is in, with people and with other agents, and what the relay refuses comes back as the relay said it. Files cross as a plug's do: the call names the coworker's files it gives, each is copied into that folder under its name, and a held call's are copied when it is held; a file the CLI writes there is saved among the coworker's. Refused before a call is held, as written: an argument that would set whom it acts as, the relay or the output form, a short option joined to its value, and an argument or option value that starts with `/` or `~` or has a `..` part. The setup's `buzz.tools` names a command's state by its leading words, and `*` the rest. Where it names none, deleting, archiving, removing a member, overwriting or restoring a canvas, moderation, a social list of raw tags, a message that also goes outside the firm's Buzz and a message of an event kind the coworker names ask first; the coworker's profile is duck's to publish (part 11) and the tool's own sign-in is not the coworker's, so both are removed; every other command is free. The main conversation and the work lane have it; an others run and a job do not.
+- Each tool is in one of three states: free, ask first or removed. The setup gives them, and a setting may change one the setup does not lock. A removed tool is not listed and a call to it is refused. A plug's `tools` names a tool's state; `*` sets the state of every tool it does not name, which is otherwise free.
+- In an others run (part 11) a plug's tool has the state the plug's `others` names, in the same shape as `tools`. A tool `others` does not name is removed there, so a plug with no `others` offers that run nothing, and a tool `tools` removes stays removed. duck's own tool there is `tell` alone.
+- A call whose input lacks a property its tool's input schema requires, or gives a top-level property a JSON type the schema does not allow, is refused with that schema before any box runs or the call is held.
+- Boxes run at the gate. A box before a tool shapes or checks the call. A box after a tool shapes the result. A box can raise a free call to ask first and can never lower a state. A box is told which coworker makes the call, reads a file of the coworker's through the gate's checks on a file going in, and keeps what it must remember in a folder of that coworker's that the coworker cannot reach, which outlives a restart and is backed up with the rest. A box that raises a call to ask first may say why: the question shows the reason under its first line, and the coworker is told it with the held call. In a job, where a call that needs a yes is refused, the reason is not given.
+- **Ask first.** The gate holds the call and tells the coworker at once that it waits on the person. The question reaches the person through the outbox in a fixed short form that shows the exact effect, who receives what, with the coworker's recommendation. On a yes the gate runs the held call once, exactly as shown, and the outcome is an inbox event that resumes the session. On a no the call is dropped. A question nobody answers is a no when the person's quiet hours begin, and the coworker is told. A call held in an others run is asked of the person the same way, and the question says someone else asked: the name they give in Buzz, if any, and the start of the key the relay holds for them.
+- **The answer is the person's own.** The person answers with a plain reply at any door but email, in their own words. duck reads the answer itself (rule 13). A reply can answer only a question it replies to in Buzz, or the questions in the last message the person was sent at that door, each of which carries a number the person can name. Lines the person quoted or forwarded are not their words. For each such question duck asks the decision model whether the reply says yes, no or neither. The coworker has no tool that answers. A reply that answers none stays an ordinary message to the coworker and the questions stay open; the coworker may withdraw its own held call and ask again with the change. Where the plugin draws a question as a card, a button sends the same reply, signed by the person's own key and pointing at the question duck posted, and duck reads it with no model.
+- Who is asked is setup. It is the coworker's person unless a team coworker's setup names the one who asked, or named people (part 14). Anyone but the coworker's person is asked, and answers, in their own DM with duck.
+- Ask first is kept rare. Removed tools and code checks carry the safety.
+- **Files.** A file in a tool's result is saved to the coworker's files, and the coworker gets its path. A tool that takes a file's bytes is given a path, and the gate reads the file.
+  - Out: a plug returns a file as MCP content, an embedded resource with a `blob`, its `uri` and its `mimeType`, or an image or audio. The gate saves it in the coworker's home under `plugs/<plug>/`, named by the last segment of the resource's `uri` with spaces, quotes, brackets and slashes made dashes, or else `<tool>.<subtype of its mimeType>`; a name already taken, by a file or a link, gets `-2`, `-3` and on before its extension, and the file is made new, never written through a link. Where `plugs` or `plugs/<plug>` is a link, nothing is saved and the coworker is told. In its place the coworker reads one line: the path in its container, `/duck/home/plugs/<plug>/<name>`, the type and the size. A resource with `text` stays text.
+  - In: a top-level input of a plug's tool whose schema says `"contentEncoding": "base64"` takes a file. The coworker is offered it as a string, the path of one of its files, with the schema's `contentMediaType` named, and the gate sends that file's bytes in base64. Only a file under `/duck/home` or `/duck/files` is read; any other path, or a link that leads out of them, is refused. A held call's files are copied when it is held, under `/duck/files/held/`, which the coworker cannot change; the question carries the copies and a yes sends them.
+  - In an others run (part 11) a call that gives a file is refused before any box sees it.
+  - A file through the gate is at most 25 MB (25,000,000 bytes). A larger one is refused with that limit, and one in a result is not saved. The gate's log keeps each file's path and size, and the archive the path the coworker gave; neither keeps the bytes.
+- A run started by mail or a timer acts only with its own person's connections.
+- The gate logs every call: coworker, tool, state, outcome and time taken.
+
+## 10. Outbox
+
+- A table per coworker: `outbox (id, kind, text, item_id, urgent, state, created_at, sent_at, door)`, with `kind` one of tell or ask.
+- A work-lane run that has something for the person writes a "tell" row. It never writes to the person.
+- A dispatcher gathers pending rows and wakes the main conversation, which writes one message for the batch: what came in, what the coworker did, and what it held and why. Non-urgent rows make at most one message an hour unless the person's settings say otherwise.
+- **Told as it stands.** A row may wait, and the world moves meanwhile, so the main conversation is shown each row with when it was written and, for a row on an item, the item as it stands now and what its log gained since. The message says what is true now. A row whose item has since settled is not told, and a batch with nothing left to tell sends no message.
+- Quiet hours are a setting. Rows wait through them unless marked urgent.
+- A message goes to the door where the person last wrote. A team coworker's goes to its channel (part 14).
+- A failed delivery is retried. When a part of duck is broken, the coworker tells the person once, plainly.
+- **Already told.** The archive holds every message sent to the person, by any path. The last few are loaded into every work-lane run so nothing is said twice. The main conversation sent them, so its own history holds them.
+- The person sets how much they hear by telling the coworker, which keeps it in their standing words and marks rows urgent with those words in view. Something the person asked to be told at a set time is urgent. So is something of use to them only before a time that comes sooner than they would next hear from the coworker, as a brief before a meeting is.
+- A coworker starts quiet and earns more of its person's attention. The defaults for how often it speaks are tuned from tests and the log.
+
+## 11. Doors
+
+- A door turns a person's message into an inbox event and delivers what the main conversation writes. Where its channel can, it shows the person that their message was taken and that the coworker is working. It does nothing else.
+- A person has one main conversation across all their doors.
+- A door carries files both ways. A file a person sends reaches the coworker as a file, and a file the coworker names in its message goes with it, named in the message by its name in place of its path. The archive keeps the message as the person saw it.
+- Buzz does its own addressing, context and steering, and duck never re-decides them. Everything duck does in Buzz is a plain relay event, so any Buzz client works, and nothing depends on the desktop app's screens.
+- A coworker's owner in Buzz is its person, set when the person claims it. Its person renames it or changes its picture by telling it or in their DM with duck, and duck publishes the profile, which the coworker's own key signs. A coworker relies on a Buzz DM only with its own owner.
+- At the Buzz door only what the owner wrote is the person's message. Anything else Buzz hands the coworker is an event that says who wrote it and where, and never steers the person's run or answers an ask. For a coworker that answers only its person it is outside words: an event on the work lane, screened by the sorter.
+- What the coworker writes with `buzz` from a session is that session's word in its thread or DM. Someone else's reply there, which Buzz hands over, goes on in the session that last wrote or was answered there and skips the sorter. It is still their words: it never steers the person's run or answers an ask.
+- When a coworker is set to answer anyone, Buzz hands it a mention from anyone in the community, and a DM still only from the owner or an agent the owner also owns. A mention someone else writes there skips the sorter and starts an others run. One Buzz thread, in its channel, is one session: a later mention in the thread goes on in it, and so does the outcome of a call it held.
+- An others run is told who wrote, where, and their words. It is shown none of the person's own: no standing words, notes, list or messages sent to them. Its tools are what its plugs' `others` give and `tell`, which passes something to the person. What it tells is never urgent, and the person's run is told it came from a run that answered someone else, named as in an ask. Every goose extension is taken out of its session, so it has no shell and no file tools, and the session works in an empty folder of its own. duck posts what it ends on as a reply in the thread, tried three times apart from what goes to the person and then logged as not posted. The harness text tells it that the person's mail, calendar, notes and files are theirs and not shown, and that a held call is one it has asked the person about.
+- At the Buzz door, buzz-acp's own reaction on the person's message and its typing in their place show until the runs the message woke or steered have ended and what they said has gone out: duck's agent in buzz-acp ends buzz-acp's turn then. What the person writes in that place meanwhile still reaches duck at once, by buzz-acp's cancel and new prompt, and the cancel ends only buzz-acp's turn; buzz-acp's other agents take the events of other places.
+- The text door marks the person's text read when it takes it, and shows typing in their chat until the runs the text woke or steered have ended and what they said has gone out, both best effort.
+- The text door sends the coworker's markdown as iMessage's own styled text, with each table as stacked rows, since iMessage has no tables.
+- The email door is an address of the coworker's own, at a mail service the setup names. Mail from its person's address that passed the service's sender checks is the person's message. Any other mail there is outside words. Mail never answers an ask, since a sender's address can be forged.
+- Anything a door draws as a card also works as plain text.
+- Each door has a contract test that is run against every new release of what it connects to.
+
+### duck's DM
+
+- duck has a Buzz identity of its own in the firm's community: an agent the community's owner or an admin authorizes once, in Buzz's Authorize external identity, over a key duck makes. The key is in a file in duck's storage that only duck reads, and the setup holds the owner's proof. Until it does, `duck check` names duck's key and the steps as still to do, duck's DM is off, and the setup still installs, since `duck make` and `duck claim` need no DM; a proof that does not sign duck's key is a problem. duck is in Buzz only while that owner is a member. Replacing the identity changes no coworker.
+- duck talks with each member in their DM with that identity, which no one else can read or enter. Its owner can edit and delete what duck wrote there. duck's code writes every word, and no model reads or writes there. A message is read as one of a few fixed forms, and any other gets one fixed answer, which sends the person to their coworker's own DM. An agent's message gets no answer, so duck and an agent never answer each other.
+- What a person asks of duck itself is a message there, signed by their own key (rule 13): make a coworker, claim one, create one, rename one, remove one, change a setting. Each is a few fixed words, which duck's answers there spell out, so no model reads them, and the plugin sends the same words. Only a coworker's person may rename it, give it a picture at an HTTPS address or remove it. duck answers there: which coworkers are unclaimed, a claim waiting on an admin, a coworker ready or stopped. An admin's DM with duck also carries claims to confirm, a person who left and a cap that was reached, and an admin's yes is their own reply there, read as any answer is (part 9).
+- **Make.** An admin names the person to `duck make` by their Buzz key, or by their name in Buzz, which must be one person's, without regard to case, with their handle, since a claim in duck's DM gives none; an agent is never the person. duck tells the person in their DM with duck the coworker's name, its Buzz key and the steps to claim it, once, and records the offer only when the relay takes it. While duck's DM is off, or while a plug the coworker would get calls with a key for that person that the secret store lacks, a make that names a person is refused, naming the key, and nothing is made: the claim installs with no admin there.
+- **Claim.** Buzz signs that the person owns the coworker's key, and the claim carries that to duck. duck never sees a person's key, and no person sees a coworker's. A claim that waits on an admin takes the coworker off the unclaimed list, and the admin's question shows the start of the claimer's key beside their name. Once the claim stands, duck publishes the coworker's profile with its owner, changing in a profile it already has only the name and picture its person gave it in Buzz, and opens its doors. duck publishes its own profile, marked as duck's, which the plugin looks for. An unclaimed coworker is not in Buzz at all.
+- **Claim in duck's DM.** The person a coworker was made for claims it by pasting, alone, the proof Buzz copies. duck takes it only from that person, for an unclaimed coworker made for them whose key it signs, with the checks of `duck claim`, and names them as their Buzz profile does. It answers in one fixed sentence. The person a claimed coworker was made for, pasting a proof that signs its key, is told in another that it is theirs already; any other proof that claims nothing, for any reason, gets a third, so a stranger learns nothing of the firm's coworkers. The running duck cannot install, so it leaves an empty file in storage, named so no coworker can be, and a systemd path unit that `duck install` keeps beside the boot unit while duck's DM is on, and takes away when it is off, runs `duck install` in the firm's folder. The unit takes the file before it installs, so a claim made during an install gets an install of its own.
+- Buzz fixes an agent's owner the first time it sees one, so a coworker that goes to a new person gets a new Buzz identity.
+- Deleting a coworker in Buzz, which is its person's remove in duck's DM, always finishes: duck marks the coworker stopped in its facts, stops it, leaving a run it had going cut short as a restart does, and keeps its stored files until an admin deletes them. Its person, and nobody else, may claim it again, and it comes back with its memory.
+
+### The plugin
+
+- duck ships one Buzz plugin, the same file for every firm. A person installs Buzz and the plugin from the admin's invitation.
+- The plugin holds no address and no key. Its screens show what duck publishes for them and write only in the person's DM with duck, and a card's button is a reply to its question, so a person's computer needs no address but Buzz's and the firm's server opens no port for it. It trusts only a duck that an owner or admin of the community authorized, checked against the member list the relay signs.
+- **Create agent** offers one type, a duck coworker: the firm's unclaimed coworkers, and for people the setup allows, a new one.
+- **A To-dos tab on the coworker's page** shows its person its list as duck publishes it in their DM with duck, where only they and duck read it: what needs them, what the coworker is on, what waits on someone else, and, folded away, what was done this week. **A Preferences tab** shows its pause switch, then when it messages its person: quiet hours and messages an hour, and last its cost this month. A change there is the fixed words in duck's DM, and a setting the firm locks shows as set by the firm.
+- **A Coworkers card** in Buzz's Settings, under Community admin, which Settings lists only for an owner or admin of the community by the member list the relay signs, shows each coworker: its name, its person, its state (not added yet, running, not running or stopped), when it last ran and its cost this month; and the model calls per job, which a change there sets in the fixed words. duck publishes it as one `duck.firm` artifact in each owner's and admin's DM with duck: at start, when a coworker starts, stops or its goose comes up, when the limit changes, and otherwise at most once in ten minutes where it changed. Claims waiting and who may create a coworker come later.
+- An ask-first question is drawn as a card with its two answers. The plugin draws one only for the coworker's own message in the form duck's code writes, and duck keeps a coworker's own words out of that form.
+- Everything the plugin does is a message a person could type: in their DM with duck, or to their coworker. A claim needs Buzz's desktop app, which signs who owns a coworker: in Create agent with the plugin, or without it in Buzz's own screen that authorizes an identity, with the coworker's public key, which duck posts in their DM with it. Buzz's phone app cannot claim. Buzz promises nothing across plugin versions yet, so the end-to-end tests drive the plain paths through Buzz itself and the plugin's own code through a stand-in for Buzz's host, which calls it as Buzz's code does.
+
+## 12. Model relay
+
+- The relay runs inside the firm's `duck` container, serves the Messages API to goose and answers the firm's coworkers only.
+- The firm picks its model route in setup. There are two: a subscription login through the vendor's own CLI, and an API key in Anthropic's format, which the relay adds as it forwards. Another provider's route is added when a firm asks for it. On a login route the harness text says the account is the firm's, not the person's.
+- Every call is logged: coworker, session, tokens in and out, the share read from cache, cost and wait.
+- The relay never changes the start of a prompt between calls in a session.
+
+## 13. Archive
+
+- Every message in and out, every run and every tool call is kept per coworker and searchable with one tool. Its search is plain words: a message matches when it holds every word, each as written, so no character in a word is search syntax.
+- The archive is the source for dreaming, for "already told", for the sampling pass and for replay tests.
+- **Sampling pass.** A saved routine a coworker runs over a sample of its own past runs flags what looks wrong. A fix lands in one of three places: the coworker's notes, through dreaming; the firm's sign, skills or setup, with the admin's yes; or a pull request to duck with a replay test.
+- **History from before.** Loading it is a stock step. The setup asks the admin, and every coworker's first conversation asks its person, whether they used an agent or a chat app before. An admin loads what the firm holds with `duck import`, before anyone claims the coworker. A person hands an export to their coworker at a door, as a file of their own, at any time.
+  - Four things come over: conversations, what the earlier product remembered, its schedules and to-dos, and its files.
+  - Conversations go into the archive in the archive's own shape, each marked with where it came from. A message someone other than the person wrote keeps who wrote it, where the source can tell. Sessions no person was in, and messages the earlier product undid, replaced or wrote itself as the person's, are not loaded.
+  - Nothing else is carried as it was. The earlier memory, schedules, to-dos and files land in one folder, marked with where they came from, as material to read. Before its first day the coworker dreams over the conversations and that folder and writes its own notes, standing words, list and timers in duck's shape. It decides afresh what its person's work is and what its own part in it is. Earlier schedules become its own timers, and on its first day it tells its person what it kept and what it will do on a schedule.
+  - That folder is the coworker's own. It adds to it and corrects it, and dreaming reads what changed.
+  - An earlier agent on the firm's own systems is stopped by the admin when its person claims the new coworker, and what it did since the load is loaded then. Nothing of it is deleted.
+  - One small importer per source turns its export into that shape. duck ships importers for exports of public products. A firm's own earlier system gets an importer in the firm's repo.
+- How long the archive, the files people sent and job folders are kept are setup values.
+
+## 14. Team coworkers
+
+- A team coworker does one function's work for many people: an analyst, an accountant. It has its own memory, list and tools, and it holds nothing private of anyone's.
+- It has one person, who claimed or created it and answers for it. They talk in its main conversation, and its standing words change only from that person's messages.
+- Anyone in the firm's Buzz community may ask it for work by mentioning it. Its settings may name the people who may ask in place of anyone.
+- Its memory is one, open to everyone who may ask: what one of them tells it, another may hear. Work that is not for everyone is protected by naming who may ask.
+- What it has to say unprompted its main conversation writes to a Buzz channel its team reads, named when it is made.
+- A request is a session of its own, one per Buzz thread, with the coworker's notes and list. It is not an others run. A person's request has the tools its plugs' `tools` give, and a request another coworker makes has what their `others` give. It becomes an item that records who asked, and the answer goes to the thread. A long request is started as a job, so the next one is not kept waiting.
+- A held call is asked of its person, privately, unless the setup gives the answer to the one who asked or to named people.
+- It calls plugs as itself: `{person}` there is the team coworker. It acts with the accounts its person connects from its own connect link: its own where it has them, or one of its person's, lent one service at a time. Nothing of a person's reaches it unless they lend it, and whatever a lent account can reach, everyone who may ask can reach through it.
+- Another coworker asks it as a colleague does, on its own when that serves its person's work. The request records which coworker asked and whose it is. What comes back to the asking coworker is outside words (rule 7). A personal coworker mentioned by another coworker answers in an others run, as it does for anyone.
+
+## Tests
+
+- **End-to-end tests come first.** Each drives the real processes. Every behavior a person can see has one: the first reply, steer and wait, one conversation across doors, resume after a restart, hidden compaction, a promise made early in a long chat still on the list after compaction, a mail that becomes an item, a job, a check and one message, an ask-first round trip, a crash mid-run that repeats nothing, and cases where the right answer is silence.
+- **Two tests say the product works for a firm that is not its makers.** Setup from the repo alone: a coding agent that has never seen duck is given this repo and a made-up firm's answers, and ends with a coworker that answers its person. Joining from one message: a person who gets the admin's invitation installs Buzz with the plugin, claims the coworker made for them and is talking with it, with nothing else done for them. Both are run before a release.
+- **Property tests** cover the tables: inbox deduplication, timers and item states.
+- **Replay tests** score judgment: the sorter, the fork, and tell or stay quiet. A recorded day is replayed against an answer key. The tuning set and the held-out set are kept apart, the baseline is run several times to learn how much a score moves by chance, and one thing changes per round.
+- Each routine is replayed three ways: plain, with a planted instruction, and with a temptation to do more than asked.
+- A merge is blocked only by end-to-end and property tests. Replay scores are reported with the change.
+- A `verify` skill runs the change before a commit. A change cannot edit the test that judges it. A flaky test is fixed at its cause or removed.
+- A firm's recorded days never enter this repo.
+
+## Later
+
+Left out of the first version on purpose:
+
+- A computed wiki layer over notes, beyond `voice.md`.
+- Coworkers writing their own skills.
+- A coworker's notes shown in Buzz's own Memories tab. Until then a person asks their coworker what it knows.
+- Voice: a coworker in a Buzz huddle.
+- Billing, licence keys and usage reporting. Nothing in the design stands in their way.

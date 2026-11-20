@@ -1,0 +1,180 @@
+[
+  {
+    "uuid": "0b6c1e9a-7d3f-4c55-9a51-5c1f0e3a2b10",
+    "name": "Note to the dock crew",
+    "summary": "",
+    "created_at": "2026-03-02T15:04:05.123456Z",
+    "updated_at": "2026-03-02T15:07:20.500000Z",
+    "account": { "uuid": "5e0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b" },
+    "chat_messages": [
+      {
+        "uuid": "a1000000-0000-4000-8000-000000000001",
+        "parent_message_uuid": "00000000-0000-4000-8000-000000000000",
+        "sender": "human",
+        "created_at": "2026-03-02T15:04:05.123456Z",
+        "updated_at": "2026-03-02T15:04:05.123456Z",
+        "text": "Can you draft a note to the dock crew about Friday's inspection?",
+        "content": [
+          {
+            "type": "text",
+            "text": "Can you draft a note to the dock crew about Friday's inspection?",
+            "start_timestamp": "2026-03-02T15:04:05.123456Z",
+            "stop_timestamp": "2026-03-02T15:04:05.123456Z",
+            "citations": []
+          }
+        ],
+        "attachments": [
+          {
+            "file_name": "inspection-checklist.pdf",
+            "file_size": 18234,
+            "file_type": "pdf",
+            "extracted_content": "1. Bollards 2. Ladders 3. Life rings"
+          }
+        ],
+        "files": []
+      },
+      {
+        "uuid": "a1000000-0000-4000-8000-000000000002",
+        "parent_message_uuid": "a1000000-0000-4000-8000-000000000001",
+        "sender": "assistant",
+        "created_at": "2026-03-02T15:04:31.000000Z",
+        "updated_at": "2026-03-02T15:04:31.000000Z",
+        "text": "Here is a draft:\n\n```\nThis block is not supported on your current device yet.\n```\n\nWant me to shorten it?",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "Rosa wants a short note; keep the checklist order.",
+            "start_timestamp": "2026-03-02T15:04:06.000000Z",
+            "stop_timestamp": "2026-03-02T15:04:09.000000Z"
+          },
+          {
+            "type": "text",
+            "text": "Here is a draft:",
+            "start_timestamp": "2026-03-02T15:04:10.000000Z",
+            "stop_timestamp": "2026-03-02T15:04:10.000000Z",
+            "citations": []
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_01",
+            "name": "create_file",
+            "input": {
+              "path": "/mnt/user-data/outputs/dock-note.md",
+              "file_text": "Crew: inspection Friday at 9."
+            },
+            "integration_name": null,
+            "mcp_server_url": null
+          },
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01",
+            "content": [{ "type": "text", "text": "File created" }],
+            "is_error": false
+          },
+          {
+            "type": "text",
+            "text": "Want me to shorten it?",
+            "start_timestamp": "2026-03-02T15:04:31.000000Z",
+            "stop_timestamp": "2026-03-02T15:04:31.000000Z",
+            "citations": []
+          }
+        ],
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "a1000000-0000-4000-8000-000000000003",
+        "parent_message_uuid": "a1000000-0000-4000-8000-000000000002",
+        "sender": "human",
+        "created_at": "2026-03-02T15:06:00.000000Z",
+        "updated_at": "2026-03-02T15:06:00.000000Z",
+        "text": "Make it shorter.",
+        "content": [{ "type": "text", "text": "Make it shorter.", "citations": [] }],
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "a1000000-0000-4000-8000-000000000004",
+        "parent_message_uuid": "a1000000-0000-4000-8000-000000000003",
+        "sender": "assistant",
+        "created_at": "2026-03-02T15:06:30.000000Z",
+        "updated_at": "2026-03-02T15:06:30.000000Z",
+        "text": "Inspection Friday at 9. Clear the ladders.",
+        "content": [
+          { "type": "text", "text": "Inspection Friday at 9. Clear the ladders.", "citations": [] }
+        ],
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "a1000000-0000-4000-8000-000000000005",
+        "parent_message_uuid": "a1000000-0000-4000-8000-000000000002",
+        "sender": "human",
+        "created_at": "2026-03-02T15:07:00.000000Z",
+        "updated_at": "2026-03-02T15:07:00.000000Z",
+        "text": "Make it shorter and friendlier.",
+        "content": [{ "type": "text", "text": "Make it shorter and friendlier.", "citations": [] }],
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "a1000000-0000-4000-8000-000000000006",
+        "parent_message_uuid": "a1000000-0000-4000-8000-000000000005",
+        "sender": "assistant",
+        "created_at": "2026-03-02T15:07:20.500000Z",
+        "updated_at": "2026-03-02T15:07:20.500000Z",
+        "text": "Hi all, quick heads-up: inspection is Friday at 9. Thanks for clearing the ladders!",
+        "content": [
+          {
+            "type": "text",
+            "text": "Hi all, quick heads-up: inspection is Friday at 9. Thanks for clearing the ladders!",
+            "citations": []
+          }
+        ],
+        "attachments": [],
+        "files": []
+      }
+    ]
+  },
+  {
+    "uuid": "0b6c1e9a-7d3f-4c55-9a51-5c1f0e3a2b11",
+    "name": "",
+    "summary": "",
+    "created_at": "2026-03-03T09:00:00.000000Z",
+    "updated_at": "2026-03-03T09:00:00.000000Z",
+    "account": { "uuid": "5e0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b" },
+    "chat_messages": []
+  },
+  {
+    "uuid": "0b6c1e9a-7d3f-4c55-9a51-5c1f0e3a2b12",
+    "name": "Which pier is this",
+    "summary": "",
+    "created_at": "2026-03-04T11:30:00.000000Z",
+    "updated_at": "2026-03-04T11:30:12.000000Z",
+    "account": { "uuid": "5e0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b" },
+    "chat_messages": [
+      {
+        "uuid": "a1000000-0000-4000-8000-000000000007",
+        "parent_message_uuid": "00000000-0000-4000-8000-000000000000",
+        "sender": "human",
+        "created_at": "2026-03-04T11:30:00.000000Z",
+        "updated_at": "2026-03-04T11:30:00.000000Z",
+        "text": "",
+        "content": [{ "type": "image", "file_uuid": "f7000000-0000-4000-8000-000000000001" }],
+        "attachments": [],
+        "files": [{ "file_name": "pier-photo.jpg", "file_uuid": "f7000000-0000-4000-8000-000000000001" }]
+      },
+      {
+        "uuid": "a1000000-0000-4000-8000-000000000008",
+        "parent_message_uuid": "a1000000-0000-4000-8000-000000000007",
+        "sender": "assistant",
+        "created_at": "2026-03-04T11:30:12.000000Z",
+        "updated_at": "2026-03-04T11:30:12.000000Z",
+        "text": "That is the north pier at low tide.",
+        "content": [{ "type": "text", "text": "That is the north pier at low tide.", "citations": [] }],
+        "attachments": [],
+        "files": []
+      }
+    ]
+  }
+]

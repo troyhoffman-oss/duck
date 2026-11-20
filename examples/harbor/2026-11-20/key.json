@@ -1,0 +1,39 @@
+{
+  "sorter": {
+    "mail <renewal-4b@harbor.example>": { "answer": "wake", "why": "A tenant asks for her renewal terms." },
+    "mail <tips-1120@landlordnews.example>": { "answer": "noise", "why": "A newsletter." },
+    "mail <leak-3c@harbor.example>": { "answer": "urgent", "why": "An active leak in a unit cannot wait." },
+    "mail <receipt-1182@bayside.example>": {
+      "answer": "noise",
+      "why": "A receipt for an invoice already paid."
+    },
+    "mail <quote-12elm@bayside.example>": { "answer": "wake", "why": "The quote an open item waits on." },
+    "mail <sale-1120@officeworld.example>": { "answer": "noise", "why": "Marketing." },
+    "calendar evt-owner-call-1121": { "answer": "wake", "why": "A meeting tomorrow that may need prep." }
+  },
+  "fork": {
+    "job-renewal-4b": {
+      "answer": "check",
+      "why": "It goes to a tenant, and the sign says those are checked."
+    },
+    "job-roof-summary": {
+      "answer": "no check",
+      "why": "For Rosa's own notes, and the amounts are in the mails."
+    }
+  },
+  "tell": {
+    "mail <renewal-4b@harbor.example>": {
+      "answer": "quiet",
+      "why": "Work for a job first; Rosa hears when the draft is ready."
+    },
+    "mail <leak-3c@harbor.example>": { "answer": "tell", "why": "Rosa must hear about a leak now." },
+    "mail <quote-12elm@bayside.example>": {
+      "answer": "tell",
+      "why": "The second of the three quotes Rosa is waiting for, and lower than the first."
+    },
+    "calendar evt-owner-call-1121": {
+      "answer": "quiet",
+      "why": "Already on her calendar; prep comes closer to the call."
+    }
+  }
+}

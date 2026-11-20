@@ -1,0 +1,10 @@
+{
+  "id": "duck",
+  "name": "duck",
+  "apiVersion": 1,
+  "description": "Add the coworker your firm made for you from Buzz's Agents tab.",
+  "discovery": {
+    "category": "agents",
+    "tags": ["duck", "coworkers", "hosted-agents"]
+  }
+}

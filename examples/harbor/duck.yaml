@@ -1,0 +1,137 @@
+# harbor: a made-up firm. The end-to-end tests install this setup with the kit's addresses, ports,
+# folders and secrets in place of the ones here, and shorter times.
+
+firm: harbor
+
+# The firm's time zone, which is also each coworker's.
+zone: America/Chicago
+
+# Where duck's inbox handler and its doors listen on the firm's server.
+listen: 127.0.0.1:4700
+
+storage:
+  folder: /var/lib/duck/harbor
+
+# The firm's secret store. harbor's is a file of NAME=value lines.
+secrets:
+  file: /etc/duck/harbor.env
+
+# The S3-compatible storage bucket every coworker's database and stored files are copied to, each coworker
+# into a restic repository of its own under restic/<firm>/<coworker>/, encrypted with the password the secret
+# `password` names. A copy stores only what changed, and duck keeps 30 days of copies itself, so no lifecycle
+# rule of the bucket may cover restic/. `at` is when the copy runs: a cron expression in the firm's zone.
+backup:
+  bucket: harbor-backup
+  endpoint: https://storage.harbor.example
+  key: HARBOR_BACKUP_KEY
+  secret: HARBOR_BACKUP_SECRET
+  password: HARBOR_BACKUP_PASSWORD
+  at: "0 2 * * *"
+
+model:
+  route: api-key
+  address: https://api.anthropic.com
+  key: HARBOR_MODEL_KEY
+  coworker: claude-opus-5-5
+
+sign: sign.md
+
+# The sorter's questions are in its file. Its decision model answers them through a decisions API: the API's
+# address, the secret that holds its key, the model's name, and fields the firm's provider needs in every
+# request, here that only a provider that collects nothing it is sent may answer.
+sorter:
+  file: sorter.md
+  mode: on
+  gap: 2m
+  address: https://decisions.harbor.example/v1/decisions
+  key: HARBOR_SORTER_KEY
+  model: harbor-decider-1
+  request:
+    provider:
+      data_collection: deny
+
+# How often duck looks at the timers, and when the coworker dreams: a cron expression in its person's zone.
+timers:
+  every: 1m
+  dreaming: "0 3 * * *"
+
+compaction:
+  idle: 30m
+
+# The most characters of the standing words, of the notes files' first lines, and of the lines the open
+# items' logs gained since a conversation last saw them, a run is shown.
+notes:
+  standing: 4000
+  lines: 4000
+  log: 8000
+
+# The most model calls of one fresh run of a job, its worker's or its checker's, by the model relay's count.
+# A run that reaches it is cut off. An admin sets another in duck's DM. With none named there is none.
+jobs:
+  calls: 200
+
+# The firm's default for each coworker's settings: quiet hours in its zone, at most one message an hour
+# outside them, and whom it answers in Buzz: its person, or anyone who mentions it.
+settings:
+  quiet: ["21:00", "07:00"]
+  one_message_per: 1h
+  answers: person
+
+# The firm's Buzz relay. Each claimed coworker has a door named buzz there, with a key duck made for it.
+buzz:
+  relay: wss://buzz.harbor.example
+
+# Coworkers are not listed here: duck keeps them. `duck make wren rosa` makes harbor's, for the person
+# whose handle is rosa, and `duck claim` gives it to Rosa once her Buzz key signs it.
+
+plugs:
+  mail:
+    address: https://mail.harbor.example/mcp
+    # {person} becomes the calling coworker's person's handle, so each calls with its own key.
+    headers:
+      authorization: Bearer ${HARBOR_MAIL_KEY_{person}}
+    coworkers: everyone
+    tools:
+      send_mail: ask first
+      delete_mail: removed
+    # The mail service pushes each mail with its own message id as `ref` and its thread's id as `about`.
+    events:
+      push: HARBOR_MAIL_PUSH_KEY
+    # What a tool's ok result made, which duck links to the item the work is for: the link's kind, the
+    # result's field that is its id, the kind and field of what it belongs to, and the field that labels it.
+    # A draft is on its thread, so the mail sent from it, which the mail service pushes about that thread,
+    # comes to the item.
+    makes:
+      save_draft:
+        kind: draft
+        id: draft
+        about: { kind: mail_thread, field: thread }
+        label: subject
+    # Files in this folder the gate runs around every call to the plug's tools, in order. A source that signs
+    # what it pushes and names the person it is for needs a box with an `event` export, as signed-mail.ts.
+    boxes: [tidy-mail.ts, handed-pdf.ts]
+  calendar:
+    address: https://calendar.harbor.example/mcp
+    headers:
+      authorization: Bearer ${HARBOR_CALENDAR_KEY}
+    coworkers: [wren]
+    # The calendar cannot push, so duck calls its list tool on an interval. Each row is a change to the
+    # calendar: its id is the change's ref, and its meeting field names the meeting it is about.
+    events:
+      poll:
+        tool: list_events
+        every: 5m
+        id: id
+        about: meeting
+
+# Doors a named coworker has beyond its buzz door: here two plain http doors.
+doors:
+  wren:
+    desk:
+      kind: http
+      address: https://chat.harbor.example/duck/desk
+      key: HARBOR_DOOR_KEY
+    phone:
+      kind: http
+      address: https://chat.harbor.example/duck/phone
+      key: HARBOR_DOOR_KEY

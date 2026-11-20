@@ -1,0 +1,310 @@
+[
+  {
+    "title": "Tides this weekend",
+    "create_time": 1772719200.0,
+    "update_time": 1772719500.25,
+    "mapping": {
+      "client-created-root": {
+        "id": "client-created-root",
+        "message": null,
+        "parent": null,
+        "children": ["b2000000-0000-4000-8000-000000000001"]
+      },
+      "b2000000-0000-4000-8000-000000000001": {
+        "id": "b2000000-0000-4000-8000-000000000001",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000001",
+          "author": { "role": "system", "name": null, "metadata": {} },
+          "create_time": null,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": [""] },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 0.0,
+          "metadata": { "is_visually_hidden_from_conversation": true },
+          "recipient": "all"
+        },
+        "parent": "client-created-root",
+        "children": ["b2000000-0000-4000-8000-000000000002"]
+      },
+      "b2000000-0000-4000-8000-000000000002": {
+        "id": "b2000000-0000-4000-8000-000000000002",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000002",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1772719200.123,
+          "update_time": null,
+          "content": {
+            "content_type": "multimodal_text",
+            "parts": [
+              {
+                "content_type": "image_asset_pointer",
+                "asset_pointer": "file-service://file-Tide7Table",
+                "size_bytes": 48211,
+                "width": 800,
+                "height": 600
+              },
+              "What is low tide at 6am Saturday, from this table?"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": {
+            "attachments": [
+              { "id": "file-Tide7Table", "name": "tide-table.png", "mime_type": "image/png", "size": 48211 }
+            ]
+          },
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000001",
+        "children": ["b2000000-0000-4000-8000-000000000003"]
+      },
+      "b2000000-0000-4000-8000-000000000003": {
+        "id": "b2000000-0000-4000-8000-000000000003",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000003",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1772719203.5,
+          "update_time": null,
+          "content": {
+            "content_type": "code",
+            "language": "unknown",
+            "text": "search(\"tide table harbor saturday\")"
+          },
+          "status": "finished_successfully",
+          "end_turn": false,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "browser"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000002",
+        "children": ["b2000000-0000-4000-8000-000000000004"]
+      },
+      "b2000000-0000-4000-8000-000000000004": {
+        "id": "b2000000-0000-4000-8000-000000000004",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000004",
+          "author": { "role": "tool", "name": "browser", "metadata": {} },
+          "create_time": 1772719205.0,
+          "update_time": null,
+          "content": {
+            "content_type": "tether_browsing_display",
+            "result": "Low 06:12, 0.3 ft",
+            "summary": ""
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000003",
+        "children": ["b2000000-0000-4000-8000-000000000005"]
+      },
+      "b2000000-0000-4000-8000-000000000005": {
+        "id": "b2000000-0000-4000-8000-000000000005",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000005",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1772719206.0,
+          "update_time": null,
+          "content": {
+            "content_type": "thoughts",
+            "thoughts": [{ "summary": "Reading the table", "content": "The 6am row says 06:12." }],
+            "source_analysis_msg_id": "b2000000-0000-4000-8000-000000000004"
+          },
+          "status": "finished_successfully",
+          "end_turn": false,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000004",
+        "children": ["b2000000-0000-4000-8000-000000000006"]
+      },
+      "b2000000-0000-4000-8000-000000000006": {
+        "id": "b2000000-0000-4000-8000-000000000006",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000006",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1772719210.0,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": ["Low tide Saturday is at 6:12am, 0.3 ft."] },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000005",
+        "children": ["b2000000-0000-4000-8000-000000000007", "b2000000-0000-4000-8000-000000000009"]
+      },
+      "b2000000-0000-4000-8000-000000000007": {
+        "id": "b2000000-0000-4000-8000-000000000007",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000007",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1772719300.0,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": ["And Sunday?"] },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000006",
+        "children": ["b2000000-0000-4000-8000-000000000008"]
+      },
+      "b2000000-0000-4000-8000-000000000008": {
+        "id": "b2000000-0000-4000-8000-000000000008",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000008",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1772719305.0,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": ["Sunday low tide is at 6:58am."] },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000007",
+        "children": []
+      },
+      "b2000000-0000-4000-8000-000000000009": {
+        "id": "b2000000-0000-4000-8000-000000000009",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000009",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1772719400.0,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": ["And Sunday at 7am, how deep at the north pier?"] },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000006",
+        "children": ["b2000000-0000-4000-8000-000000000010", "b2000000-0000-4000-8000-000000000011"]
+      },
+      "b2000000-0000-4000-8000-000000000010": {
+        "id": "b2000000-0000-4000-8000-000000000010",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000010",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1772719405.0,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": ["About four feet."] },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000009",
+        "children": []
+      },
+      "b2000000-0000-4000-8000-000000000011": {
+        "id": "b2000000-0000-4000-8000-000000000011",
+        "message": {
+          "id": "b2000000-0000-4000-8000-000000000011",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1772719500.25,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": ["At 7am Sunday the north pier has about 3.5 ft of water, rising."]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "b2000000-0000-4000-8000-000000000009",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "b2000000-0000-4000-8000-000000000011",
+    "conversation_id": "68c1a2b3-0000-8000-9000-00000000a001",
+    "id": "68c1a2b3-0000-8000-9000-00000000a001",
+    "is_archived": false,
+    "default_model_slug": "gpt-5"
+  },
+  {
+    "title": "Boat slip fees",
+    "create_time": 1775808900.0,
+    "update_time": 1775808930.0,
+    "mapping": {
+      "c3000000-0000-4000-8000-000000000001": {
+        "id": "c3000000-0000-4000-8000-000000000001",
+        "message": null,
+        "parent": null
+      },
+      "c3000000-0000-4000-8000-000000000002": {
+        "id": "c3000000-0000-4000-8000-000000000002",
+        "message": {
+          "id": "c3000000-0000-4000-8000-000000000002",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1775808900.0,
+          "update_time": null,
+          "content": {
+            "content_type": "user_editable_context",
+            "user_profile": "I manage a small marina.",
+            "user_instructions": "Answer briefly."
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": { "is_visually_hidden_from_conversation": true },
+          "recipient": "all"
+        },
+        "parent": "c3000000-0000-4000-8000-000000000001"
+      },
+      "c3000000-0000-4000-8000-000000000003": {
+        "id": "c3000000-0000-4000-8000-000000000003",
+        "message": {
+          "id": "c3000000-0000-4000-8000-000000000003",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1775808910.0,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": ["What do marinas usually charge per foot for a summer slip?"]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "c3000000-0000-4000-8000-000000000002"
+      },
+      "c3000000-0000-4000-8000-000000000004": {
+        "id": "c3000000-0000-4000-8000-000000000004",
+        "message": {
+          "id": "c3000000-0000-4000-8000-000000000004",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1775808930.0,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": ["Often $80 to $150 a foot for the season."] },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "c3000000-0000-4000-8000-000000000003"
+      }
+    },
+    "moderation_results": [],
+    "current_node": "c3000000-0000-4000-8000-000000000004",
+    "conversation_id": "68c1a2b3-0000-8000-9000-00000000a002",
+    "id": "68c1a2b3-0000-8000-9000-00000000a002"
+  }
+]

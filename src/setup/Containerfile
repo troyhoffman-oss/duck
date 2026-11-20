@@ -1,0 +1,95 @@
+# duck's two images. `duck install` builds each target with the versions package.json pins. buzz is Buzz's
+# own image of buzz-acp and its CLI, one binary that acts as the name it is called by. restic is restic's own
+# image, whose binary the nightly backup runs.
+
+ARG BUZZ
+ARG RESTIC
+FROM ghcr.io/block/buzz-sprig:${BUZZ} AS buzz
+FROM docker.io/restic/restic:${RESTIC} AS restic
+
+FROM docker.io/oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4 AS duck
+# A coworker's goose container started again may get a new address under its name, and bun keeps a name's
+# address for 30 s by default, so duck would wait that long to reach a goose that is already back.
+ENV BUN_CONFIG_DNS_TIME_TO_LIVE_SECONDS=1
+# duck commits each coworker's standing words, notes and voice here, where its coworker cannot write.
+RUN apt-get update && apt-get install --yes --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+ARG CLAUDE
+# The claude-login route resumes conversation files in this exact version's format. The checksum is the one
+# in the release's own manifest, which Claude Code's installer checks.
+RUN bun -e ' \
+  const base = `https://downloads.claude.ai/claude-code-releases/${process.env.CLAUDE}`; \
+  const platform = process.arch === "arm64" ? "linux-arm64" : "linux-x64"; \
+  const { platforms } = await (await fetch(`${base}/manifest.json`)).json(); \
+  const binary = await (await fetch(`${base}/${platform}/claude`)).arrayBuffer(); \
+  if (new Bun.CryptoHasher("sha256").update(binary).digest("hex") !== platforms[platform].checksum) \
+    throw new Error("claude does not match its release checksum"); \
+  await Bun.write("/usr/local/bin/claude", binary);' \
+  && chmod 755 /usr/local/bin/claude \
+  && test "$(claude --version)" = "$CLAUDE (Claude Code)"
+COPY --from=buzz /usr/local/bin/sprig /usr/local/bin/sprig
+RUN ln -s sprig /usr/local/bin/buzz-acp && ln -s sprig /usr/local/bin/buzz \
+  && buzz-acp --help >/dev/null && buzz --help >/dev/null
+COPY --from=restic /usr/bin/restic /usr/local/bin/restic
+WORKDIR /app
+COPY package.json bun.lock ./
+RUN bun install --production --frozen-lockfile
+COPY src src
+ENTRYPOINT ["bun", "src/duck.ts", "serve"]
+
+FROM docker.io/oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4 AS downloads
+ARG GOOSE
+ARG AGENT_BROWSER
+# goose's installer checks no checksum, so the one GitHub lists for the release's asset is checked here.
+RUN bun -e ' \
+  const name = `goose-${process.arch === "arm64" ? "aarch64" : "x86_64"}-unknown-linux-musl.tar.gz`; \
+  const release = await (await fetch(`https://api.github.com/repos/aaif-goose/goose/releases/tags/v${process.env.GOOSE}`)).json(); \
+  const asset = release.assets.find((a) => a.name === name); \
+  const archive = await (await fetch(asset.browser_download_url)).arrayBuffer(); \
+  if (`sha256:${new Bun.CryptoHasher("sha256").update(archive).digest("hex")}` !== asset.digest) \
+    throw new Error("goose does not match its release checksum"); \
+  await Bun.write("/tmp/goose.tar.gz", archive);' \
+  && tar -xzf /tmp/goose.tar.gz -C /usr/local/bin ./goose \
+  && test "$(goose --version | tr -d ' ')" = "$GOOSE"
+# agent-browser installs from npm, which checks each package against the registry's integrity hash; so does
+# this. Its usage guide (`agent-browser skills get core`) is the skill-data folder beside the binary's folder.
+RUN bun -e ' \
+  const arch = process.arch === "arm64" ? "arm64" : "x64"; \
+  for (const [i, name] of ["agent-browser", `@agent-browser/cli-linux-${arch}-gnu`].entries()) { \
+    const { dist } = await (await fetch(`https://registry.npmjs.org/${name}/${process.env.AGENT_BROWSER}`)).json(); \
+    const archive = await (await fetch(dist.tarball)).arrayBuffer(); \
+    if (`sha512-${new Bun.CryptoHasher("sha512").update(archive).digest("base64")}` !== dist.integrity) \
+      throw new Error(`${name} does not match its registry checksum`); \
+    await Bun.write(`/tmp/agent-browser-${i}.tgz`, archive); }' \
+  && mkdir /opt/agent-browser \
+  && tar -xzf /tmp/agent-browser-0.tgz -C /opt/agent-browser --strip-components=1 package/skill-data \
+  && tar -xzf /tmp/agent-browser-1.tgz -C /opt/agent-browser --strip-components=1 package/bin/agent-browser \
+  && test "$(/opt/agent-browser/bin/agent-browser --version)" = "agent-browser $AGENT_BROWSER"
+
+FROM docker.io/library/debian:trixie-slim@sha256:7378260c0a098d27ac206225db5e7d92b8c7c84ea7afccc86eeb513756bbd392 AS coworker
+# The stock tools (SPEC part 5). agent-browser finds Debian's chromium on the PATH; its own `install` fetches
+# Chrome for Testing unpinned and unchecked into $HOME, which is the coworker's mounted folder. The Python
+# document libraries are pinned with every package they need, so pip adds nothing unpinned.
+RUN apt-get update \
+  && apt-get install --yes --no-install-recommends ca-certificates curl git jq ripgrep python3 python3-pip \
+    chromium fonts-liberation pandoc poppler-utils iproute2 \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip install --no-cache-dir --break-system-packages --no-deps python-docx==1.2.0 openpyxl==3.1.5 \
+    python-pptx==1.0.2 pypdf==7.1.0 lxml==6.1.3 pillow==13.0.0 xlsxwriter==3.3.1 typing-extensions==4.16.0 \
+    et-xmlfile==2.0.0 \
+  && python3 -c "import docx, openpyxl, pptx, pypdf"
+COPY --from=downloads /usr/local/bin/goose /usr/local/bin/goose
+COPY --from=downloads /opt/agent-browser /opt/agent-browser
+RUN ln -s /opt/agent-browser/bin/agent-browser /usr/local/bin/agent-browser
+# A coworker reaches the open internet and its own network, where the firm's duck is, and no private address:
+# not the server's, not its networks', not another machine's on them. The routes are set while the container
+# holds NET_ADMIN, which leaves the bounding set before goose starts, so nothing goose runs can undo them.
+COPY --chmod=755 <<'EOF' /usr/local/bin/start-goose
+#!/bin/sh
+set -e
+for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16; do
+  ip route add unreachable "$net"
+done
+for net in fc00::/7 fe80::/10; do ip -6 route add unreachable "$net"; done
+exec setpriv --bounding-set -net_admin goose "$@"
+EOF
+ENTRYPOINT ["start-goose"]

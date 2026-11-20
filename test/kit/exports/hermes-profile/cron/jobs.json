@@ -1,0 +1,15 @@
+{
+  "jobs": [
+    {
+      "id": "a1b2c3d4e5f6",
+      "name": "Monday slip report",
+      "prompt": "Send Rosa the week's open slips.",
+      "schedule": { "kind": "cron", "expr": "0 7 * * 1" },
+      "schedule_display": "0 7 * * 1",
+      "enabled": true,
+      "paused_at": null,
+      "deliver": "origin"
+    }
+  ],
+  "updated_at": "2026-05-01T12:00:00+00:00"
+}
