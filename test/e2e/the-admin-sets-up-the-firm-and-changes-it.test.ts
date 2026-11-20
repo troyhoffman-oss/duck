@@ -331,7 +331,7 @@ describe("The admin sets up the firm and changes it", () => {
     const write = (path: string, content: string) => Bun.write(join(profile, "skills", path), content);
     const skill = (dir: string, name: string, words: string) =>
       write(`${dir}/SKILL.md`, `---\nname: ${name}\ndescription: ${words}\n---\n\n${words}\n`);
-    await skill("harbor/dock-inspection", "dock-inspection", "Walk the dock with the crew lead on Fridays at 9.");
+    await skill("harbor/dock-inspection", "dock-inspection", "Walk the dock with the crew lead on Fridays.");
     await write("harbor/dock-inspection/references/form.md", "Log each loose cleat with its berth number.\n");
     await skill("email/crew-notes", "short-crew-notes", "Notes to the dock crew are three lines at most.");
     await skill("weather/tide-tables", "tide-tables", "Read the tide tables.");

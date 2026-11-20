@@ -287,9 +287,8 @@ function hermes(path: string, found: Found) {
  */
 function hermesHowtos(path: string) {
   const file = join(path, "skills", ".usage.json");
-  const usage: Record<string, { created_by: string | null; patch_count: number; state: string }> = existsSync(file)
-    ? JSON.parse(readFileSync(file, "utf8"))
-    : {};
+  type Use = { created_by: string | null; patch_count: number; state: string };
+  const usage: Record<string, Use> = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
   return [...new Bun.Glob("skills/**/SKILL.md").scanSync(path)].map(dirname).filter((dir) => {
     const head = readFileSync(join(path, dir, "SKILL.md"), "utf8").split(/^---[ \t]*$/m)[1] ?? "";
     const use = usage[/^name:[ \t]*["']?([^"'\n]*)/m.exec(head)?.[1]?.trim() || basename(dir)];
