@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { type Buzz, E2E, type Firm, loadPlugin, startBuzz, startFirm } from "../kit";
 
 const NOT_FIT = "That proof does not fit a coworker made for you here, so nothing changed.";
@@ -175,6 +176,30 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     "a person who is not an admin and asks for the job limit in their channel with duck is refused in fixed words",
     async () => {
       expect(await buzz.askDuck("ana", duck(), "set model calls per job 50")).toBe(NOT_ADMIN);
+    },
+    E2E,
+  );
+
+  test.failing(
+    "a member who poses as duck, with a profile that says so, a tag no owner signed and a channel like duck's, is shown to nobody and sent no proof",
+    async () => {
+      const junk = ["auth", buzz.keys.rosa, "", "00".repeat(64)];
+      await buzz.publish("theo", buzz.sign("theo", 0, [junk], JSON.stringify({ name: "duck", duck: true })));
+      const fake = randomUUID();
+      const made = { h: fake, name: "duck", channel_type: "system", visibility: "private", t: buzz.keys.ana };
+      await buzz.publish("theo", buzz.sign("theo", 9007, [...Object.entries(made), ["p", buzz.keys.ana]], ""));
+      const offer = (tags: string[][]) => {
+        const envelope = { ar: "1", d: randomUUID(), h: fake, type: "duck.offer", title: "heron", op: "create" };
+        const content = JSON.stringify({ version: 1, coworker: "heron" });
+        return buzz.sign("theo", 45010, [...Object.entries(envelope), ["agent", buzz.keys.heron], ...tags], content);
+      };
+      // The relay takes an artifact's auth tag only where its owner signed the artifact's author's key.
+      await expect(buzz.publish("theo", offer([junk]))).rejects.toThrow("unverified artifact auth tag");
+      await buzz.publish("theo", offer([]));
+      const shown = await (await loadPlugin(buzz, "ana")).create((l) => !l[0]?.endsWith("…"));
+      expect(shown.lines.join(" ")).not.toContain("heron");
+      await expect(plugin.add("heron", "Heron")).rejects.toThrow();
+      expect(await buzz.query("ana", [{ kinds: [45010], "#h": [fake], authors: [buzz.keys.ana] }])).toEqual([]);
     },
     E2E,
   );
