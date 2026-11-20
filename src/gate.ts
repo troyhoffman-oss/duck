@@ -74,12 +74,16 @@ const words = (text: string, isError = false): Result => ({ content: [{ type: "t
 
 /** The JSON a plug's result gives as its text: a polled list's rows, or what a tool made. */
 export function fields(result: Result): unknown {
+  let rows: unknown;
   try {
-    return JSON.parse(String(result.content[0]?.text));
+    rows = JSON.parse(String(result.content[0]?.text));
   } catch {
     // The text may be an error page or a person's own words, so what is said of it is only what kind it was.
     throw new Error(`the plug answered with ${result.isError ? "an error" : "a result"} that is not JSON`);
   }
+  // An error's text may be JSON too, and is still no rows.
+  if (result.isError) throw new Error("the plug answered with an error");
+  return rows;
 }
 
 /** The most bytes a file through the gate may have (SPEC part 9). */

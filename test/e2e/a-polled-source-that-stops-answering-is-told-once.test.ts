@@ -89,3 +89,22 @@ test(
   },
   E2E,
 );
+
+test(
+  "a polled source whose error's text is JSON is still down: it is told, and its text is not read as rows",
+  async () => {
+    await using firm = await startFirm();
+    firm.model.on(
+      all(coworkerRun, said("the plug answered with an error")),
+      say("Your calendar is not answering me: it sends back an error."),
+    );
+    firm.calendar.answer("list_events", () => ({
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify([{ id: "ev-bogus", title: "Bogus error row" }]) }],
+    }));
+    await firm.person.nextWith("not answering me", 60);
+    expect(firm.model.requests.some(shows("Bogus error row"))).toBe(false);
+    await firm.person.quiet(5);
+  },
+  E2E,
+);
