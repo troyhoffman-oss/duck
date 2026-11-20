@@ -187,11 +187,26 @@ describe("a person claims the coworker made for them, and nothing of it shows in
       await buzz.publish("theo", buzz.sign("theo", 0, [junk], JSON.stringify({ name: "duck", duck: true })));
       const fake = randomUUID();
       const made = { h: fake, name: "duck", channel_type: "system", visibility: "private", t: buzz.keys.ana };
-      await buzz.publish("theo", buzz.sign("theo", 9007, [...Object.entries(made), ["p", buzz.keys.ana]], ""));
+      await buzz.publish(
+        "theo",
+        buzz.sign("theo", 9007, [...Object.entries(made), ["p", buzz.keys.ana]], ""),
+      );
       const offer = (tags: string[][]) => {
-        const envelope = { ar: "1", d: randomUUID(), h: fake, type: "duck.offer", title: "heron", op: "create" };
+        const envelope = {
+          ar: "1",
+          d: randomUUID(),
+          h: fake,
+          type: "duck.offer",
+          title: "heron",
+          op: "create",
+        };
         const content = JSON.stringify({ version: 1, coworker: "heron" });
-        return buzz.sign("theo", 45010, [...Object.entries(envelope), ["agent", buzz.keys.heron], ...tags], content);
+        return buzz.sign(
+          "theo",
+          45010,
+          [...Object.entries(envelope), ["agent", buzz.keys.heron], ...tags],
+          content,
+        );
       };
       // The relay takes an artifact's auth tag only where its owner signed the artifact's author's key.
       await expect(buzz.publish("theo", offer([junk]))).rejects.toThrow("unverified artifact auth tag");
@@ -199,7 +214,9 @@ describe("a person claims the coworker made for them, and nothing of it shows in
       const shown = await (await loadPlugin(buzz, "ana")).create((l) => !l[0]?.endsWith("…"));
       expect(shown.lines.join(" ")).not.toContain("heron");
       await expect(plugin.add("heron", "Heron")).rejects.toThrow();
-      expect(await buzz.query("ana", [{ kinds: [45010], "#h": [fake], authors: [buzz.keys.ana] }])).toEqual([]);
+      expect(await buzz.query("ana", [{ kinds: [45010], "#h": [fake], authors: [buzz.keys.ana] }])).toEqual(
+        [],
+      );
     },
     E2E,
   );
