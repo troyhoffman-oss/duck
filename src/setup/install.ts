@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import pkg from "../../package.json";
-import { identity } from "../dms";
 import { plugsOf } from "../gate";
 import { AT_ONCE } from "../jobs";
 import {
@@ -21,6 +20,7 @@ import {
   readSetup,
   type Setup,
 } from ".";
+import { identity } from "./coworkers";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const CONTAINERFILE = join(import.meta.dir, "Containerfile");

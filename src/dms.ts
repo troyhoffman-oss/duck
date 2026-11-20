@@ -1,8 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { schnorr } from "@noble/curves/secp256k1.js";
+import { writeFileSync } from "node:fs";
 import { connect, type Event } from "./buzz";
 import { type Item, shown } from "./list";
 import { monthCosts, monthOf } from "./model-relay";
@@ -22,7 +20,14 @@ import {
   settingsOf,
   zoneOf,
 } from "./setup";
-import { buzzKey, claim, hex, signs, write, writeFacts } from "./setup/coworkers";
+import {
+  buzzKey,
+  claim,
+  identity,
+  signs,
+  write,
+  writeFacts,
+} from "./setup/coworkers";
 import { rezone } from "./timers";
 
 /** duck's one answer in its DMs, in fixed words (SPEC part 11, duck's DM). */
@@ -74,53 +79,6 @@ const LIMITED = "Done: a job's run is cut off at that many model calls from its 
 const NOT_ADMIN = "Only an owner or admin of this community sets that, so nothing changed.";
 
 const OFF = "duck's DM is off: the setup holds no ownership proof of duck's Buzz key; duck check says how";
-
-/** duck's own Buzz key, in hex, in a file in its storage that only duck reads, made the first time it is asked for. */
-function duckKey(setup: Setup) {
-  const file = join(setup.storage.folder, "keys.env");
-  if (!existsSync(file)) write(file, `BUZZ_KEY=${hex(schnorr.utils.randomSecretKey())}\n`, 0o600);
-  return readFileSync(file, "utf8").trim().slice("BUZZ_KEY=".length);
-}
-
-/** Whether `owner`, an ownership proof as Buzz copies it, signs Buzz key `key`. */
-function proves(owner: string | undefined, key: string) {
-  try {
-    return signs(JSON.parse(owner ?? "[]"), key);
-  } catch {
-    return false;
-  }
-}
-
-/** duck's own Buzz key's public key, in hex. */
-const duckPublic = (setup: Setup) => hex(schnorr.getPublicKey(Buffer.from(duckKey(setup), "hex")));
-
-const STEPS =
-  "in Buzz's desktop app the community's owner or an admin opens Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), puts that key in Application public key (hex), presses Authorize identity and then Authorize this key, presses Copy ownership proof and puts the proof in duck.yaml as buzz.owner in single quotes, since Buzz copies it as a JSON list";
-
-/** What is wrong with duck's own identity where the firm has Buzz: a proof in the setup that does not sign its key. */
-export function identityProblems(setup: Setup) {
-  if (!setup.buzz?.owner) return [];
-  const key = duckPublic(setup);
-  return proves(setup.buzz.owner, key)
-    ? []
-    : [`buzz.owner does not sign duck's own Buzz key ${key}: ${STEPS}`];
-}
-
-/** What is still to do where the firm has Buzz and the setup holds no proof of duck's own identity yet. */
-export function identityToDo(setup: Setup) {
-  return setup.buzz && !setup.buzz.owner
-    ? [
-        `still to do: duck's Buzz key is ${duckPublic(setup)}; ${STEPS}. Until then duck's DM is off, and coworkers are made and claimed with duck make and duck claim`,
-      ]
-    : [];
-}
-
-/** duck's own identity in Buzz where the setup's proof signs its key; with none, duck's DM is off. */
-export function identity(setup: Setup) {
-  const owner = setup.buzz?.owner;
-  if (setup.buzz && owner && proves(owner, duckPublic(setup)))
-    return { key: duckKey(setup), owner, relay: setup.buzz.relay };
-}
 
 /**
  * duck in its DMs (SPEC part 11, duck's DM), once the setup's proof signs its key: a person's message that is an
