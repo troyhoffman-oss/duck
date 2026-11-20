@@ -94,6 +94,10 @@ test(
   "a polled source whose error's text is JSON is still down: it is told, and its text is not read as rows",
   async () => {
     await using firm = await startFirm();
+    firm.model.on(said(ASK), say("Nothing on it today."));
+    await firm.person.send("desk", ASK);
+    await firm.person.nextWith("Nothing on it", 30);
+    await firm.step();
     firm.model.on(
       all(coworkerRun, said("the plug answered with an error")),
       say("Your calendar is not answering me: it sends back an error."),
