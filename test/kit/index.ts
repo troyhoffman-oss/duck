@@ -1,5 +1,5 @@
 export { type Buzz, type BuzzMessage, startBuzz } from "./buzz";
-export { coworkerRun, E2E, HARBOR, harbor, idIn, jobRun, sorter, summary, TOOLS } from "./duck";
+export { coworkerRun, E2E, HARBOR, harbor, idIn, jobRun, reading, sorter, summary, TOOLS } from "./duck";
 export { type EmailService, ROSA, type Sent, startEmail } from "./email";
 export { clock, type Firm, JOB_CALLS, second, startFirm } from "./firm";
 export {

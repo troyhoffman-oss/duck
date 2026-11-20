@@ -296,7 +296,7 @@ One word per thing, in code, setup, messages and docs.
 
 ## 13. Archive
 
-- Every message in and out, every run and every tool call is kept per coworker and searchable with one tool. Its search is plain words: a message matches when it holds every word, each as written, so no character in a word is search syntax.
+- Every message in and out, every run and every tool call is kept per coworker and searchable with one tool. Its search is plain words: a message matches when it holds every word, each as written, so no character in a word is search syntax. It reads in order, on from a time or back to one, and shows whole a message its line cut short.
 - The archive is the source for dreaming, for "already told", for the sampling pass and for replay tests.
 - **Sampling pass.** A saved routine a coworker runs over a sample of its own past runs flags what looks wrong. A fix lands in one of three places: the coworker's notes, through dreaming; the firm's sign, skills or setup, with the admin's yes; or a pull request to duck with a replay test.
 - **History from before.** Loading it is a stock step. The setup asks the admin, and every coworker's first conversation asks its person, whether they used an agent or a chat app before. An admin loads what the firm holds with `duck import`, before anyone claims the coworker. A person hands an export to their coworker at a door, as a file of their own, at any time.

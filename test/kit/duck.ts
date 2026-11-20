@@ -42,18 +42,19 @@ export const TOOLS = {
   setTimer: "set_timer",
   /** Part 3: removes timer `id`. */
   removeTimer: "remove_timer",
-  /**
-   * Part 9: the coworker's answer to a held call, `{ask, yes}`, where the gate's result for the held call
-   * names `ask`. The gate takes it only from the main conversation, in a run started by the person's own
-   * message that arrived after the question was delivered.
-   */
-  answer: "answer",
   /** Part 9: Buzz's own CLI as the coworker, `{args, input, files}`, where it has a buzz door. */
   buzz: "buzz",
 };
 
+/**
+ * A call of the firm's decision model that reads whether a person's reply says yes, no or neither to one
+ * question (SPEC part 9): its one question is `reply`, and its state the question and the reply.
+ */
+export const reading: When = (r) =>
+  r.model === harbor.models.sorter && Object.hasOwn((r.body.questions as object | undefined) ?? {}, "reply");
+
 /** A call of the sorter's cheap decision model (SPEC rule 10), through its decisions API. */
-export const sorter: When = (r) => r.model === harbor.models.sorter;
+export const sorter: When = (r) => r.model === harbor.models.sorter && !reading(r);
 
 /**
  * goose's compaction call: the coworker's model with no tools, which is how goose 1.59.0 sends it
