@@ -11,8 +11,8 @@ import {
   type Firm,
   harbor,
   held,
-  idIn,
   type ModelRequest,
+  reading,
   said,
   say,
   shows,
@@ -117,8 +117,8 @@ describe("the Buzz door", () => {
       const HERON_THREAD = "Rent roll: 4B pays $2,400 a month.";
       const TO_HERON_DM = "Could you send me the 4B boiler invoice?";
       const HERON_DM = "The boiler invoice is $640.";
-      /** A run of the main conversation, which has `answer`. */
-      const main = (r: ModelRequest) => r.has(TOOLS.answer);
+      /** A run of the main conversation, which has the list and not `tell`. */
+      const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
       /** The main conversation shown what `buzz` printed, holding `text`. */
       const printed = (text: string) => all(main, answered(TOOLS.buzz), said(text));
       const { channel, keys } = buzz;
@@ -313,17 +313,14 @@ describe("the Buzz door", () => {
       expect(await answer("It was not saved.")).toBe(true);
       expect(existsSync(join(own, "files", "planted-4B.txt"))).toBe(false);
 
-      // A delete asks first, and runs once on the person's yes.
-      let ask = 0;
+      // A delete asks first, and runs once on the person's yes, which duck reads.
       firm.model.on(
         all(main, said("Take your rent roll ask out of harbor-ops.")),
         call(TOOLS.buzz, { args: ["messages", "delete", "--event", asked] }),
       );
-      firm.model.on(all(main, answered(TOOLS.buzz)), (r) => {
-        ask = idIn(r.last);
-        return say("I've asked you first.");
-      });
-      firm.model.on(all(main, said("Yes, take it out.")), () => call(TOOLS.answer, { ask, yes: true }));
+      firm.model.on(all(main, answered(TOOLS.buzz)), say("I've asked you first."));
+      firm.model.on(all(reading, said("Yes, take it out.")), say("yes"));
+
       firm.model.on(main, say("Done."), { times: Number.POSITIVE_INFINITY });
       await buzz.person.send("Take your rent roll ask out of harbor-ops.");
       const question = [(await buzz.person.next(60)).content, (await buzz.person.next(60)).content];

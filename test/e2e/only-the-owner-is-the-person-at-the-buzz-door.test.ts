@@ -5,8 +5,8 @@ import {
   call,
   E2E,
   held,
-  idIn,
   type ModelRequest,
+  reading,
   said,
   say,
   shows,
@@ -34,12 +34,12 @@ const MIDRUN = {
   unnamed: "Make it 30 months.",
   agent: "Make it 24 months.",
 };
-/** What others write while her ask waits, each in words the script answers yes to in the main conversation. */
+/** What others write while her ask waits, each in words the script reads as a yes. */
 const YESES = { dm: "Yes, send it.", channel: "Yes, send it now.", agent: "Yes, send it today." };
 const YES = "Yes, go ahead and send it.";
 
-/** A run of the main conversation, which has `answer`; a work-lane run has `tell` in its place. */
-const main = (r: ModelRequest) => r.has(TOOLS.answer);
+/** A run of the main conversation, which has the list and not `tell`; a work-lane run has both. */
+const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
 const work = (r: ModelRequest) => r.has(TOOLS.tell);
 const others = [...Object.values(MIDRUN), ...Object.values(YESES)];
 
@@ -48,22 +48,17 @@ test(
   async () => {
     await using buzz = await startBuzz();
     await using firm = await startFirm({ buzz });
-    let ask = 0;
     firm.model.on(sorter, say("wake: someone writes to the coworker in Buzz"), {
       times: Number.POSITIVE_INFINITY,
     });
     firm.model.on(work, say("Nothing for Rosa in that."), { times: Number.POSITIVE_INFINITY });
     firm.model.on(all(main, said(ASK)), held("asking", say("I'll send Dana the 4B terms.")));
     firm.model.on(all(main, shows(STEER)), call("send_mail", MAIL));
-    firm.model.on(answered("send_mail"), (r) => {
-      ask = idIn(r.last);
-      return say("I've asked you before it goes.");
+    firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
+    // Any yes duck reads is read as a yes, so a yes it read as hers would send.
+    firm.model.on((r) => reading(r) && [YES, ...Object.values(YESES)].some((y) => said(y)(r)), say("yes"), {
+      times: Number.POSITIVE_INFINITY,
     });
-    // Any yes the main conversation is shown answers the ask, so a yes that reached it as hers would send.
-    firm.model.on(
-      (r) => main(r) && [YES, ...Object.values(YESES)].some((y) => said(y)(r)),
-      () => call(TOOLS.answer, { ask, yes: true }),
-    );
     firm.model.on(main, say("Done."), { times: Number.POSITIVE_INFINITY });
     const db = firm.db();
     const hers = () =>
@@ -110,6 +105,8 @@ test(
     expect(firm.model.requests.filter(main).filter((r) => others.some((t) => r.shows(t)))).toEqual([]);
     expect(firm.model.requests.filter((r) => r.shows(MIDRUN.unnamed))).toEqual([]);
     expect(hers()).toEqual(["done", "done", "done"]);
+    expect(firm.model.requests.filter(reading).map((r) => r.last)).toEqual([expect.stringContaining(YES)]);
+
     db.close();
   },
   E2E,

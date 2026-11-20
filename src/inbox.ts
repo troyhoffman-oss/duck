@@ -39,6 +39,8 @@ const ADDED: [string, string, string][] = [
   ["jobs", "title", "text"],
   ["jobs", "started_at", "text"],
   ["jobs", "since", "text"],
+  ["outbox", "message", "integer"],
+  ["outbox", "answered_by", "integer"],
 ];
 
 /** A coworker's database file, with its tables made, and an earlier build's brought up to them. */

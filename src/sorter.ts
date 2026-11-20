@@ -57,23 +57,32 @@ type Answers = {
   ai?: { noul?: number };
 };
 
-/** The sorter's answer to `event`: one call of the firm's decision model, through its decisions API. */
-async function ask(setup: Setup, event: Screened) {
-  const { address, key, model, request, file } = setup.sorter;
+/**
+ * The firm's decision model's answers to `questions` about `state`: one call through its decisions API, logged
+ * as `what`'s. The text it sent back comes with them, to name in a failure.
+ */
+export async function decide(setup: Setup, what: string, state: string, questions: object) {
+  const { address, key, model, request } = setup.sorter;
   const started = performance.now();
   const response = await fetch(address, {
     method: "POST",
     headers: { authorization: `Bearer ${secret(setup, key)}`, "content-type": "application/json" },
-    body: JSON.stringify({ ...request, model, state: line(event), questions: questions(file) }),
-    // The work lane waits on the call: one that hangs is failed after a minute, which wakes the coworker.
+    body: JSON.stringify({ ...request, model, state, questions }),
+    // The work lane or a person's message waits on the call: one that hangs is failed after a minute.
     signal: AbortSignal.timeout(60_000),
   });
   const sent = await response.text();
-  if (!response.ok) throw new Error(`the sorter's model answered ${response.status}: ${sent.slice(0, 300)}`);
-  const { answers, usage } = JSON.parse(sent) as { answers?: Answers; usage?: unknown };
+  if (!response.ok) throw new Error(`the decision model answered ${response.status}: ${sent.slice(0, 300)}`);
+  const { answers, usage } = JSON.parse(sent) as { answers?: Record<string, unknown>; usage?: unknown };
   // duck's log, as the model relay logs its calls: the tokens, and the cost where the API gives one.
-  console.log(JSON.stringify({ sorter: model, usage, ms: Math.round(performance.now() - started) }));
-  const { answer, ai } = answers ?? {};
+  console.log(JSON.stringify({ [what]: model, usage, ms: Math.round(performance.now() - started) }));
+  return { answers: answers ?? {}, sent };
+}
+
+/** The sorter's answer to `event`: one call of the firm's decision model, which wakes the coworker when it fails. */
+async function ask(setup: Setup, event: Screened) {
+  const { answers, sent } = await decide(setup, "sorter", line(event), questions(setup.sorter.file));
+  const { answer, ai } = answers as Answers;
   if (!ANSWERS.includes(answer?.choice ?? "") || typeof ai?.noul !== "number")
     throw new Error(`the sorter's model gave no answer: ${sent.slice(0, 300)}`);
   return {

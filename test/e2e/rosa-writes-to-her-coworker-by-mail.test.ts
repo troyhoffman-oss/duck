@@ -8,8 +8,8 @@ import {
   E2E,
   type EmailService,
   type Firm,
-  idIn,
   ROSA,
+  reading,
   type Sent,
   said,
   say,
@@ -126,24 +126,24 @@ describe("Rosa writes to her coworker by mail", () => {
     await email.quiet(5);
   });
 
-  test("an ask goes where it can be answered: the question waits at her desk, where she last wrote but by mail, her yes by mail leaves the call held, and her yes at the desk releases it", async () => {
+  test("an ask goes where it can be answered: the question waits at her desk, where she last wrote but by mail, her yes by mail is not read and leaves the call held, and her yes at the desk, which duck reads, releases it", async () => {
     const [FILE, SEND, YES] = ["/duck/home/lease-4B.txt", "Send Dana the 4B lease.", "Yes, send it."];
     /** What the session that made a held call is told on a yes. */
     const OUTCOME = '"answer":"yes"';
-    let ask = 0;
     firm.model.on(said(SEND), call("shell", { command: `printf 'The 4B lease' > ${FILE}` }));
     firm.model.on(answered("shell"), call("send_file", { to: "dana.reyes@harbor.example", file: FILE }));
-    firm.model.on(answered("send_file"), (r) => {
-      ask = idIn(r.last);
-      return say(r.last.includes("at their desk door") ? "I've asked you at your desk." : "I've asked you.");
-    });
-    firm.model.on(said(YES), () => call(TOOLS.answer, { ask, yes: true }), { times: 2 });
+    firm.model.on(answered("send_file"), (r) =>
+      say(r.last.includes("at their desk door") ? "I've asked you at your desk." : "I've asked you."),
+    );
+    // Mail answers no ask: her yes by mail reaches the coworker as her message, answering nothing.
     firm.model.on(
-      all(answered(TOOLS.answer), said("never by mail")),
+      all(main, said(YES), (r) => !r.last.includes("answers ask")),
       say("Say yes at your desk; mail can't."),
     );
-    // The held call was made in the main conversation, so its outcome steers the run the yes is given in.
+    firm.model.on(all(reading, said(YES)), say("yes"));
+    // The held call was made in the main conversation, so its outcome comes to it with her yes or after it.
     firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has the 4B lease."));
+    firm.model.on(all(main, said(YES)), say("Sending it."), { times: Number.POSITIVE_INFINITY });
 
     const asked = email.person.send("4B lease", SEND);
     const told = await email.person.next(60);
@@ -157,6 +157,7 @@ describe("Rosa writes to her coworker by mail", () => {
     await firm.person.nextWith("Dana has the 4B lease.", 60);
     expect(firm.mail.callsTo("send_file")).toHaveLength(1);
     expect(email.sent.some((m) => m.text.includes("Your yes is needed"))).toBe(false);
+    expect(firm.model.requests.filter(reading)).toHaveLength(1);
   });
 
   test("a stream that goes silent without closing is noticed and opened again, and the mail she sent meanwhile is answered, found on a later page of what is listed", async () => {

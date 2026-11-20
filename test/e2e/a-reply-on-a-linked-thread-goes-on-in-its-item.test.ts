@@ -174,7 +174,7 @@ test(
     const LATER = "Anything from Dana?";
     let offered: boolean[] = [];
     firm.model.on(all(coworkerRun, said(LATER)), (r) => {
-      offered = [r.has(TOOLS.answer), r.has(TOOLS.tell)];
+      offered = [r.has(TOOLS.writeItem), r.has(TOOLS.tell)];
       return say("Nothing new.");
     });
     await firm.person.send("desk", LATER);

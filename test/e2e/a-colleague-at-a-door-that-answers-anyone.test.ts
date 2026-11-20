@@ -7,8 +7,8 @@ import {
   E2E,
   type Firm,
   held,
-  idIn,
   type ModelRequest,
+  reading,
   said,
   say,
   shows,
@@ -18,9 +18,9 @@ import {
   until,
 } from "../kit";
 
-/** A run that answers someone else has `tell` and not the list; the work lane's has both, the main conversation's `answer`. */
+/** A run that answers someone else has `tell` and not the list; the work lane's has both, the main conversation's the list alone. */
 const othersRun = (r: ModelRequest) => r.has(TOOLS.tell) && !r.has(TOOLS.writeItem);
-const main = (r: ModelRequest) => r.has(TOOLS.answer);
+const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
 
 const DANA = "dana.reyes@harbor.example";
 const MAIL = {
@@ -71,21 +71,17 @@ describe("a colleague at a Buzz door that answers anyone", () => {
   }, E2E);
 
   test(
-    "a colleague's call that `others` makes ask first is held, the person is asked with the colleague named, and on her yes it runs once and the colleague hears in their thread",
+    "a colleague's call that `others` makes ask first is held, the person is asked with the colleague named, and on her yes, which duck reads, it runs once and the colleague hears in their thread",
     async () => {
       const ASK = "Can you send Dana the 4B renewal terms?";
       const ASKED = "I've asked Rosa before it goes.";
       const YES = "Yes, send it.";
       const SENT = "Rosa said yes, and the terms have gone to Dana.";
-      let ask = 0;
       firm.model.on(all(othersRun, said(ASK)), call("send_mail", MAIL));
-      firm.model.on(all(othersRun, answered("send_mail")), (r) => {
-        ask = idIn(r.last);
-        return say(ASKED);
-      });
+      firm.model.on(all(othersRun, answered("send_mail")), say(ASKED));
       firm.model.on(all(othersRun, said('"answer":"yes"')), say(SENT));
-      firm.model.on(all(main, said(YES)), () => call(TOOLS.answer, { ask, yes: true }));
-      firm.model.on(all(main, answered(TOOLS.answer)), say("Sent."));
+      firm.model.on(all(reading, said(YES)), say("yes"));
+      firm.model.on(all(main, said(YES)), say("Sent."));
 
       const { id: root } = await buzz.write("theo", "harbor-ops", ASK);
       await buzz.inThread(root, ASKED, 90);
@@ -158,7 +154,7 @@ describe("a colleague at a Buzz door that answers anyone", () => {
       expect(told).toEqual([{ text: `${from}: ${TELLS}`, urgent: 0 }]);
       // The person's own runs keep goose's shell and file tools and duck's tools for her.
       const hers = firm.model.requests.find(all(main, said(SETUP))) as ModelRequest;
-      expect(["shell", "write", TOOLS.writeItem, TOOLS.answer].filter((t) => !hers.has(t))).toEqual([]);
+      expect(["shell", "write", TOOLS.writeItem].filter((t) => !hers.has(t))).toEqual([]);
     },
     E2E,
   );

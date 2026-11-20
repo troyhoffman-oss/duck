@@ -112,7 +112,7 @@ describe("The admin sets up the firm and changes it", () => {
     ]);
   });
 
-  test("duck check refuses a setup that lists people or coworkers, as duck install does, and one with an unknown zone, a plug's coworkers that are not a list, a state that is not one, a state on the polled list tool, or a sorter on or in observe with no route to its decision model; a sorter that is off needs none, and the running firm is never touched", async () => {
+  test("duck check refuses a setup that lists people or coworkers, as duck install does, and one with an unknown zone, a plug's coworkers that are not a list, a state that is not one, a state on the polled list tool, or no route to the firm's decision model, whatever the sorter's mode, since duck reads each answer to a question with it; and the running firm is never touched", async () => {
     const file = join(firm.folder, "duck.yaml");
     const setup = readFileSync(file, "utf8");
     const duck = await firm.duckId();
@@ -130,7 +130,7 @@ describe("The admin sets up the firm and changes it", () => {
       await expect(firm.duck("check")).rejects.toThrow(listed);
       await expect(firm.duck("install")).rejects.toThrow(listed);
 
-      for (const mode of ["on", "observe"]) {
+      for (const mode of ["on", "observe", "off"]) {
         const refused = checked((s) => {
           s.zone = "Mars/Olympus";
           s.plugs.odd = { address: "http://127.0.0.1:9/mcp", coworkers: "wren" as "everyone" };
@@ -144,14 +144,10 @@ describe("The admin sets up the firm and changes it", () => {
           "plug odd's coworkers is everyone or a list of coworkers' names",
           `plug mail's tool * is "sometimes"`,
           "plug calendar's tool list_events is the one duck polls",
-          `sorter names no address: the route to its decision model, which mode ${mode} calls`,
+          "sorter names no address: the route to the firm's decision model, which reads each person's answer to a question and which the sorter calls",
         ])
           await expect(refused).rejects.toThrow(problem);
       }
-      await checked((s) => {
-        s.sorter.mode = "off";
-        for (const part of ["address", "key", "model"] as const) delete s.sorter[part];
-      });
     } finally {
       writeFileSync(file, setup);
     }
