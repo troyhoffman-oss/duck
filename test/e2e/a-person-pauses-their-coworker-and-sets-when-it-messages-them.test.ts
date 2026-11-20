@@ -210,7 +210,8 @@ describe("a person pauses their coworker and sets when it messages them", () => 
       const asked = firm.model.requests.find(said(CLOCK));
       expect(asked?.shown).toContain(`${offsetIn(ZONE)}</current-time>`);
       expect(asked?.shown).toContain(`time zone is ${ZONE}.`);
-      expect(firm.model.requests.find(answered("shell"))?.last).toContain(`${offsetIn(ZONE)}</current-time>`);
+      const after = firm.model.requests.find(answered("shell"));
+      expect(JSON.stringify(after?.messages.at(-1)?.content)).toContain(`${offsetIn(ZONE)}</current-time>`);
 
       // Every day at a time two minutes on in Rosa's zone, which in the firm's is hours away.
       const NOTE = "Remind Rosa to water the lobby plants.";
