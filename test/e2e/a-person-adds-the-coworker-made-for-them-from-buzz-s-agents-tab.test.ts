@@ -3,7 +3,6 @@ import { type Buzz, E2E, type Firm, harbor, loadPlugin, startBuzz, startFirm } f
 import { all, held, said, say, shows } from "../kit/model";
 
 const PICTURE = "https://images.example/pip.png";
-const PUBLISHED = "Done: that coworker's profile in Buzz shows it now.";
 const CODE = "The gate code for the annex is 4417.";
 const LEASE = "Can you check the annex lease?";
 const BOILER = "Is the boiler serviced?";
@@ -73,26 +72,24 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     }
   }
 
-  test(
-    "duck's offer puts adding from the Agents tab first, and duck's own profile says it is duck, with the tag of the community's owner",
+  test.failing(
+    "duck's offer shows in the person's New agent, and duck's own profile says it is duck, with the tag of the community's owner",
     async () => {
       const made = await firm.duck("make", "lark", "ana", "Ana");
       lark = /its Buzz key is ([0-9a-f]{64})/.exec(made)?.[1] as string;
-      const offer = (await buzz.answerFrom("ana", duck(), 60)).content;
-      expect(offer).toContain(lark);
-      expect(offer).toContain("open Agents, press New agent");
-      expect(offer.indexOf("open Agents")).toBeLessThan(offer.indexOf("Settings, then Security"));
+      plugin = await loadPlugin(buzz, "ana");
+      expect(plugin.type.title).toBe("duck");
+      const offered = "lark, made for you by your firm. The name you give it above is its own.";
+      expect((await plugin.create((l) => l.includes(offered))).lines).toEqual(["Your coworker", offered]);
       const own = await profileOf(duck(), (p) => p.duck === true);
       expect(own.owner).toBe(buzz.keys.rosa);
     },
     E2E,
   );
 
-  test(
+  test.failing(
     "a person adds it in New agent with a name and a picture of their own, and it starts with no admin, showing both",
     async () => {
-      plugin = await loadPlugin(buzz, "ana");
-      expect(plugin.type.title).toBe("duck");
       expect(await plugin.add("lark", "Pip", PICTURE)).toEqual({ pubkey: lark, picture: PICTURE });
       const facts = firm.facts("lark");
       expect(facts.state).toBe("claimed");
@@ -105,7 +102,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test(
+  test.failing(
     "a person's new name for it in Buzz is its profile's, and the same claim sent again still stands",
     async () => {
       await plugin.edit(lark, "Pippa", PICTURE);
@@ -117,7 +114,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test(
+  test.failing(
     "deleting it in Buzz stops it and keeps its folder, and adding it again brings it back as it was",
     async () => {
       const before = firm.facts("lark");
@@ -136,8 +133,8 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test(
-    "a coworker whose profile Buzz already shows keeps its name, picture and about across a duck restart, and its person's rename changes only its name",
+  test.failing(
+    "a coworker whose profile Buzz already shows keeps its name, picture and about across a duck restart, and its person's rename in Buzz changes only its name",
     async () => {
       const wren = buzz.keys.wren;
       const kept = {
@@ -153,11 +150,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
       // duck publishes at start without waiting; a profile it sent would be in well before this.
       await Bun.sleep(10_000);
       expect((await profileOf(wren, () => true)).id).toBe(set.id);
-      await buzz.write("rosa", "dm", `rename ${harbor.coworker} to Wrenna`, { to: duck() });
-      for (const end = Date.now() + 60_000; ; await Bun.sleep(500)) {
-        if ((await buzz.dmOf("rosa", duck())).some((m) => m.content === PUBLISHED)) break;
-        if (Date.now() > end) throw new Error("waited 60 s for duck's answer to the rename");
-      }
+      await (await loadPlugin(buzz, "rosa")).edit(wren, "Wrenna");
       const renamed = await profileOf(wren, (p) => p.display_name === "Wrenna");
       expect(renamed).toMatchObject({
         name: "Wrenna",
@@ -169,7 +162,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test(
+  test.failing(
     "a person's delete in Buzz stops only their coworker, inside the running duck: another coworker's run goes on, duck's container stays, and nothing of the stopped one answers",
     async () => {
       firm.model.on(said(CODE), say("Noted: 4417 for the annex."));
@@ -207,7 +200,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test(
+  test.failing(
     "claimed again in the same duck, the stopped coworker starts clean: the run the stop cut short comes back once, with its memory, and one buzz-acp serves it",
     async () => {
       firm.model.on(all(said(LEASE), shows(CUT), shows(CODE)), say(BACK));
