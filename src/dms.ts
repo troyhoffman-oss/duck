@@ -95,7 +95,8 @@ export function talk(setup: Setup) {
     const [text, writer] = [asked.content.trim(), asked.pubkey];
     const [proof, form, set, limit] = [proofIn(text), FORM.exec(text), SETTING.exec(text), LIMIT.exec(text)];
     after(async () => {
-      if (!(await madeFor(duck, tagOf(asked, "h"), writer))) throw new Error("its channel is not its writer's");
+      if (!(await madeFor(duck, tagOf(asked, "h"), writer)))
+        throw new Error("its channel is not its writer's");
       if (proof) return claimFrom(setup, duck, writer, proof);
       if (form) return change(setup, writer, form);
       if (set) return setFor(setup, duck, writer, set);
@@ -277,7 +278,8 @@ async function publishArtifact(
   const d = artifactId(h, artifact[0], key);
   const [head] = await duck.query({ artifact: "current", "#h": [h], "#d": [d] });
   // Its person may revise it too, so only duck's own revision is taken as unchanged.
-  if (head?.content !== artifact[2] || head.pubkey !== duck.me) await revise(duck, [h, d], artifact, head, tags);
+  if (head?.content !== artifact[2] || head.pubkey !== duck.me)
+    await revise(duck, [h, d], artifact, head, tags);
 }
 
 /** Writes claimed coworker `name`'s artifact in its person's channel with duck, naming its Buzz key. */
