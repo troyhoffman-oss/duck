@@ -615,7 +615,7 @@ type Mail = {
     attachment_id: string;
     filename?: string;
     content_type?: string;
-    /** `inline` with a `content_id` for a picture the mail's own body shows, such as one in a signature. */
+    /** `inline` with a `content_id` for a picture the mail's own body shows, a signature's or a pasted one. */
     content_disposition?: string;
     content_id?: string;
   }[];
@@ -650,8 +650,9 @@ const PING = 30_000;
  * address alone that passed the mail service's sender checks, an SPF or a DMARC pass for their own domain,
  * since a From line can be forged. Any other mail there is outside words: an event about its thread on the
  * work lane, with whom it says it is from, its words, its files' names and its checks; its files stay at the
- * service. A picture the mail's body shows, such as one in a signature, is part of how it looks and not a
- * file. The stream is kept going, and each time it opens every mail received since a day before the door
+ * service. A picture the mail's body shows is handed over as a file like any other, and named as one shown in
+ * its body, so the coworker tells a signature's logo from a pasted screenshot by what the mail says. The
+ * stream is kept going, and each time it opens every mail received since a day before the door
  * last took one is listed, page by page, so mail that came while it was down is taken; the inbox takes each
  * once, by its id. A stream that answers no ping is closed, which opens it again.
  */
@@ -666,21 +667,25 @@ async function mailIn(c: Coworker, door: string, set: Door) {
     const from = (/<([^>]*)>/.exec(m.from)?.[1] ?? m.from).trim().toLowerCase();
     const { spf, dmarc } = m.authentication_results ?? {};
     // The service's extracted_text leaves out the lines a mail quotes, which are not the sender's words.
-    const text = [m.subject, (m.extracted_text ?? m.text ?? "").trim()].filter(Boolean).join("\n\n");
-    const attached = (m.attachments ?? []).filter(
-      (a) => !(a.content_disposition === "inline" && a.content_id),
-    );
+    const words = [m.subject, (m.extracted_text ?? m.text ?? "").trim()].filter(Boolean).join("\n\n");
+    const attached = m.attachments ?? [];
+    const name = (a: (typeof attached)[number]) => a.filename ?? a.attachment_id;
+    // The service marks a picture the mail's body shows inline with a content id: a signature's logo or a
+    // screenshot pasted into the words. Which it is, the coworker reads from the mail, so code only names them.
+    const shown = attached.filter((a) => a.content_disposition === "inline" && a.content_id).map(name);
     if (from !== person || m.from.split("@").length !== 2 || ![spf, dmarc].includes("pass")) {
-      const payload = { from: m.from, text, files: attached.map((a) => a.filename), checks: { spf, dmarc } };
+      const files = attached.map(name);
+      const payload = { from: m.from, text: words, files, shown_in_body: shown, checks: { spf, dmarc } };
       if (add(c.db, `${door}:others`, id, JSON.stringify(payload), null, null, m.thread_id)) void c.wake();
       return;
     }
+    const text = shown.length > 0 ? `${words}\n\nShown in the mail's body: ${shown.join(", ")}.` : words;
     const files = attached.map(async (a) => {
       const at = `/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(a.attachment_id)}`;
       const got = await fetch((await mail<{ download_url: string }>(c, set, at)).download_url);
       if (!got.ok) throw new Error(`its file ${a.filename} could not be downloaded (${got.status})`);
       const data = Buffer.from(await got.arrayBuffer()).toString("base64");
-      return { name: a.filename ?? a.attachment_id, type: a.content_type ?? "", data };
+      return { name: name(a), type: a.content_type ?? "", data };
     });
     taken(c, door, { id, text, files: await Promise.all(files) });
   };
@@ -781,11 +786,19 @@ async function mailOut(
 /**
  * `words`, the markdown a coworker writes, as plain HTML a mail client shows in its own font: bold, lists,
  * links and tables as themselves, each line break kept as it reads in chat, and any HTML in them shown as text.
+ * A table has a thin border and padded cells, which is all the HTML says about how anything looks.
  */
 const mailHtml = (words: string) =>
   // Two spaces before a line's end are markdown's line break; Bun 1.4.4's hardSoftBreaks does not change its HTML.
-  Bun.markdown.html(words.replace(/(?<=[^\n])\n(?=[^\n])/g, "  \n"), {
-    noHtmlBlocks: true,
-    noHtmlSpans: true,
-    autolinks: true,
-  });
+  Bun.markdown
+    .html(words.replace(/(?<=[^\n])\n(?=[^\n])/g, "  \n"), {
+      noHtmlBlocks: true,
+      noHtmlSpans: true,
+      autolinks: true,
+    })
+    // A table with no border or padding draws cramped in desktop mail clients. Every <table> here is the
+    // renderer's own, since HTML in the words is shown as text.
+    .replaceAll(
+      "<table>",
+      '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse">',
+    );

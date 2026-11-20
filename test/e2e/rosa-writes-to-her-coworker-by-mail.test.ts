@@ -173,7 +173,7 @@ describe("Rosa writes to her coworker by mail", () => {
     await email.quiet(5);
   });
 
-  test("her coworker's reply reads as formatted mail, and a picture in a signature is not a file, on her mail or a stranger's", async () => {
+  test("her coworker's reply reads as formatted mail, its table bordered, and a picture a mail's body shows arrives as a file said to be one, on her mail or a stranger's", async () => {
     const [BEHIND, OFFER] = ["Which units are behind on rent?", "We can repaint 4B next week for $900."];
     const ANSWER =
       "**Two units** are behind:\n\n| Unit | Owed |\n|---|---|\n| 4B | $2,100 |\n| 5C | $950 |\n\nSee [the ledger](https://ledger.harbor.example/rent).";
@@ -187,18 +187,23 @@ describe("Rosa writes to her coworker by mail", () => {
     expect(reply.text).toBe(ANSWER);
     for (const part of [
       "<strong>Two units</strong>",
-      "<table>",
+      '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse">',
       "<td>4B</td><td>$2,100</td>",
       '<a href="https://ledger.harbor.example/rent">the ledger</a>',
     ])
       expect(reply.html).toContain(part);
-    expect(reply.html).not.toMatch(/style|class=|<font|<html/);
+    expect(reply.html?.match(/style=/g)).toHaveLength(1);
+    expect(reply.html).not.toMatch(/class=|color|font|<html/);
     const asked = firm.model.requests.findLast(said(BEHIND));
-    expect([asked?.shows("rent-roll.txt"), asked?.shows("signature-logo")]).toEqual([true, false]);
+    for (const file of ["signature-logo.png", "rent-roll.txt"])
+      expect(asked?.last).toMatch(new RegExp(`/duck/files/\\S+${file.replace(".", "\\.")}`));
+    expect(asked?.last).toContain("Shown in the mail's body: signature-logo.png.");
 
     email.stranger.send("Repaint", OFFER, { files: [LOGO, { name: "quote-4B.txt", bytes: "$900" }] });
     await outside(OFFER);
     const seen = firm.model.requests.findLast(all(workLane, shows(OFFER)));
-    expect([seen?.shows("quote-4B.txt"), seen?.shows("signature-logo")]).toEqual([true, false]);
+    expect(
+      seen?.shows('"files":["signature-logo.png","quote-4B.txt"],"shown_in_body":["signature-logo.png"]'),
+    ).toBe(true);
   });
 });
