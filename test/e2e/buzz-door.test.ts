@@ -423,27 +423,29 @@ describe("the Buzz door", () => {
       firm.model.clear();
       const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
       const printed = (text: string) => all(main, answered(TOOLS.buzz), said(text));
-      const [ARCHIVE, BEFORE, YES] = [
-        "Archive harbor-ops when you can.",
-        "Before I archive it: shall I tell Theo first?",
+      const [CLEAN, BEFORE, YES] = [
+        "Clean up harbor-ops when you can.",
+        "Before I take my note down: shall I tell Theo first?",
         "Yes, go on.",
       ];
       let root = "";
-      firm.model.on(all(main, said(ARCHIVE)), () =>
+      firm.model.on(all(main, said(CLEAN)), () =>
         call(TOOLS.buzz, {
           args: ["messages", "send", "--channel", buzz.channel, "--reply-to", root, "--content", "-"],
           input: BEFORE,
         }),
       );
-      firm.model.on(
-        printed("event_id"),
-        call(TOOLS.buzz, { args: ["channels", "archive", "--channel", buzz.channel] }),
+      // A delete of that very message, so its question is told apart from the one the step before left open.
+      firm.model.on(printed("event_id"), (r) =>
+        call(TOOLS.buzz, {
+          args: ["messages", "delete", "--event", /"event_id":\s*"([0-9a-f]{64})"/.exec(r.last)?.[1] ?? ""],
+        }),
       );
       firm.model.on(printed("The gate holds"), say("I've asked you first."));
       firm.model.on(reading, say("neither"), { times: Number.POSITIVE_INFINITY });
       firm.model.on(all(main, said(YES)), say("Noted."));
 
-      root = (await buzz.write("rosa", "harbor-ops", ARCHIVE)).id;
+      root = (await buzz.write("rosa", "harbor-ops", CLEAN)).id;
       let question = "";
       for (let waited = 0; !question; waited++) {
         if (waited === 120) throw new Error("waited 60 s for the question in the thread");
