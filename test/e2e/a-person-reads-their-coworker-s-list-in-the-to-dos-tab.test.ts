@@ -83,7 +83,8 @@ describe("a person reads their coworker's list in the To-dos tab, and nobody els
         items: [{ group: "you", id: item, state: "open", ...ITEM, updated_at: expect.any(String) }],
       });
       const d = list?.tags.find((t) => t[0] === "d")?.[1] as string;
-      expect(await buzz.query("rosa", [{ ids: [list?.id] }])).toHaveLength(1);
+      // A system channel is read only by naming it (buzz-relay src/handlers/system_channels.rs:1-23).
+      expect(await buzz.query("rosa", [{ ids: [list?.id], "#h": [channel] }])).toHaveLength(1);
       expect(await buzz.query("theo", [{ ids: [list?.id] }])).toEqual([]);
       expect(await buzz.query("theo", [{ kinds: [45010], "#d": [d] }])).toEqual([]);
       await expect(buzz.query("theo", [{ kinds: [45010], "#h": [channel] }])).rejects.toThrow("restricted");
