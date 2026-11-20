@@ -206,4 +206,19 @@ describe("Rosa writes to her coworker by mail", () => {
       seen?.shows('"files":["signature-logo.png","quote-4B.txt"],"shown_in_body":["signature-logo.png"]'),
     ).toBe(true);
   });
+
+  test("two files of one mail with one name are two files for her coworker", async () => {
+    const PAIR = "Both pages of the 5C lease are here.";
+    firm.model.on(said(PAIR), say("Got both pages."));
+    email.person.send("5C lease", PAIR, {
+      files: [
+        { name: "page.txt", bytes: "page one" },
+        { name: "page.txt", bytes: "page two" },
+      ],
+    });
+    await email.person.next(60);
+    const seen = firm.model.requests.findLast(said(PAIR))?.last ?? "";
+    expect(seen).toMatch(/\/duck\/files\/\S+\/page\.txt/);
+    expect(seen).toMatch(/\/duck\/files\/\S+\/page-2\.txt/);
+  });
 });

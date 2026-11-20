@@ -10,14 +10,13 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive } from "./archive";
 import { listChanged } from "./dms";
-import { act, askDoors, doorTo } from "./doors";
+import { act, askDoors, doorTo, saved } from "./doors";
 import { add, mark, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
 import { LIST_TOOLS, type Link, link, linkedTo, logged, useList } from "./list";
@@ -456,17 +455,6 @@ function context(setup: Setup, coworker: string): Context {
   };
 }
 
-/** Writes `bytes` as a new file at `path`, never through a link there; false when the name is taken, by a link or a file. */
-function madeAt(path: string, bytes: Buffer) {
-  try {
-    writeFileSync(path, bytes, { flag: "wx" });
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw error;
-  }
-}
-
 /**
  * Saves each file in plug `plug`'s `result` of `tool` under coworker `coworker`'s home, in `plugs/<plug>/`, by
  * the last part of its uri or else as `<tool>.<type>`, numbered when the name is taken, and gives the coworker
@@ -509,11 +497,7 @@ function saveFiles(
     const name = ["", ".", ".."].includes(last)
       ? `${tool}.${type.split("/")[1]?.split(/[+;]/)[0]}`
       : last.replace(/[\s"'`<>()/\\]/g, "-");
-    const dot = name.lastIndexOf(".") > 0 ? name.lastIndexOf(".") : name.length;
-    let at = join(folder, name);
-    for (let n = 2; !madeAt(at, bytes); n++)
-      at = join(folder, `${name.slice(0, dot)}-${n}${name.slice(dot)}`);
-    const path = `${HOME}/plugs/${plug}/${basename(at)}`;
+    const path = `${HOME}/plugs/${plug}/${saved(folder, name, bytes)}`;
     moved.push({ path, bytes: bytes.length });
     return { type: "text", text: `${plug} gave a file, saved at ${path}: ${type}, ${bytes.length} bytes.` };
   });

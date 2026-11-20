@@ -66,6 +66,25 @@ export async function take(c: Coworker, door: string, request: Request) {
   return new Response(held, { status: 202 });
 }
 
+/** Writes `bytes` as a new file at `path`, never through a link there; false when the name is taken, by a link or a file. */
+function madeAt(path: string, bytes: Buffer) {
+  try {
+    writeFileSync(path, bytes, { flag: "wx" });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+}
+
+/** Saves `bytes` in `folder` as `name`, numbered before its extension when the name is taken. Returns the name it has. */
+export function saved(folder: string, name: string, bytes: Buffer) {
+  const dot = name.lastIndexOf(".") > 0 ? name.lastIndexOf(".") : name.length;
+  let at = name;
+  for (let n = 2; !madeAt(join(folder, at), bytes); n++) at = `${name.slice(0, dot)}-${n}${name.slice(dot)}`;
+  return at;
+}
+
 /**
  * Writes what the person wrote at `door` as an inbox event, with their files where the coworker reads them
  * and cannot change them, and wakes the coworker. A buzz door's message keeps its place as the payload. It
@@ -77,10 +96,9 @@ function taken(c: Coworker, door: string, body: Written) {
     const event = add(c.db, door, body.id, body.place ? JSON.stringify(body.place) : null);
     if (event === null) return null;
     const files = (body.files ?? []).map((f) => {
-      const path = join(String(event), basename(f.name));
-      mkdirSync(join(c.files, String(event)), { recursive: true });
-      writeFileSync(join(c.files, path), Buffer.from(f.data, "base64"));
-      return `${FILES}/${path}`;
+      const folder = join(c.files, String(event));
+      mkdirSync(folder, { recursive: true });
+      return `${FILES}/${event}/${saved(folder, basename(f.name), Buffer.from(f.data, "base64"))}`;
     });
     heard(c.db, door, event, body.text, files);
     return event;
