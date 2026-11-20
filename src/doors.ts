@@ -4,7 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-ai/advanced-imessage/grpc";
 import { heard, told } from "./archive";
-import { aboutSession, add, type Event, lastEvent, waiting } from "./inbox";
+import { aboutSession, add, broken, type Event, lastEvent, waiting } from "./inbox";
 import type { Coworker } from "./run";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
 
@@ -150,11 +150,6 @@ export function deliver(c: Coworker, said: string, since: number, ask = false) {
     broken(c, `${door}:${last?.id ?? 0}`, { door, undelivered: text, because: failed.message });
   });
   return door;
-}
-
-/** Tells the main conversation, once for `ref`, `what` broke at a door (SPEC part 10). */
-function broken(c: Coworker, ref: string, what: object) {
-  if (add(c.db, "broken", ref, JSON.stringify(what), null, c.conversation() ?? null) !== null) void c.wake();
 }
 
 /**

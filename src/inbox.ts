@@ -6,6 +6,7 @@ import { boxesOf, callPlug, fields, session as plugSession } from "./gate";
 import { JOBS } from "./jobs";
 import { LIST, logged } from "./list";
 import { OUTBOX } from "./outbox";
+import type { Coworker } from "./run";
 import { factsOf, gives, ms, type Setup, secret } from "./setup";
 import { logLine, SORTER } from "./sorter";
 import { TIMERS } from "./timers";
@@ -73,6 +74,11 @@ export const add = (
       "insert into inbox (source, ref, about, received_at, payload, item_id, session) values (?, ?, ?, ?, ?, ?, ?) on conflict do nothing returning id",
     )
     .get(source, ref, about, new Date().toISOString(), payload, item, session)?.id ?? null;
+
+/** Tells the main conversation, once for `ref`, `what` broke: a door or a polled source (SPEC part 10). */
+export function broken(c: Coworker, ref: string, what: object) {
+  if (add(c.db, "broken", ref, JSON.stringify(what), null, c.conversation() ?? null) !== null) void c.wake();
+}
 
 const among = (sources: string[], not = false) =>
   `source ${not ? "not in" : "in"} (${sources.map(() => "?").join(", ")})`;
@@ -241,12 +247,15 @@ export async function push(setup: Setup, name: string, request: Request, arrive:
  * Calls the list tool of each plug that is polled, on its interval (SPEC part 1), as each running coworker in
  * `coworkers` it is given to, through the gate's call so the plug's boxes shape its result: each row it lists
  * is an event for that coworker's person, whose `ref` is the row's id field and what it is about the row's
- * about field, where setup names one, and whose payload is the rest of the row.
+ * about field, where setup names one, and whose payload is the rest of the row. A failed poll is logged, and
+ * from the third in a row the source is broken: told once for each time it is down.
  */
-export function poll(setup: Setup, coworkers: ReadonlyMap<string, unknown>, arrive: Arrive) {
+export function poll(setup: Setup, coworkers: ReadonlyMap<string, Coworker>, arrive: Arrive) {
   for (const [name, plug] of Object.entries(setup.plugs ?? {})) {
     const p = plug.events?.poll;
     if (!p) continue;
+    /** Since when each coworker's polls have failed, and how many in a row. */
+    const down = new Map<string, { since: string; failed: number }>();
     const list = async (coworker: string) => {
       const send = await plugSession(setup, plug, coworker);
       const result = await callPlug(setup, coworker, name, send, p.tool, {}, [], []);
@@ -259,9 +268,16 @@ export function poll(setup: Setup, coworkers: ReadonlyMap<string, unknown>, arri
         });
     };
     setInterval(() => {
-      for (const c of [...coworkers.keys()].filter((c) => gives(plug, c)))
-        list(c).catch((error: Error) =>
-          console.error(`the poll of plug ${name} for ${c} failed: ${error.message}`),
+      for (const c of [...coworkers.values()].filter((c) => gives(plug, c.name)))
+        list(c.name).then(
+          () => down.delete(c.name),
+          (error: Error) => {
+            console.error(`the poll of plug ${name} for ${c.name} failed: ${error.message}`);
+            const d = down.get(c.name) ?? { since: new Date().toISOString(), failed: 0 };
+            down.set(c.name, d);
+            if (++d.failed >= 3)
+              broken(c, `${name} down since ${d.since}`, { plug: name, because: error.message });
+          },
         );
     }, ms(p.every));
   }
