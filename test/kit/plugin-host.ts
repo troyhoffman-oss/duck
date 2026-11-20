@@ -100,28 +100,12 @@ export async function loadPlugin(buzz: Buzz, who: Writer) {
       who,
       filters.map(({ limit, ...f }) => ("artifact" in f ? f : { limit, ...f })),
     );
-  const tag = (event: BuzzEvent, name: string) => event.tags.find((t) => t[0] === name)?.[1];
   const session = {
     viewer: buzz.keys[who],
     relayAuthor,
     read,
     // The relay's own answer, fresh, as Buzz reads its config artifacts (buzz-app src/features/relay/session.ts:2707-2716).
     snapshotRead: (filters: Record<string, unknown>[], _settings: { signal?: AbortSignal }) => read(filters),
-    channels: {
-      /**
-       * NIP-CL: the channels `creator` made labelled `label`, oldest first, from the relay's own metadata, as
-       * Buzz's findLabeled reads them (buzz-app src/features/relay/store.ts:3195-3245).
-       */
-      async findLabeled({ creator, label }: { creator: string; label: string }) {
-        const found = await read([
-          { kinds: [39000], authors: [relayAuthor], "#P": [creator], "#t": [label] },
-        ]);
-        return found
-          .filter((c) => tag(c, "P") === creator && c.tags.some(([t, v]) => t === "t" && v === label))
-          .sort((a, b) => Number(tag(a, "created_at")) - Number(tag(b, "created_at")))
-          .map((c) => ({ id: tag(c, "d"), channelType: tag(c, "t"), creator }));
-      },
-    },
     // Buzz's artifact writer signs only an artifact, as the person (buzz-app src/features/relay/native.ts:620-646).
     configArtifactWriter: {
       kinds: [45010],

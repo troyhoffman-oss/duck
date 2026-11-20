@@ -32,31 +32,44 @@ export function apply(ctx) {
       .map(([, key]) => key);
   }
 
+  /** First value of tag `name` on `event`. */
+  const tagOf = (event, name) => event.tags.find(([tag]) => tag === name)?.[1];
+
   /**
-   * duck in this community: the agent whose profile says it is duck, signed with the tag of an owner or admin
-   * on the member list the relay signs, and the person's channel with it, if duck has made one: the oldest
-   * system channel duck made labelled with the person's key (NIP-CL), as Buzz finds its config channels.
+   * Each system channel (NIP-CL) the person is in, by the relay's own record of it, which no client writes;
+   * the relay reaches one only for a read that names its type (buzz-relay src/handlers/system_channels.rs:14-19)
+   * and answers newest first up to its page limit, so this reads page by page back to the first.
+   */
+  async function systemChannels(signal) {
+    const s = session();
+    const all = new Map();
+    for (let until; ; ) {
+      const filter = { kinds: [39000], authors: [s.relayAuthor], "#t": ["system"], limit: 500, until };
+      const page = (await s.snapshotRead([filter], { signal })).filter((c) => !all.has(tagOf(c, "d")));
+      if (page.length === 0) return [...all.values()];
+      for (const c of page) all.set(tagOf(c, "d"), c);
+      until = Math.min(...page.map((c) => c.created_at));
+    }
+  }
+
+  /**
+   * duck in this community and the person's channel with it: of the system channels labelled with the person's
+   * key, the oldest whose creator wrote an artifact there carrying the tag by which an owner or admin on the
+   * member list the relay signs authorised that creator. The relay takes an artifact's tag only where its owner
+   * signed the artifact's writer's key (buzz-relay src/handlers/artifact.rs:19, 91-113), so no account an owner
+   * or admin did not authorise passes for duck. With none, duck has not written to the person yet.
    */
   async function duck() {
-    const s = session();
-    const owners = await admins();
-    const profiles = await s.read([{ kinds: [0], limit: 500 }]);
-    const found = profiles
-      .filter((p) => owners.includes(p.tags.find(([tag]) => tag === "auth")?.[1]) && saysDuck(p.content))
-      .sort((a, b) => b.created_at - a.created_at)[0];
-    if (!found) throw new Error("This community has no duck that its owner or an admin set up.");
-    const labelled = await s.channels.findLabeled(
-      { creator: found.pubkey, label: s.viewer },
-      { consistency: "strong", signal: AbortSignal.timeout(WAIT_MS) },
-    );
-    return { key: found.pubkey, channel: labelled.find((c) => c.channelType === "system")?.id };
-  }
-  function saysDuck(content) {
-    try {
-      return JSON.parse(content).duck === true;
-    } catch {
-      return false;
+    const [s, owners, signal] = [session(), await admins(), AbortSignal.timeout(WAIT_MS)];
+    const labelled = (await systemChannels(signal))
+      .filter((c) => tagOf(c, "t") === "system" && c.tags.some(([t, v]) => t === "t" && v === s.viewer))
+      .sort((a, b) => Number(tagOf(a, "created_at")) - Number(tagOf(b, "created_at")));
+    for (const c of labelled) {
+      const [key, channel] = [tagOf(c, "P"), tagOf(c, "d")];
+      const written = await s.snapshotRead([{ artifact: "current", "#h": [channel], limit: 100 }], { signal });
+      if (written.some((a) => a.pubkey === key && owners.includes(tagOf(a, "auth")))) return { key, channel };
     }
+    return {};
   }
 
   /** The current artifacts in the person's channel with duck that `filter` matches, as the relay answers. */
@@ -70,7 +83,7 @@ export function apply(ctx) {
   const published = async (d, ...types) =>
     (await current(d, { "#type": types })).filter((a) => a.pubkey === d.key);
   /** The Buzz key of the coworker an artifact of duck's is for. */
-  const agentOf = (a) => a.tags.find(([tag]) => tag === "agent")?.[1];
+  const agentOf = (a) => tagOf(a, "agent");
 
   /** Each coworker duck offered the person, by its name, with its Buzz key. */
   const offers = async (d) =>

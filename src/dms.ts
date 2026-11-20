@@ -89,14 +89,13 @@ export function talk(setup: Setup) {
     sending = done.then(() => {}).catch(() => {});
     return done;
   };
-  const duck = connect(me, (asked) => {
+  const duck = connect(me, (asked, label) => {
     if (tagOf(asked, "type") !== "duck.request" || tagOf(asked, "op") !== "create" || tagOf(asked, "auth"))
       return;
     const [text, writer] = [asked.content.trim(), asked.pubkey];
     const [proof, form, set, limit] = [proofIn(text), FORM.exec(text), SETTING.exec(text), LIMIT.exec(text)];
     after(async () => {
-      if (!(await madeFor(duck, tagOf(asked, "h"), writer)))
-        throw new Error("its channel is not its writer's");
+      if (writer !== label) throw new Error("its channel is not its writer's");
       if (proof) return claimFrom(setup, duck, writer, proof);
       if (form) return change(setup, writer, form);
       if (set) return setFor(setup, duck, writer, set);
@@ -146,13 +145,8 @@ export function talk(setup: Setup) {
     firmChanged();
     for (const name of running.keys()) listed(name);
   }, 600_000);
-  // The plugin finds duck by this profile, and trusts it where its owner's tag names an owner or admin.
   duck
-    .send(
-      0,
-      [],
-      JSON.stringify({ name: "duck", about: "The service your firm's coworkers run on.", duck: true }),
-    )
+    .send(0, [], JSON.stringify({ name: "duck", about: "The service your firm's coworkers run on." }))
     .catch((e: Error) => console.error(`duck's profile: ${e.message}`));
 }
 
@@ -180,8 +174,8 @@ const lists = new Map<string, Database>();
 let listed = (_name: string) => {};
 
 /**
- * Publishes coworker `name`'s list, on its database `db`, to its person in their channel with duck, where only
- * they and duck read it (SPEC part 11, The plugin): at start and after each write to it.
+ * Publishes coworker `name`'s list, on its database `db`, to its person in their channel with duck (SPEC part
+ * 11, The plugin): at start and after each write to it.
  */
 export function listChanged(name: string, db: Database) {
   lists.set(name, db);
@@ -208,38 +202,19 @@ function artifactId(h: string, type: string, key: string) {
   return id.toString("hex").replace(/^(.{8})(.{4})(.{4})(.{4})/, "$1-$2-$3-$4-");
 }
 
-/** Each person's channel with duck, by their Buzz key. */
-const channels = new Map<string, string>();
-
 /**
  * The channel of the person whose Buzz key is `to` with duck (NIP-CL): a private system channel duck made with
  * them as its one other member, labelled with their key, which Buzz's apps list nowhere and count nothing in as
  * unread. duck makes it the first time it writes there; with more than one, every reader takes the oldest.
  */
 async function channelFor(duck: ReturnType<typeof connect>, to: string) {
-  const known = channels.get(to);
+  const known = await duck.channel(to);
   if (known) return known;
-  const [oldest] = (await duck.query({ kinds: [39000], "#P": [duck.me], "#t": [to] }))
-    .filter((c) => tagOf(c, "t") === "system")
-    .sort((a, b) => Number(tagOf(a, "created_at")) - Number(tagOf(b, "created_at")));
-  const id = (oldest && tagOf(oldest, "d")) || randomUUID();
-  if (!oldest) {
-    const made = { h: id, name: "duck", channel_type: "system", visibility: "private", t: to, p: to };
-    await duck.send(9007, Object.entries(made), "");
-  }
-  channels.set(to, id);
-  return id;
-}
-
-/**
- * Whether channel `h` is one duck made for the person whose Buzz key is `writer`: a system channel, duck its
- * creator and their key its label, by the relay's own record of it, which no client can write.
- */
-async function madeFor(duck: ReturnType<typeof connect>, h: string, writer: string) {
-  const [made] = await duck.query({ kinds: [39000], "#d": [h] });
-  const has = (name: string, value: string) => !!made?.tags.some(([t, v]) => t === name && v === value);
-  // Its first `t` is its type, then its labels (NIP-CL).
-  return !!made && tagOf(made, "t") === "system" && has("P", duck.me) && has("t", writer);
+  const id = randomUUID();
+  const made = { h: id, name: "duck", channel_type: "system", visibility: "private", t: to, p: to };
+  await duck.send(9007, Object.entries(made), "");
+  await duck.refresh();
+  return (await duck.channel(to)) ?? id;
 }
 
 /**
@@ -557,11 +532,8 @@ async function claimFrom(setup: Setup, duck: ReturnType<typeof connect>, writer:
   const name = made(setup).find((c) => factsOf(setup, c).for === writer && signs(proof, buzzKey(setup, c)));
   if (!name) return NOT_FIT;
   if (factsOf(setup, name).state === "claimed") return MINE;
-  // A relay that never answers names the person by their handle, not stopping every claim after this one.
-  const profiles = await Promise.race([
-    duck.query({ kinds: [0], authors: [writer] }),
-    Bun.sleep(10_000).then(() => []),
-  ]);
+  // A relay that does not answer in time names the person by their handle.
+  const profiles = await duck.query({ kinds: [0], authors: [writer] }).catch(() => []);
   const profile = profiles.find((p) => p.pubkey === writer);
   const person = (profile && nameOf(profile)) || (factsOf(setup, name).handle ?? "");
   try {
