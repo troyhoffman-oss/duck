@@ -36,44 +36,22 @@ export function apply(ctx) {
   const tagOf = (event, name) => event.tags.find(([tag]) => tag === name)?.[1];
 
   /**
-   * Each system channel (NIP-CL) the person is in, by the relay's own record of it, which no client writes;
-   * the relay reaches one only for a read that names its type (buzz-relay src/handlers/system_channels.rs:14-19)
-   * and answers newest first up to its page limit, so this reads page by page back to the first: a page short
-   * of the limit, or with nothing new, is the last.
-   */
-  async function systemChannels(signal) {
-    const s = session();
-    const all = new Map();
-    for (let until; ; ) {
-      const filter = { kinds: [39000], authors: [s.relayAuthor], "#t": ["system"], limit: 500, until };
-      const page = await s.snapshotRead([filter], { signal });
-      const fresh = page.filter((c) => !all.has(tagOf(c, "d")));
-      for (const c of fresh) all.set(tagOf(c, "d"), c);
-      if (page.length < 500 || fresh.length === 0) return [...all.values()];
-      until = Math.min(...page.map((c) => c.created_at));
-    }
-  }
-
-  /**
-   * duck in this community and the person's channel with it: of the system channels labelled with the person's
-   * key, the oldest whose creator wrote an artifact there carrying the tag by which an owner or admin on the
-   * member list the relay signs authorised that creator. The relay takes an artifact's tag only where its owner
-   * signed the artifact's writer's key (buzz-relay src/handlers/artifact.rs:19, 91-113), so no account an owner
-   * or admin did not authorise passes for duck. With none, duck has not written to the person yet.
+   * duck in this community and the person's channel with it: of the system channels (NIP-CL) labelled with the
+   * person's key that a key the member list names as an owner or admin made, the oldest, as Buzz finds labelled
+   * channels by their creator from the relay's own record. Only the community's owner makes a key an admin
+   * (buzz-relay src/handlers/relay_admin.rs:319-338), so no coworker or other agent is taken for duck. With none,
+   * duck has not written to the person yet.
    */
   async function duck() {
-    const [s, owners, signal] = [session(), await admins(), AbortSignal.timeout(WAIT_MS)];
-    const labelled = (await systemChannels(signal))
-      .filter((c) => tagOf(c, "t") === "system" && c.tags.some(([t, v]) => t === "t" && v === s.viewer))
-      .sort((a, b) => Number(tagOf(a, "created_at")) - Number(tagOf(b, "created_at")));
-    for (const c of labelled) {
-      const [key, channel] = [tagOf(c, "P"), tagOf(c, "d")];
-      const written = await s.snapshotRead([{ artifact: "current", "#h": [channel], limit: 100 }], {
-        signal,
-      });
-      if (written.some((a) => a.pubkey === key && owners.includes(tagOf(a, "auth")))) return { key, channel };
-    }
-    return {};
+    const [s, owners] = [session(), await admins()];
+    const settings = { consistency: "strong", signal: AbortSignal.timeout(WAIT_MS) };
+    const found = await Promise.all(
+      owners.map((creator) => s.channels.findLabeled({ creator, label: s.viewer }, settings)),
+    );
+    const [oldest] = found
+      .flatMap((made, i) => made.filter((c) => c.channelType === "system").map((c) => ({ ...c, key: owners[i] })))
+      .sort((a, b) => (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity) || (a.id < b.id ? -1 : 1));
+    return oldest ? { key: oldest.key, channel: oldest.id } : {};
   }
 
   /** The current artifacts in the person's channel with duck that `filter` matches, as the relay answers. */
