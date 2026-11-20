@@ -100,14 +100,14 @@ describe("an admin sees each coworker and sets the model calls of a job", () => 
   );
 
   test(
-    "a member who is not an admin has no card, is refused in fixed words, and reads none of what the admin sees",
+    "a member who is not an admin has no card, gets no answer from a channel duck did not make, and reads none of what the admin sees",
     async () => {
       const theo = await loadPlugin(buzz, "theo");
       expect(await theo.listed("Coworkers")).toBe(false);
-      // Asked from a channel Theo makes with duck himself, since he has no card.
-      expect(await buzz.askDuck("theo", firm.duckKey as string, "set model calls per job 50")).toBe(
-        NOT_ADMIN,
-      );
+      // Asked from a channel Theo makes with duck in it himself, since he has no card, which duck never reads.
+      expect(
+        await buzz.askDuck("theo", firm.duckKey as string, "set model calls per job 50", 15),
+      ).toBeUndefined();
       expect(JSON.parse(readFileSync(firmFile(), "utf8"))).toEqual({ jobs: { calls: 2 } });
 
       // The owner sets it again, so what the admins see is published with the run and its cost.

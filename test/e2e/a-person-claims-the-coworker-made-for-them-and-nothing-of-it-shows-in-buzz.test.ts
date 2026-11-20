@@ -3,6 +3,7 @@ import { type Buzz, E2E, type Firm, loadPlugin, startBuzz, startFirm } from "../
 
 const NOT_FIT = "That proof does not fit a coworker made for you here, so nothing changed.";
 const MINE = "That coworker is yours already.";
+const NOT_ADMIN = "Only an owner or admin of this community sets that, so nothing changed.";
 const OFFERED = "lark, made for you by your firm. The name you give it above is its own.";
 
 // The join path (SPEC part 11, duck's channel), as a person and an admin see it: the person in duck's plugin,
@@ -67,11 +68,12 @@ describe("a person claims the coworker made for them, and nothing of it shows in
   );
 
   test(
-    "a proof that does not fit a coworker made for the one who sends it is refused in fixed words, and nothing is claimed",
+    "a proof that does not fit a coworker made for the one who sends it is refused in fixed words, one sent from a channel duck did not make gets no answer, and nothing is claimed",
     async () => {
-      // Ana's proof sent by Theo, and Theo's own proof for Ana's coworker, from a channel Theo makes with duck.
-      expect(await buzz.askDuck("theo", duck(), buzz.proof("ana", lark))).toBe(NOT_FIT);
-      expect(await buzz.askDuck("theo", duck(), buzz.proof("theo", lark))).toBe(NOT_FIT);
+      // Ana's proof sent by Theo, and Theo's own proof for Ana's coworker, from a channel Theo makes with duck in
+      // it and his own key as its label, which duck never reads.
+      expect(await buzz.askDuck("theo", duck(), buzz.proof("ana", lark), 15)).toBeUndefined();
+      expect(await buzz.askDuck("theo", duck(), buzz.proof("theo", lark), 15)).toBeUndefined();
       // Theo's proof for Ana's coworker sent by Ana, and Ana's proof for a key duck never made, from New agent.
       expect(await buzz.askDuck("ana", duck(), buzz.proof("theo", lark))).toBe(NOT_FIT);
       await expect(plugin.finish("lark", buzz.keys.heron, "Lark")).rejects.toThrow(NOT_FIT);
@@ -163,8 +165,16 @@ describe("a person claims the coworker made for them, and nothing of it shows in
       // The step before put duck's channels back in the setup; installing it starts duck with them on.
       await firm.duck("install");
       expect(await buzz.askDuck("ana", duck(), buzz.proof("ana", lark))).toBe(MINE);
-      expect(await buzz.askDuck("theo", duck(), buzz.proof("ana", lark))).toBe(NOT_FIT);
+      expect(await buzz.askDuck("theo", duck(), buzz.proof("ana", lark), 15)).toBeUndefined();
       expect(firm.facts("lark").state).toBe("claimed");
+    },
+    E2E,
+  );
+
+  test(
+    "a person who is not an admin and asks for the job limit in their channel with duck is refused in fixed words",
+    async () => {
+      expect(await buzz.askDuck("ana", duck(), "set model calls per job 50")).toBe(NOT_ADMIN);
     },
     E2E,
   );
