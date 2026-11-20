@@ -557,6 +557,37 @@ export async function startFirm(
         const value = (key: string) => new RegExp(`^${key}=(.*)$`, "m").exec(shown)?.[1] ?? "";
         return { state: value("ActiveState"), run: value("InvocationID") };
       },
+      /**
+       * Freezes (SIGSTOP) or thaws (SIGCONT) the run of this firm's own claim install unit, named exactly, so a
+       * step builds an overlap with it rather than racing it. The containers it starts run in scopes of their
+       * own, so duck goes on taking claims while it is frozen.
+       */
+      freezeInstall: (frozen: boolean) =>
+        exec(
+          "systemctl",
+          "--user",
+          "kill",
+          "--signal",
+          frozen ? "SIGSTOP" : "SIGCONT",
+          `duck-firm-${name}-install.service`,
+        ),
+      /** What this firm's claim install unit logged since `since`, as journalctl reads it. */
+      installLog: (since: Date) =>
+        exec(
+          "journalctl",
+          "--user",
+          "--no-pager",
+          "--output",
+          "cat",
+          "--unit",
+          `duck-firm-${name}-install.service`,
+          "--since",
+          `@${Math.floor(since.getTime() / 1000)}`,
+        ),
+      /** Whether coworker `coworker`'s goose container exists, as duck install makes it. */
+      goose: async (coworker: string) =>
+        (await podman("ps", "--all", "--format", "{{.Names}}", "--filter", `name=^duck-${name}-${coworker}$`)).trim() !==
+        "",
       /** Coworker `coworker`'s facts, as duck keeps them in its folder. */
       facts: (coworker: string) =>
         JSON.parse(readFileSync(join(storage, coworker, "coworker.json"), "utf8")) as Record<string, string>,

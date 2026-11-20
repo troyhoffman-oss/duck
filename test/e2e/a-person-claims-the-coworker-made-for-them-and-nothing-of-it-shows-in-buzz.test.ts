@@ -99,7 +99,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
   );
 
   test.failing(
-    "a make for a person waits for their plug key, and a claim that comes while duck installs for an earlier one is not lost",
+    "a make for a person waits for their plug key, and a claim that comes while duck installs for an earlier one is not lost and holds that install up for nobody",
     async () => {
       const kiteKey = "HARBOR_MAIL_KEY_ana_kite";
       await expect(firm.duck("make", "kite", "ana_kite", buzz.keys.ana)).rejects.toThrow(kiteKey);
@@ -110,26 +110,39 @@ describe("a person claims the coworker made for them, and nothing of it shows in
       await plugin.create(
         (l) => l.some((t) => t.startsWith("kite,")) && l.some((t) => t.startsWith("tern,")),
       );
-      await plugin.add("kite", "Kite");
-      let first = await firm.claimInstall();
-      for (const end = Date.now() + 60_000; first.state !== "activating"; first = await firm.claimInstall()) {
-        if (Date.now() > end)
-          throw new Error(`duck's install after kite's claim is ${first.state}, not running`);
-        await Bun.sleep(100);
+      // Kite's claim starts an install. Once kite's goose container is there, that install has read the setup
+      // and is waiting for duck; the step freezes it there while tern's claim comes, so the claim lands inside
+      // it every time.
+      const since = new Date();
+      const added = plugin.add("kite", "Kite");
+      for (const end = Date.now() + 60_000; !(await firm.goose("kite")); await Bun.sleep(50))
+        if (Date.now() > end) throw new Error("no goose container for kite 60 s after its claim");
+      let claimed = 0;
+      let first = { state: "", run: "" };
+      try {
+        await firm.freezeInstall(true);
+        first = await firm.claimInstall();
+        expect(first.state).toBe("activating");
+        await added;
+        await plugin.add("tern", "Tern");
+        claimed = Date.now();
+        expect(firm.facts("tern").state).toBe("claimed");
+        expect(await firm.claimInstall()).toEqual(first);
+      } finally {
+        await firm.freezeInstall(false);
       }
-      await plugin.add("tern", "Tern");
-      expect(firm.facts("tern").state).toBe("claimed");
-      // Tern's claim was taken while the install kite's claim started still ran.
-      expect(await firm.claimInstall()).toEqual(first);
-      await buzz.person.online(400, kite);
-      await buzz.person.online(400, tern);
-      // The file tern's claim left has the unit run again once the run kite's claim started ends; the step
-      // waits for that run to finish.
+      // Kite's run ends without waiting on tern, which it did not install, and the file tern's claim left has
+      // the unit run again for tern; the step waits for that run to finish.
       const end = Date.now() + 240_000;
       for (let now = first; now.run === first.run || now.state !== "inactive"; await Bun.sleep(250)) {
         now = await firm.claimInstall();
         if (Date.now() > end) throw new Error(`duck's install for tern's claim is ${now.state}, not done`);
       }
+      expect(await firm.installLog(since)).not.toContain("is not ready");
+      await buzz.person.online(400, kite);
+      await buzz.person.online(60, tern);
+      // Tern is up well within a minute of its claim; an install held up by it waited 120 s before tern's began.
+      expect(Date.now() - claimed).toBeLessThan(60_000);
     },
     3 * E2E,
   );
