@@ -140,7 +140,9 @@ describe("a person pauses their coworker and sets when it messages them", () => 
       const [prefs] = await buzz.query("rosa", [
         { artifact: "current", "#h": [channel], "#type": ["duck.person"] },
       ]);
-      const { zone } = Bun.YAML.parse(readFileSync(join(firm.folder, "duck.yaml"), "utf8")) as { zone: string };
+      const { zone } = Bun.YAML.parse(readFileSync(join(firm.folder, "duck.yaml"), "utf8")) as {
+        zone: string;
+      };
       expect(JSON.parse(prefs?.content as string)).toEqual({
         version: 1,
         coworker: harbor.coworker,

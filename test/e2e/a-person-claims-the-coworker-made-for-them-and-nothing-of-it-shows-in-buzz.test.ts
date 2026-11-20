@@ -104,7 +104,9 @@ describe("a person claims the coworker made for them, and nothing of it shows in
       const keyOf = (made: string) => /its Buzz key is ([0-9a-f]{64})/.exec(made)?.[1] as string;
       const kite = keyOf(await firm.duck("make", "kite", "ana_kite", buzz.keys.ana));
       const tern = keyOf(await firm.duck("make", "tern", "ana_tern", buzz.keys.ana));
-      await plugin.create((l) => l.some((t) => t.startsWith("kite,")) && l.some((t) => t.startsWith("tern,")));
+      await plugin.create(
+        (l) => l.some((t) => t.startsWith("kite,")) && l.some((t) => t.startsWith("tern,")),
+      );
       await plugin.add("kite", "Kite");
       let first = await firm.claimInstall();
       for (const end = Date.now() + 60_000; first.state !== "activating"; first = await firm.claimInstall()) {

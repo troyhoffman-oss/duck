@@ -368,7 +368,15 @@ export async function startBuzz() {
       ws.onmessage = (m) => {
         const [type, a, b, c] = JSON.parse(String(m.data));
         if (type === "AUTH") {
-          const auth = signed(secrets[who], 22242, [["relay", url], ["challenge", a]], "");
+          const auth = signed(
+            secrets[who],
+            22242,
+            [
+              ["relay", url],
+              ["challenge", a],
+            ],
+            "",
+          );
           signIn = auth.id;
           send("AUTH", auth);
         } else if (type === "OK" && a === signIn)
@@ -411,7 +419,12 @@ export async function startBuzz() {
       let channel = (await channelWith(who, duck)) ?? own.get(who);
       if (!channel) {
         channel = randomUUID();
-        const tags = [["h", channel], ["name", "asks"], ["channel_type", "system"], ["p", duck]];
+        const tags = [
+          ["h", channel],
+          ["name", "asks"],
+          ["channel_type", "system"],
+          ["p", duck],
+        ];
         await publish(who, signed(secrets[who], 9007, [...tags, ["visibility", "private"]], ""));
         own.set(who, channel);
       }

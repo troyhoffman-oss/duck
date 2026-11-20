@@ -105,7 +105,9 @@ describe("an admin sees each coworker and sets the model calls of a job", () => 
       const theo = await loadPlugin(buzz, "theo");
       expect(await theo.listed("Coworkers")).toBe(false);
       // Asked from a channel Theo makes with duck himself, since he has no card.
-      expect(await buzz.askDuck("theo", firm.duckKey as string, "set model calls per job 50")).toBe(NOT_ADMIN);
+      expect(await buzz.askDuck("theo", firm.duckKey as string, "set model calls per job 50")).toBe(
+        NOT_ADMIN,
+      );
       expect(JSON.parse(readFileSync(firmFile(), "utf8"))).toEqual({ jobs: { calls: 2 } });
 
       // The owner sets it again, so what the admins see is published with the run and its cost.
