@@ -251,11 +251,12 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
   const reply = place.reply ? ["--reply-to", place.reply] : [];
   // Buzz refuses a message whose "@word" names no member, unless a mention is given; it then leaves the word as
   // text. Its own key is always a member, and the tag it adds notifies no one and starts no run.
-  const self = Buffer.from(schnorr.getPublicKey(Buffer.from(env.BUZZ_PRIVATE_KEY, "hex"))).toString("hex");
+  const own = Buffer.from(schnorr.getPublicKey(Buffer.from(env.BUZZ_PRIVATE_KEY, "hex"))).toString("hex");
+  const mention = ["--mention", own];
   const attached = files.flatMap((f) => ["--file", f]);
   await buzz(
     env,
-    ["messages", "send", "--channel", place.channel, ...reply, "--mention", self, ...attached, "--content", "-"],
+    ["messages", "send", "--channel", place.channel, ...reply, ...mention, ...attached, "--content", "-"],
     text,
   );
 }
