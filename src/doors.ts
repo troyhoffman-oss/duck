@@ -611,7 +611,14 @@ type Mail = {
   subject?: string;
   text?: string;
   extracted_text?: string;
-  attachments?: { attachment_id: string; filename?: string; content_type?: string }[];
+  attachments?: {
+    attachment_id: string;
+    filename?: string;
+    content_type?: string;
+    /** `inline` with a `content_id` for a picture the mail's own body shows, a signature's or a pasted one. */
+    content_disposition?: string;
+    content_id?: string;
+  }[];
   /** The service's SPF and DMARC verdicts, each kept only where it speaks for the sender's From domain. */
   authentication_results?: { spf?: string; dmarc?: string };
 };
@@ -635,16 +642,19 @@ async function mail<T>(c: Coworker, set: Door, path: string, body?: object, once
   return answer.json() as Promise<T>;
 }
 
-/** The most mails the email door lists when its stream opens. */
-const LISTED = 100;
+/** How often the email door pings its stream; one that died without closing is noticed within twice this. */
+const PING = 30_000;
 
 /**
  * Hands each mail its person sends email door `set`'s mailbox to `door`, with its files: one from their
  * address alone that passed the mail service's sender checks, an SPF or a DMARC pass for their own domain,
  * since a From line can be forged. Any other mail there is outside words: an event about its thread on the
  * work lane, with whom it says it is from, its words, its files' names and its checks; its files stay at the
- * service. The stream is kept going, and each time it opens the mail received since a day before the door
- * last took one is listed, so mail that came while it was down is taken; the inbox takes each once, by its id.
+ * service. A picture the mail's body shows is handed over as a file like any other, and named as one shown in
+ * its body, so the coworker tells a signature's logo from a pasted screenshot by what the mail says. The
+ * stream is kept going, and each time it opens every mail received since a day before the door
+ * last took one is listed, page by page, so mail that came while it was down is taken; the inbox takes each
+ * once, by its id. A stream that answers no ping is closed, which opens it again.
  */
 async function mailIn(c: Coworker, door: string, set: Door) {
   const person = secret(c.setup, set.auth as string).toLowerCase();
@@ -657,23 +667,25 @@ async function mailIn(c: Coworker, door: string, set: Door) {
     const from = (/<([^>]*)>/.exec(m.from)?.[1] ?? m.from).trim().toLowerCase();
     const { spf, dmarc } = m.authentication_results ?? {};
     // The service's extracted_text leaves out the lines a mail quotes, which are not the sender's words.
-    const text = [m.subject, (m.extracted_text ?? m.text ?? "").trim()].filter(Boolean).join("\n\n");
+    const words = [m.subject, (m.extracted_text ?? m.text ?? "").trim()].filter(Boolean).join("\n\n");
+    const attached = m.attachments ?? [];
+    const name = (a: (typeof attached)[number]) => a.filename ?? a.attachment_id;
+    // The service marks a picture the mail's body shows inline with a content id: a signature's logo or a
+    // screenshot pasted into the words. Which it is, the coworker reads from the mail, so code only names them.
+    const shown = attached.filter((a) => a.content_disposition === "inline" && a.content_id).map(name);
     if (from !== person || m.from.split("@").length !== 2 || ![spf, dmarc].includes("pass")) {
-      const payload = {
-        from: m.from,
-        text,
-        files: m.attachments?.map((a) => a.filename),
-        checks: { spf, dmarc },
-      };
+      const files = attached.map(name);
+      const payload = { from: m.from, text: words, files, shown_in_body: shown, checks: { spf, dmarc } };
       if (add(c.db, `${door}:others`, id, JSON.stringify(payload), null, null, m.thread_id)) void c.wake();
       return;
     }
-    const files = (m.attachments ?? []).map(async (a) => {
+    const text = shown.length > 0 ? `${words}\n\nShown in the mail's body: ${shown.join(", ")}.` : words;
+    const files = attached.map(async (a) => {
       const at = `/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(a.attachment_id)}`;
       const got = await fetch((await mail<{ download_url: string }>(c, set, at)).download_url);
       if (!got.ok) throw new Error(`its file ${a.filename} could not be downloaded (${got.status})`);
       const data = Buffer.from(await got.arrayBuffer()).toString("base64");
-      return { name: a.filename ?? a.attachment_id, type: a.content_type ?? "", data };
+      return { name: name(a), type: a.content_type ?? "", data };
     });
     taken(c, door, { id, text, files: await Promise.all(files) });
   };
@@ -683,6 +695,19 @@ async function mailIn(c: Coworker, door: string, set: Door) {
       .then(() => took(id))
       .catch((e: Error) => console.error(`${what} took no mail ${id}: ${e.message}`));
   };
+  // Every mail received after `after`, oldest first, a page at a time until the service gives no next page.
+  const listAfter = async (after: string) => {
+    for (let page = ""; ; ) {
+      const listed = await mail<{ messages: { message_id: string }[]; next_page_token?: string }>(
+        c,
+        set,
+        `/messages?ascending=true&limit=100&after=${encodeURIComponent(after)}${page && `&page_token=${encodeURIComponent(page)}`}`,
+      );
+      for (const m of listed.messages) next(m.message_id);
+      if (!listed.next_page_token) return;
+      page = listed.next_page_token;
+    }
+  };
   await keep(c, door, `${what}'s stream`, async () => {
     const ended = Promise.withResolvers<never>();
     // AgentMail's stream is at its API's host with ws for api: wss://ws.agentmail.to for https://api.agentmail.to.
@@ -690,25 +715,31 @@ async function mailIn(c: Coworker, door: string, set: Door) {
     const headers = { authorization: `Bearer ${secret(c.setup, set.key)}` };
     const ws = new WebSocket(stream, { headers });
     socket = ws;
-    ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe", inbox_ids: [set.mailbox] }));
+    let beat: ReturnType<typeof setInterval> | undefined;
+    let answered = true;
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: "subscribe", inbox_ids: [set.mailbox] }));
+      // The service answers a WebSocket ping with a pong. A stream that answered none since the last ping has
+      // died without closing; it is closed, so it opens again and lists what came meanwhile.
+      beat = setInterval(() => {
+        if (!answered) {
+          ended.reject(new Error(`its stream answered no ping in ${PING / 1000} s`));
+          return ws.terminate();
+        }
+        answered = false;
+        ws.ping();
+      }, PING);
+    };
+    ws.addEventListener("pong", () => {
+      answered = true;
+    });
     ws.onmessage = ({ data }) => {
       const e = JSON.parse(String(data));
       if (e.type === "subscribed") {
         const last = lastEvent(c.db, [door, `${door}:others`])?.received_at;
         const after = new Date(last ? Date.parse(last) - 86_400_000 : Date.now()).toISOString();
-        void mail<{ messages: { message_id: string }[] }>(
-          c,
-          set,
-          `/messages?ascending=true&limit=${LISTED}&after=${encodeURIComponent(after)}`,
-        ).then(
-          (listed) => {
-            for (const m of listed.messages) next(m.message_id);
-            if (listed.messages.length === LISTED)
-              console.error(
-                `${what} listed ${LISTED} mails since ${after}; mail after them may not be taken`,
-              );
-          },
-          (error: Error) => console.error(`${what} could not list its mail: ${error.message}`),
+        listAfter(after).catch((error: Error) =>
+          console.error(`${what} could not list its mail since ${after}: ${error.message}`),
         );
       } else if (e.type === "event" && String(e.event_type).startsWith("message.received"))
         next(e.message.message_id);
@@ -718,14 +749,19 @@ async function mailIn(c: Coworker, door: string, set: Door) {
       }
     };
     ws.onclose = ({ code }) => ended.reject(new Error(`the mail service ended its stream (${code})`));
-    return ended.promise;
+    try {
+      return await ended.promise;
+    } finally {
+      clearInterval(beat);
+    }
   });
 }
 
 /**
  * Mails `words`, with `files`, from email door `set`'s mailbox to its person alone, under `id`, which the mail
  * service sends once however often it is tried: as a reply to `last`, the person's last mail, or before they
- * have written at any door, as a new mail whose subject is its first line.
+ * have written at any door, as a new mail whose subject is its first line. It carries the words as they were
+ * written and as HTML, so a mail client shows them formatted.
  */
 async function mailOut(
   c: Coworker,
@@ -744,5 +780,25 @@ async function mailOut(
   const [path, subject] = last
     ? [`/messages/${encodeURIComponent(last.ref)}/reply`, undefined]
     : ["/messages/send", words.split("\n")[0]?.slice(0, 78)];
-  await mail(c, set, path, { to, subject, text: words, attachments }, id);
+  await mail(c, set, path, { to, subject, text: words, html: mailHtml(words), attachments }, id);
 }
+
+/**
+ * `words`, the markdown a coworker writes, as plain HTML a mail client shows in its own font: bold, lists,
+ * links and tables as themselves, each line break kept as it reads in chat, and any HTML in them shown as text.
+ * A table has a thin border and padded cells, which is all the HTML says about how anything looks.
+ */
+const mailHtml = (words: string) =>
+  // Two spaces before a line's end are markdown's line break; Bun 1.4.4's hardSoftBreaks does not change its HTML.
+  Bun.markdown
+    .html(words.replace(/(?<=[^\n])\n(?=[^\n])/g, "  \n"), {
+      noHtmlBlocks: true,
+      noHtmlSpans: true,
+      autolinks: true,
+    })
+    // A table with no border or padding draws cramped in desktop mail clients. Every <table> here is the
+    // renderer's own, since HTML in the words is shown as text.
+    .replaceAll(
+      "<table>",
+      '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse">',
+    );

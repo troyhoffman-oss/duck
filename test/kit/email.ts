@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { connect, createServer, type Socket } from "node:net";
 import type { ServerWebSocket } from "bun";
 import { FROM_CONTAINERS, freePort, until } from "./reach";
 
@@ -20,6 +21,8 @@ export type Sent = {
   to: string[];
   subject?: string;
   text: string;
+  /** The same words as HTML, where it sent them so. */
+  html?: string;
   files: { name: string; bytes: Buffer }[];
   replyTo?: string;
   at: number;
@@ -28,8 +31,9 @@ export type Sent = {
 /**
  * A stand-in for AgentMail for one test, speaking only what duck's email door calls: the stream at /v0, which
  * takes a subscribe with the key as a bearer and sends each mail received as an event, the messages of the
- * coworker's mailbox, listed after a time, got one by one, and their files; and a reply or a new mail, sent
- * once for each idempotency key. The person and a stranger mail the coworker's mailbox.
+ * coworker's mailbox, listed after a time a few at a time as the service may, got one by one, and their files;
+ * and a reply or a new mail, sent once for each idempotency key. The person and a stranger mail the coworker's
+ * mailbox. It answers a ping on the stream with a pong, until it is hushed.
  */
 export function startEmail() {
   const key = randomBytes(24).toString("base64url");
@@ -39,6 +43,7 @@ export function startEmail() {
   const sent: Sent[] = [];
   const sockets = new Set<ServerWebSocket<unknown>>();
   let opened = 0;
+  let pages = 0;
   const base = `/v0/inboxes/${encodeURIComponent(MAILBOX)}/messages`;
   const missing = () => Response.json({ name: "NotFoundError", message: "not found" }, { status: 404 });
 
@@ -65,6 +70,7 @@ export function startEmail() {
           to: string[];
           subject?: string;
           text: string;
+          html?: string;
           attachments?: { filename: string; content: string }[];
         };
         const on = received.get(id);
@@ -75,6 +81,7 @@ export function startEmail() {
           to: body.to,
           subject: body.subject,
           text: body.text,
+          html: body.html,
           files: (body.attachments ?? []).map((a) => ({
             name: a.filename,
             bytes: Buffer.from(a.content, "base64"),
@@ -88,9 +95,16 @@ export function startEmail() {
       }
       if (request.method !== "GET") return missing();
       if (!id) {
+        // A page holds at most four mails whatever the limit asked, as the service's may hold fewer.
         const after = Date.parse(url.searchParams.get("after") ?? "") || 0;
-        const listed = [...received.values()].filter((m) => Date.parse(String(m.timestamp)) > after);
-        return Response.json({ count: listed.length, messages: listed });
+        const at = Number(url.searchParams.get("page_token") ?? 0);
+        const size = Math.min(Number(url.searchParams.get("limit") ?? 100), 4);
+        const all = [...received.values()].filter((m) => Date.parse(String(m.timestamp)) > after);
+        if (url.searchParams.get("ascending") !== "true") all.reverse();
+        const messages = all.slice(at, at + size);
+        if (at > 0) pages += 1;
+        const next_page_token = at + size < all.length ? String(at + size) : undefined;
+        return Response.json({ count: messages.length, limit: size, messages, next_page_token });
       }
       const mail = received.get(id);
       if (!mail) return missing();
@@ -124,17 +138,42 @@ export function startEmail() {
     },
   });
 
+  // The stream reaches the stand-in through a relay that passes its bytes both ways until it is hushed, when it
+  // stops passing them and closes nothing, as a connection that died without closing does. Other calls pass.
+  const hushed = new Set<Socket>();
+  const streams = new Set<[Socket, Socket]>();
+  const relay = createServer((near) => {
+    const far = connect(port, "127.0.0.1");
+    const pair: [Socket, Socket] = [near, far];
+    near.once("data", (first) => {
+      far.write(first);
+      if (first.toString("latin1").startsWith("GET /v0 ")) streams.add(pair);
+      near.pipe(far);
+      far.pipe(near);
+    });
+    for (const [a, b] of [pair, [far, near]] as [Socket, Socket][]) {
+      a.on("error", () => b.destroy());
+      a.on("close", () => {
+        b.destroy();
+        streams.delete(pair);
+      });
+    }
+  });
+  const front = freePort();
+  relay.listen(front, FROM_CONTAINERS.bind);
+
   /**
    * `from`, as `name`, mails the coworker's mailbox `words` under `subject`, with `files`, faring as `checks`
    * says in the sender checks; `on`, a mail the coworker sent, puts it on that mail's thread, quoting it below
-   * the new words as a mail client does. Returns the mail's id and thread.
+   * the new words as a mail client does. A file marked inline is a picture the mail's body shows, as one in a
+   * signature is. Returns the mail's id and thread.
    */
   function wrote(
     from: string,
     name: string,
     subject: string,
     words: string,
-    given: { files?: { name: string; bytes: string }[]; checks?: Checks; on?: Sent } = {},
+    given: { files?: { name: string; bytes: string; inline?: boolean }[]; checks?: Checks; on?: Sent } = {},
   ) {
     const checks = given.checks ?? { spf: "pass", dkim: "pass", dmarc: "pass" };
     const passed = Object.values(checks).includes("pass");
@@ -142,7 +181,11 @@ export function startEmail() {
       const attachment_id = randomUUID();
       stored.set(attachment_id, { name: f.name, type: "text/plain", bytes: Buffer.from(f.bytes) });
       const meta = { filename: f.name, size: f.bytes.length, content_type: "text/plain" };
-      return { attachment_id, ...meta, content_disposition: "attachment" };
+      const shown = f.inline && {
+        content_disposition: "inline",
+        content_id: `<${attachment_id}@harbor.example>`,
+      };
+      return { attachment_id, ...meta, ...(shown || { content_disposition: "attachment" }) };
     });
     const quoted = given.on
       ? `\n\nOn ${new Date().toUTCString()}, ${MAILBOX} wrote:\n> ${given.on.text}`
@@ -180,7 +223,7 @@ export function startEmail() {
     /** The coworker's email door as duck's setup writes it, pointing at the stand-in. */
     door: {
       kind: "email",
-      address: `http://${FROM_CONTAINERS.host}:${port}`,
+      address: `http://${FROM_CONTAINERS.host}:${front}`,
       mailbox: MAILBOX,
       key: "HARBOR_WREN_MAIL_KEY",
       auth: "HARBOR_ROSA_MAIL",
@@ -191,6 +234,19 @@ export function startEmail() {
     online: (seconds = 60) => until("the email door's stream open", () => sockets.size > 0, seconds),
     /** How many streams have been opened. */
     opened: () => opened,
+    /** How many pages after the first a listing of the mailbox's mail asked for. */
+    pages: () => pages,
+    /** Hushes every stream open now: none of its bytes pass either way any more, and nothing closes it. */
+    hush() {
+      for (const pair of streams) {
+        for (const s of pair) {
+          s.unpipe();
+          s.pause();
+          hushed.add(s);
+        }
+        streams.delete(pair);
+      }
+    },
     person: {
       send: (subject: string, words: string, given?: Parameters<typeof wrote>[4]) =>
         wrote(ROSA, "Rosa Alvarez", subject, words, given),
@@ -203,7 +259,10 @@ export function startEmail() {
         return found;
       },
     },
-    stranger: { send: (subject: string, words: string) => wrote(SAM, "Sam Okafor", subject, words) },
+    stranger: {
+      send: (subject: string, words: string, given?: Parameters<typeof wrote>[4]) =>
+        wrote(SAM, "Sam Okafor", subject, words, given),
+    },
     /** Fails if the coworker's mailbox sends anything in the next `seconds`. */
     async quiet(seconds: number) {
       const before = sent.length;
@@ -213,6 +272,8 @@ export function startEmail() {
     /** Every mail the coworker's mailbox sent, to anyone. */
     sent,
     [Symbol.asyncDispose]: async () => {
+      for (const s of hushed) s.destroy();
+      relay.close();
       await server.stop(true);
     },
   };
