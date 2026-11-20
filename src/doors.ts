@@ -1,11 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { schnorr } from "@noble/curves/secp256k1.js";
 import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-ai/advanced-imessage/grpc";
 import { heard, told } from "./archive";
 import { aboutSession, add, broken, type Event, lastEvent, waiting } from "./inbox";
 import type { Coworker } from "./run";
+import { buzzKey } from "./setup/coworkers";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
 
 /** A file as it crosses a door: its name, media type and bytes in base64. */
@@ -251,8 +251,7 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
   const reply = place.reply ? ["--reply-to", place.reply] : [];
   // Buzz refuses a message whose "@word" names no member, unless a mention is given; it then leaves the word as
   // text. Its own key is always a member, and the tag it adds notifies no one and starts no run.
-  const own = Buffer.from(schnorr.getPublicKey(Buffer.from(env.BUZZ_PRIVATE_KEY, "hex"))).toString("hex");
-  const mention = ["--mention", own];
+  const mention = ["--mention", buzzKey(c.setup, c.name)];
   const attached = files.flatMap((f) => ["--file", f]);
   await buzz(
     env,
