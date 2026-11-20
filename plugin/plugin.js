@@ -87,7 +87,10 @@ export function apply(ctx) {
     const tags = Object.entries({ ar: "1", d: id, h: d.channel, type: "duck.request", title: "Request" });
     const signal = AbortSignal.timeout(WAIT_MS);
     const template = { kind: ARTIFACT, created_at: Math.floor(Date.now() / 1000), content: text };
-    const request = await s.configArtifactWriter.sign({ ...template, tags: [...tags, ["op", "create"]] }, signal);
+    const request = await s.configArtifactWriter.sign(
+      { ...template, tags: [...tags, ["op", "create"]] },
+      signal,
+    );
     await s.configArtifactWriter.publish(request, signal);
     for (const end = Date.now() + WAIT_MS; Date.now() < end; await sleep(500)) {
       const [answer] = await current(d, { "#d": [id] });
@@ -103,7 +106,9 @@ export function apply(ctx) {
 
   /** The name duck knows the coworker whose Buzz key is `pubkey` by, from its offer or its preferences. */
   async function nameOf(pubkey) {
-    const own = (await published(await duck(), "duck.offer", "duck.person")).find((a) => agentOf(a) === pubkey);
+    const own = (await published(await duck(), "duck.offer", "duck.person")).find(
+      (a) => agentOf(a) === pubkey,
+    );
     if (own) return JSON.parse(own.content).coworker;
     throw new Error("duck never offered you this coworker.");
   }

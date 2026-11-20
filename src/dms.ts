@@ -245,7 +245,7 @@ const revise = (
     45010,
     [
       ...Object.entries({ ar: "1", d, h, type, title }),
-      ...(head ? [["op", "update"], ["prev", head.id]] : [["op", "create"]]),
+      ...(head ? Object.entries({ op: "update", prev: head.id }) : [["op", "create"]]),
       ...tags,
     ],
     content,
@@ -515,9 +515,13 @@ async function offer(setup: Setup, duck: ReturnType<typeof connect>) {
     const { for: person } = factsOf(setup, name);
     if (!person) continue;
     const content = JSON.stringify({ version: 1, coworker: name });
-    await publishArtifact(duck, person, name, ["duck.offer", `${name}, made for you`, content], [
-      ["agent", buzzKey(setup, name)],
-    ]).catch((e: Error) => console.error(`${name}'s offer, sent again at duck's next start: ${e.message}`));
+    await publishArtifact(
+      duck,
+      person,
+      name,
+      ["duck.offer", `${name}, made for you`, content],
+      [["agent", buzzKey(setup, name)]],
+    ).catch((e: Error) => console.error(`${name}'s offer, sent again at duck's next start: ${e.message}`));
   }
 }
 
@@ -595,5 +599,7 @@ export function personFor(setup: Setup, member: string) {
   if (asked.exitCode === 0) return asked.stdout.toString().trim();
   if (asked.exitCode === 1)
     throw new Error(asked.stderr.toString().trim() || "duck could not reach Buzz in 30 s");
-  throw new Error("duck's channels are off while the firm's duck container is not running; duck install starts it");
+  throw new Error(
+    "duck's channels are off while the firm's duck container is not running; duck install starts it",
+  );
 }
