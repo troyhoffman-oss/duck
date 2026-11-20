@@ -236,7 +236,7 @@ async function channelFor(duck: ReturnType<typeof connect>, to: string) {
  */
 const revise = (
   duck: ReturnType<typeof connect>,
-  [h, d]: string[],
+  [h, d]: [string, string],
   [type, title, content]: [string, string, string],
   head?: Event,
   tags: string[][] = [],
