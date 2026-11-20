@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { schnorr } from "@noble/curves/secp256k1.js";
 import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-ai/advanced-imessage/grpc";
 import { heard, told } from "./archive";
 import { aboutSession, add, type Event, lastEvent, waiting } from "./inbox";
@@ -13,7 +14,7 @@ type DoorFile = { name: string; type: string; data: string };
  * Where in Buzz a message was written: the channel, the event an answer threads under, if any, the root of
  * its thread, if it is in one, and whether the channel is a DM.
  */
-type Place = { channel: string; reply?: string; root?: string; dm?: boolean; key?: string };
+type Place = { channel: string; reply?: string; root?: string; dm?: boolean };
 
 const PATH = new RegExp(`(?:${HOME}|${FILES})/[^\\s"'\`<>()]+`, "g");
 
@@ -254,12 +255,12 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
     : { channel: JSON.parse((await buzz(env, ["dms", "open", "--pubkey", owner])).toString()).dm_id };
   const reply = place.reply ? ["--reply-to", place.reply] : [];
   // Buzz refuses a message whose "@word" names no member, unless a mention is given; it then leaves the word as
-  // text. The one it answers is in the channel, so mentioning them costs nothing.
-  const to = ["--mention", place.key ?? owner];
+  // text. Its own key is always a member, and the tag it adds notifies no one and starts no run.
+  const self = Buffer.from(schnorr.getPublicKey(Buffer.from(env.BUZZ_PRIVATE_KEY, "hex"))).toString("hex");
   const attached = files.flatMap((f) => ["--file", f]);
   await buzz(
     env,
-    ["messages", "send", "--channel", place.channel, ...reply, ...to, ...attached, "--content", "-"],
+    ["messages", "send", "--channel", place.channel, ...reply, "--mention", self, ...attached, "--content", "-"],
     text,
   );
 }
