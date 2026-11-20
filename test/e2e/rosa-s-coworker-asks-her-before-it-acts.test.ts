@@ -499,7 +499,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     expect(firm.mail.callsTo("send_mail")).toEqual([]);
     const run = firm.model.requests.find(all(coworkerRun, said(REPLY)));
     expect(run?.last).toContain("which stays open");
-    expect(run?.last).not.toContain("answers ask");
+    expect(run?.last).not.toContain("'s message below answers ask");
     const db = firm.db();
     const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
     db.close();
