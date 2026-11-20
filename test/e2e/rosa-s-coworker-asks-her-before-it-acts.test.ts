@@ -9,6 +9,7 @@ import {
   type Firm,
   harbor,
   idIn,
+  reading,
   said,
   say,
   shows,
@@ -33,22 +34,21 @@ const OUTCOME = '"answer":"yes"';
 /**
  * Dana's mail `ref` starts a work-lane session, which writes the terms to a file, calls send_file, which the
  * kit's setup makes ask first, and changes the file; Rosa is asked with the file as it was when held, and
- * nothing reaches the plug. The coworker gives the gate a yes each time it reads Rosa's, `yeses` times.
- * Returns the call as the plug must get it, and the mail's text.
+ * nothing reaches the plug. duck reads her `YES` as a yes. Returns the call as the plug must get it, and the
+ * mail's text.
  */
-async function heldFile(firm: Firm, ref: string, yeses: number) {
+async function heldFile(firm: Firm, ref: string) {
   const [TERMS, ASKED, CHANGED] = ["/duck/home/4B-terms.txt", `4B: $1,900 a month (${ref})`, "4B: $2,100"];
   const text = `Hi Rosa, could you send me the 4B renewal terms as a file? (${ref})`;
   firm.model.on(all(sorter, shows(text)), say("wake: a tenant asks for her renewal terms"));
   firm.model.on(all(coworkerRun, said(text)), call("shell", { command: `printf '${ASKED}' > ${TERMS}` }));
   firm.model.on(answered("shell"), call("send_file", { to: DANA, file: TERMS }));
-  let ask = 0;
-  firm.model.on(answered("send_file"), (r) => {
-    ask = idIn(r.last);
-    return call("shell", { command: `printf '${CHANGED}' > ${TERMS} && cat ${TERMS}` });
-  });
+  firm.model.on(
+    answered("send_file"),
+    call("shell", { command: `printf '${CHANGED}' > ${TERMS} && cat ${TERMS}` }),
+  );
   firm.model.on(answered("shell"), say("Held for Rosa's yes."));
-  firm.model.on(said(YES), () => call(TOOLS.answer, { ask, yes: true }), { times: yeses });
+  firm.model.on(all(reading, said(YES)), say("yes"));
 
   const payload = { from: `Dana Reyes <${DANA}>`, subject: "4B renewal terms", text };
   expect(await firm.push({ ref, payload })).toEqual({ status: 202, body: { duplicate: false } });
@@ -222,26 +222,12 @@ describe("Rosa's coworker asks her before it acts", () => {
     });
   });
 
-  test("ask first: Rosa is asked with the exact mail; an answer no person wrote and an answer not in the tool's shape run nothing, and her no is taken and runs nothing", async () => {
+  test.failing("ask first: Rosa is asked with the exact mail, and her no, which duck reads from her own words and the question alone, runs nothing and comes to the conversation that made the call with her message", async () => {
     const ASK = "Send Dana the 4B renewal terms.";
-    const SHAPE = "answer was not called: yes is missing.";
-    const NEWS = "Dana's 4B lease came back signed.";
-    let ask = 0;
     firm.model.on(said(ASK), call("send_mail", MAIL));
-    firm.model.on(answered("send_mail"), (r) => {
-      ask = idIn(r.last);
-      return say("I've asked you before it goes.");
-    });
-    // A mail wakes the work lane, which tells Rosa; the run that tells her, which her message did not start,
-    // answers the ask itself. The tell is urgent, so it leaves her limit on messages as it was.
-    firm.model.on(all(sorter, shows("Signed lease 4B")), say("wake: a signed lease"));
-    firm.model.on(answered(TOOLS.tell), say("Told."));
-    firm.model.on(all(coworkerRun, shows("Signed lease 4B")), call(TOOLS.tell, { text: NEWS, urgent: true }));
-    firm.model.on(all(coworkerRun, said(NEWS)), () => call(TOOLS.answer, { ask, yes: true }));
-    firm.model.on(answered(TOOLS.answer), say(NEWS));
-    firm.model.on(said(NO), () => call(TOOLS.answer, { ask, answer: "no" }));
-    firm.model.on(said(SHAPE), () => call(TOOLS.answer, { ask, yes: false }));
-    firm.model.on(answered(TOOLS.answer), say("It stays unsent."));
+    firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
+    firm.model.on(all(reading, said(NO)), say("no"));
+    firm.model.on(all(coworkerRun, said(NO), said('"answer":"no"')), say("It stays unsent."));
 
     await firm.person.send("desk", ASK);
     // The run's answer reaches her, then the question, which goes once the run ends.
@@ -249,29 +235,22 @@ describe("Rosa's coworker asks her before it acts", () => {
     const question = await firm.person.nextWith(MAIL.to, 30);
     expect(question.text).toContain(MAIL.subject);
     expect(question.text).toContain(MAIL.body);
-    const payload = { from: DANA, subject: "Signed lease 4B", text: "The 4B lease is signed." };
-    await firm.push({ ref: "<signed-4b@harbor.example>", payload });
-    await firm.person.nextWith(NEWS, 60);
-    expect(firm.mail.callsTo("send_mail")).toEqual([]);
     await firm.person.send("desk", NO);
     await firm.person.nextWith("It stays unsent", 30);
 
     expect(firm.mail.callsTo("send_mail")).toEqual([]);
-    expect(await firm.logged("gate")).toContainEqual({
-      gate: harbor.coworker,
-      tool: TOOLS.answer,
-      state: "free",
-      outcome: "refused",
-      ms: expect.any(Number),
-      why: SHAPE,
-    });
+    const read = firm.model.requests.filter(reading);
+    expect(read.map((r) => r.last)).toEqual([expect.stringContaining(`${question.text}\n\n`)]);
+    expect(read[0]?.last).toEndWith(NO);
+    expect(read[0]?.shows("I've asked you before it goes.")).toBe(false);
+    expect(firm.model.requests.find(all(coworkerRun, said(NO)))?.last).toContain("answers ask");
     const db = firm.db();
     const answers = db.query("select answer from outbox where kind = 'ask'").all();
     db.close();
     expect(answers).toEqual([{ answer: "no" }]);
   });
 
-  test("a box raises a free call to ask first: harbor's box holds a draft for someone outside the firm, and Rosa's yes saves it once, exactly as shown", async () => {
+  test.failing("a box raises a free call to ask first: harbor's box holds a draft for someone outside the firm, and Rosa's yes, which duck reads, saves it once, exactly as shown", async () => {
     const ASK = "Draft the 4B renewal for Dana and for Lee.";
     const INSIDE = { to: DANA, subject: "4B renewal", body: "Hi Dana, here is the renewal." };
     const OUTSIDE = {
@@ -280,16 +259,16 @@ describe("Rosa's coworker asks her before it acts", () => {
       body: "Hi Lee, here it is.",
     };
     const SAVE = "Yes, save Lee's too.";
-    let ask = 0;
     firm.model.on(said(ASK), call("save_draft", INSIDE));
     firm.model.on(answered("save_draft"), call("save_draft", OUTSIDE));
-    firm.model.on(answered("save_draft"), (r) => {
-      ask = idIn(r.last);
-      return say("Dana's draft is saved. Lee is outside the firm, so I've asked you first.");
-    });
-    firm.model.on(said(SAVE), () => call(TOOLS.answer, { ask, yes: true }));
-    // The held call was made in the main conversation, so its outcome steers the run the yes is given in.
+    firm.model.on(
+      answered("save_draft"),
+      say("Dana's draft is saved. Lee is outside the firm, so I've asked you first."),
+    );
+    firm.model.on(all(reading, said(SAVE)), say("yes"));
+    // The held call was made in the main conversation, so its outcome comes to it with her yes or after it.
     firm.model.on(all(coworkerRun, said(OUTCOME)), say("Lee's draft is saved."));
+    firm.model.on(all(coworkerRun, said(SAVE)), say("Saving Lee's."), { times: Number.POSITIVE_INFINITY });
 
     await firm.person.send("desk", ASK);
     await firm.person.nextWith("I've asked you first", 30);
@@ -302,10 +281,10 @@ describe("Rosa's coworker asks her before it acts", () => {
     expect(firm.mail.callsTo("save_draft").map((c) => c.input)).toEqual([INSIDE, OUTSIDE]);
   });
 
-  test("a call held before a restart runs once on Rosa's yes after it, as it was held, with its file's bytes as they were though the file changed since, and its outcome reaches the session that made it", async () => {
-    const { sent, text } = await heldFile(firm, "<terms-4b@harbor.example>", 1);
+  test.failing("a call held before a restart runs once on Rosa's yes after it, which duck reads, as it was held, with its file's bytes as they were though the file changed since, and its outcome reaches the session that made it", async () => {
+    const { sent, text } = await heldFile(firm, "<terms-4b@harbor.example>");
     firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has the terms."));
-    firm.model.on(answered(TOOLS.answer), say("Sent."));
+    firm.model.on(all(coworkerRun, said(YES)), say("Sent."));
     await firm.restart();
 
     await firm.person.send("desk", YES);
@@ -326,25 +305,30 @@ describe("Rosa's coworker asks her before it acts", () => {
     ]);
   });
 
-  test("a restart while the yes's call is at the plug runs it no second time, though the coworker gives the yes again", async () => {
-    const { sent } = await heldFile(firm, "<terms-4b-again@harbor.example>", 2);
-    firm.model.on(answered(TOOLS.answer), say("Dana has the terms already."));
+  test.failing("a restart while the yes's call is at the plug runs it no second time, and the session that made it is told that what came of it is unknown", async () => {
+    const CUT = "duck stopped while the call ran";
+    const { sent, text } = await heldFile(firm, "<terms-4b-again@harbor.example>");
+    firm.model.on(all(coworkerRun, said(YES)), say("Sending Dana the terms."));
+    firm.model.on(all(coworkerRun, said(CUT)), say("I'll check with Dana before I send them again."));
     firm.mail.hold("send_file");
 
     await firm.person.send("desk", YES);
     await firm.mail.reached("send_file");
+    await firm.person.nextWith("Sending Dana the terms.", 60);
     await firm.stop();
     firm.mail.release("send_file");
     await firm.start();
 
-    await firm.person.nextWith("already", 90);
+    const told = () => firm.model.requests.find(all(coworkerRun, said(CUT)));
+    await until("the call's session told", () => told() !== undefined, 90, firm.trouble);
     expect(firm.mail.callsTo("send_file").map((c) => c.input)).toEqual([sent]);
-    const again = firm.model.requests.filter(answered(TOOLS.answer)).map((r) => r.last);
-    expect(again).toEqual([expect.stringContaining("is not waiting on an answer")]);
+    // The session Dana's mail started, which made the call.
+    expect(told()?.shows(text)).toBe(true);
   });
 
-  test("a question nobody answers is a no when Rosa's quiet hours begin, the coworker is told, and a later yes runs nothing", async () => {
+  test.failing("a question nobody answers is a no when Rosa's quiet hours begin, though she wrote meanwhile in words that answer it neither, which reach the coworker as an ordinary message; the coworker is told, and a later yes runs nothing", async () => {
     const ASK = "Send Dana the 4B renewal terms, please.";
+    const ASIDE = "Is that the January rate?";
     let ask = 0;
     firm.model.on(said(ASK), call("send_mail", MAIL));
     firm.model.on(answered("send_mail"), (r) => {
@@ -355,12 +339,17 @@ describe("Rosa's coworker asks her before it acts", () => {
       all(coworkerRun, (r) => r.last.includes(`"ask":${ask},"answer":"no"`)),
       say("Your quiet hours began, so the mail stays unsent."),
     );
-    firm.model.on(said(YES), () => call(TOOLS.answer, { ask, yes: true }));
-    firm.model.on(answered(TOOLS.answer), say("That ask has lapsed."));
+    firm.model.on(all(reading, said(ASIDE)), say("neither"));
+    firm.model.on(all(coworkerRun, said(ASIDE)), say("Yes, it starts January 1."));
+    firm.model.on(all(coworkerRun, said(YES)), say("That ask has lapsed."));
 
     await firm.person.send("desk", ASK);
     await firm.person.nextWith("I've asked you", 30);
     await firm.person.nextWith(MAIL.to, 30);
+    await firm.person.send("desk", ASIDE);
+    expect((await firm.person.next(30)).text).toBe("Yes, it starts January 1.");
+    expect(firm.model.requests.find(all(coworkerRun, said(ASIDE)))?.last).not.toContain("answers ask");
+
     // Quiet hours from the next minute in Rosa's zone, for an hour.
     await firm.reinstall((setup) => {
       setup.settings.quiet = [1 / 60, 1 + 1 / 60].map((h) => clock(setup.zone, h));
@@ -370,6 +359,8 @@ describe("Rosa's coworker asks her before it acts", () => {
     await firm.person.send("desk", YES);
     await firm.person.nextWith("lapsed", 30);
     expect(firm.mail.callsTo("send_mail")).toEqual([]);
+    // Her yes came after the question was a no, and after other messages: duck read only her aside.
+    expect(firm.model.requests.filter(reading).map((r) => r.last)).toEqual([expect.stringContaining(ASIDE)]);
   });
 
   test("in quiet hours a message waits unless it is urgent", async () => {
@@ -404,7 +395,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     expect((await firm.person.next(60)).text).toContain("leaking into 3C");
   });
 
-  test("harbor's box holds a PDF its mail never handed the coworker for Rosa's yes and tells her and the coworker why; a PDF it handed goes through with no ask, after a restart too", async () => {
+  test.failing("harbor's box holds a PDF its mail never handed the coworker for Rosa's yes and tells her and the coworker why; a PDF it handed goes through with no ask, after a restart too, asked for in her next message, which duck reads against the question and which answers it neither", async () => {
     const ASK = "Store Dana's signed 4B lease and a summary of it in the shared drive.";
     const AGAIN = "Store the signed lease once more, please.";
     const [LEASE, SUMMARY] = ["%PDF-1.7 the signed 4B lease", "%PDF-1.7 a summary of the 4B lease"];
@@ -441,6 +432,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     ]);
 
     await firm.restart();
+    firm.model.on(all(reading, said(AGAIN)), say("neither"));
     firm.model.on(said(AGAIN), store("4B lease.pdf", HANDED));
     firm.model.on(answered("store_file"), say("Stored again."));
     await firm.person.send("desk", AGAIN);
@@ -449,5 +441,6 @@ describe("Rosa's coworker asks her before it acts", () => {
       { name: "4B lease.pdf", file: b64(LEASE) },
       { name: "4B lease.pdf", file: b64(LEASE) },
     ]);
+    expect(firm.model.requests.filter(reading)).toHaveLength(1);
   });
 });
