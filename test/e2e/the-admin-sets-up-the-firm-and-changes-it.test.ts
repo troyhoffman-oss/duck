@@ -321,4 +321,47 @@ describe("The admin sets up the firm and changes it", () => {
     await firm.person.send("desk", ASK);
     expect((await firm.person.next(60)).text).toContain(offset(harbor.zone));
   });
+
+  test("the how-tos an earlier Hermes agent made or changed land in the coworker's home whole, for its dream to read; Hermes's stock catalog and retired how-tos stay behind", async () => {
+    const profile = mkdtempSync(join(tmpdir(), "hermes-"));
+    cpSync(join(EXPORTS, "hermes-profile"), profile, { recursive: true });
+    const store = new Database(join(profile, "state.db"));
+    store.exec(readFileSync(join(EXPORTS, "hermes-state.sql"), "utf8"));
+    store.close();
+    const write = (path: string, content: string) => Bun.write(join(profile, "skills", path), content);
+    const skill = (dir: string, name: string, words: string) =>
+      write(`${dir}/SKILL.md`, `---\nname: ${name}\ndescription: ${words}\n---\n\n${words}\n`);
+    await skill("harbor/dock-inspection", "dock-inspection", "Walk the dock with the crew lead on Fridays at 9.");
+    await write("harbor/dock-inspection/references/form.md", "Log each loose cleat with its berth number.\n");
+    await skill("email/crew-notes", "short-crew-notes", "Notes to the dock crew are three lines at most.");
+    await skill("weather/tide-tables", "tide-tables", "Read the tide tables.");
+    await skill("harbor/old-roster", "old-roster", "Send the roster to the old office.");
+    await write(
+      ".usage.json",
+      JSON.stringify({
+        "dock-inspection": { created_by: "agent", patch_count: 0, state: "active" },
+        "short-crew-notes": { created_by: null, patch_count: 2, state: "stale" },
+        "tide-tables": { created_by: null, patch_count: 0, state: "active" },
+        "old-roster": { created_by: "agent", patch_count: 1, state: "archived" },
+      }),
+    );
+    const before = "/duck/home/before/hermes/skills";
+    firm.model.on(all(workLane, said("dreaming.md")), (r) =>
+      call("shell", {
+        command: `cat ${/\/\S+dreaming\.md/.exec(r.last)?.[0]} ${before}/email/crew-notes/SKILL.md ${before}/harbor/dock-inspection/references/form.md; ls -R ${before}`,
+      }),
+    );
+    firm.model.on(answered("shell"), say("Dreamed."));
+
+    const printed = await firm.import("hermes", profile);
+    expect(printed).toContain("copied skills/email/crew-notes, skills/harbor/dock-inspection to ");
+    await until("the dream", () => firm.model.requests.some(answered("shell")), 60, firm.trouble);
+    const read = firm.model.requests.find(answered("shell"))?.last ?? "";
+    expect(read).toContain("A how-to names that product's tools, not yours");
+    expect(read).toContain("Log each loose cleat with its berth number.");
+    expect(read).toContain("Notes to the dock crew are three lines at most.");
+    expect(read).not.toContain("tide-tables");
+    expect(read).not.toContain("old-roster");
+    expect(await firm.import("hermes", profile)).not.toContain("copied");
+  });
 });

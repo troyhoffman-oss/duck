@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 /**
  * A message a person saw in another product, in the archive's shape: the session it was in there and its
@@ -280,26 +280,53 @@ function hermes(path: string, found: Found) {
   }
 }
 
-/** What an earlier product kept besides conversations, by kind, as globs in the folder it keeps them in. */
-const MATERIAL: Record<string, string[]> = { hermes: ["memories/*.md", "cron/jobs.json"] };
+/**
+ * The folders of the how-tos a Hermes agent made or changed and has not retired, in its profile at `path`; its
+ * other skills are Hermes's own catalog. Its usage file keys a skill by the name in its SKILL.md, else by its
+ * folder's name (tools/skill_usage.py).
+ */
+function hermesHowtos(path: string) {
+  const file = join(path, "skills", ".usage.json");
+  const usage: Record<string, { created_by: string | null; patch_count: number; state: string }> = existsSync(file)
+    ? JSON.parse(readFileSync(file, "utf8"))
+    : {};
+  return [...new Bun.Glob("skills/**/SKILL.md").scanSync(path)].map(dirname).filter((dir) => {
+    const head = readFileSync(join(path, dir, "SKILL.md"), "utf8").split(/^---[ \t]*$/m)[1] ?? "";
+    const use = usage[/^name:[ \t]*["']?([^"'\n]*)/m.exec(head)?.[1]?.trim() || basename(dir)];
+    return use && (use.created_by || use.patch_count > 0) && use.state !== "archived";
+  });
+}
 
 /**
- * Copies what the earlier product of `kind` remembered and scheduled, from its folder at `path`, into `folder`
- * under the kind's name, and says what it copied. A file already there is the coworker's own and is left as it is.
+ * What an earlier product kept besides conversations, by kind, as globs in the folder it keeps them in. A glob
+ * ending in `/**` is a folder, and the import names the folder rather than its files.
+ */
+const MATERIAL: Record<string, (path: string) => string[]> = {
+  hermes: (path) => ["memories/*.md", "cron/jobs.json", ...hermesHowtos(path).map((dir) => `${dir}/**`)],
+};
+
+/**
+ * Copies what the earlier product of `kind` remembered, wrote down how to do and scheduled, from its folder at
+ * `path`, into `folder` under the kind's name, and says what it copied. A file already there is the coworker's own
+ * and is left as it is.
  */
 export function importMaterial(kind: string, path: string, folder: string): string[] {
-  const globs = MATERIAL[kind];
-  if (!globs || !statSync(path).isDirectory()) return [];
-  const copied = globs
-    .flatMap((glob) => [...new Bun.Glob(glob).scanSync(path)])
-    .filter((file) => {
-      const to = join(folder, kind, file);
-      if (existsSync(to)) return false;
-      mkdirSync(dirname(to), { recursive: true });
-      copyFileSync(join(path, file), to);
-      return true;
-    });
-  return copied.length > 0 ? [`copied ${copied.sort().join(", ")} to ${join(folder, kind)}`] : [];
+  const material = MATERIAL[kind];
+  if (!material || !statSync(path).isDirectory()) return [];
+  const copied = new Set(
+    material(path).flatMap((glob) =>
+      [...new Bun.Glob(glob).scanSync(path)]
+        .filter((file) => {
+          const to = join(folder, kind, file);
+          if (existsSync(to)) return false;
+          mkdirSync(dirname(to), { recursive: true });
+          copyFileSync(join(path, file), to);
+          return true;
+        })
+        .map((file) => (glob.endsWith("/**") ? glob.slice(0, -3) : file)),
+    ),
+  );
+  return copied.size > 0 ? [`copied ${[...copied].sort().join(", ")} to ${join(folder, kind)}`] : [];
 }
 
 /** One importer per source, by the kind `duck import` names. */
