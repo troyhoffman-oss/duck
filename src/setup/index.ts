@@ -94,9 +94,11 @@ export type Settings = {
   paused?: string | false;
   quiet?: [string, string] | null;
   one_message_per?: string;
+  /** Its person's time zone; the firm's is the default. */
+  zone?: string;
   jobs?: { calls?: number };
 };
-export const SETTINGS = ["paused", "quiet", "one_message_per"] as const;
+export const SETTINGS = ["paused", "quiet", "one_message_per", "zone"] as const;
 
 /** The states a tool can have in setup (SPEC part 9). */
 const TOOL_STATES = ["free", "ask first", "removed"];
@@ -107,7 +109,7 @@ const SORTER_MODES = ["off", "observe", "on"];
 /** The parts of a firm's `duck.yaml` this build reads (SPEC part 1). */
 export type Setup = {
   firm: string;
-  /** The firm's time zone, which is also each coworker's. */
+  /** The firm's time zone, and each coworker's person's where they set none. */
   zone: string;
   listen: string;
   storage: { folder: string };
@@ -198,7 +200,7 @@ export const jobCalls = (setup: Setup) => settingsOf(setup).jobs?.calls ?? setup
 /** Coworker `coworker`'s setting `key`: the firm's where the setup locks it or its person never changed it. */
 export function setting<K extends (typeof SETTINGS)[number]>(setup: Setup, coworker: string, key: K) {
   const own = settingsOf(setup, coworker);
-  const firm: Settings = { paused: false, ...setup.settings };
+  const firm: Settings = { paused: false, ...setup.settings, zone: setup.zone };
   return setup.settings.locked?.includes(key) || !(key in own) ? firm[key] : own[key];
 }
 
@@ -230,7 +232,9 @@ export const claimed = (setup: Setup) => made(setup).filter((c) => factsOf(setup
  */
 export const personOf = (setup: Setup, coworker: string): Person => ({
   name: factsOf(setup, coworker).name ?? "",
-  zone: setup.zone,
+  get zone() {
+    return setting(setup, coworker, "zone") as string;
+  },
   get quiet() {
     return setting(setup, coworker, "quiet") ?? null;
   },
@@ -241,6 +245,13 @@ export const personOf = (setup: Setup, coworker: string): Person => ({
     return setting(setup, coworker, "paused") || null;
   },
 });
+
+/** IANA time zone `zone` as Intl names it, such as America/Chicago, or undefined where it is none. */
+export function zoneOf(zone: string) {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions().timeZone;
+  } catch {}
+}
 
 /** Whether `plug` is given to `coworker`. */
 export const gives = (plug: Plug, coworker: string) =>
@@ -401,11 +412,8 @@ export function check(folder: string): string[] {
   if (!(setup.model.route in routes))
     problems.push(`model route "${setup.model.route}" is not one of: ${Object.keys(routes).join(", ")}`);
   if (setup.model.route === "claude-login") problems.push(...loginProblems(setup.model.login));
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: setup.zone ?? "" });
-  } catch {
+  if (!zoneOf(setup.zone ?? ""))
     problems.push(`zone is "${setup.zone ?? ""}"; it is the firm's time zone, such as America/Chicago`);
-  }
   if (!/^\d\d:\d\d$/.test(setup.settings?.quiet?.[0] ?? "") || !/^\d\d:\d\d$/.test(setup.settings.quiet[1]))
     problems.push("settings.quiet is the firm's default quiet hours: two times such as 21:00 and 07:00");
   for (const name of setup.settings?.locked ?? [])

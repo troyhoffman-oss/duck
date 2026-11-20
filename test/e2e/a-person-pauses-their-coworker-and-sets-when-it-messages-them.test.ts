@@ -6,6 +6,7 @@ import {
   answered,
   type Buzz,
   call,
+  clock,
   coworkerRun,
   E2E,
   type Firm,
@@ -34,6 +35,26 @@ const TOLD = "Lee paid 2A's November rent.";
 const [HELLO, REPLY] = ["Anything new on 4B?", "Nothing new on 4B since yesterday."];
 const LOCKED = "Your firm sets that for every coworker, so nothing changed.";
 const COST = "Model use this month at list price: $";
+const SET = "Done: that coworker's setting is changed.";
+/** Rosa's own time zone, hours from the firm's at every time of year. */
+const ZONE = "Asia/Tokyo";
+
+/** `zone`'s offset from UTC now, as goose's turn-context block writes it, such as +09:00. */
+const offsetIn = (zone: string) =>
+  new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longOffset" })
+    .format(new Date())
+    .replace(/.*GMT/, "") || "+00:00";
+
+/** duck's answer to `words`, which Rosa writes in her DM with duck, whose Buzz key is `duck`. */
+async function answerTo(buzz: Buzz, duck: string, words: string) {
+  const before = (await buzz.dmOf("rosa", duck)).length;
+  await buzz.write("rosa", "dm", words, { to: duck });
+  for (const end = Date.now() + 60_000; ; await Bun.sleep(250)) {
+    const answers = await buzz.dmOf("rosa", duck);
+    if (answers.length > before) return answers[before]?.content;
+    if (Date.now() > end) throw new Error(`duck did not answer "${words}" in 60 s`);
+  }
+}
 
 // A person's own settings (SPEC part 1, Settings) through duck's plugin, driven as Rosa's desktop drives it,
 // against a real relay and a real firm. One relay and one firm for every step, which run in order.
@@ -146,5 +167,116 @@ describe("a person pauses their coworker and sets when it messages them", () => 
       expect(await buzz.query("theo", [{ kinds: [45010], "#d": [d] }])).toEqual([]);
     },
     E2E,
+  );
+
+  test(
+    "its person sets their own time zone in duck's DM, and one that is not a zone is refused saying so; the coworker's clock, the time the model sees and a repeating timer then go by theirs",
+    async () => {
+      const duck = firm.duckKey as string;
+      const file = join(firm.folder, "storage", harbor.coworker, "settings.json");
+      expect(await answerTo(buzz, duck, `set ${harbor.coworker} zone Mars/Olympus`)).toBe(
+        '"Mars/Olympus" is not a time zone; write one such as America/Chicago, so nothing changed.',
+      );
+      expect(JSON.parse(readFileSync(file, "utf8")).zone).toBeUndefined();
+      const before = await firm.claimInstall();
+      expect(await answerTo(buzz, duck, `set ${harbor.coworker} zone ${ZONE}`)).toBe(SET);
+      expect(JSON.parse(readFileSync(file, "utf8")).zone).toBe(ZONE);
+      // Dreaming's repeating timer moved to its next time in Rosa's zone (SPEC part 3).
+      const { timers } = Bun.YAML.parse(readFileSync(join(firm.folder, "duck.yaml"), "utf8")) as {
+        timers: { dreaming: string };
+      };
+      {
+        using db = firm.db();
+        const dream = db
+          .query<{ at: string }, []>(
+            "select at from timers where note like '%dreaming.md%' and repeat is not null",
+          )
+          .get();
+        expect(dream?.at).toBe(Bun.cron.parse(timers.dreaming, Date.now(), { tz: ZONE })?.toISOString());
+      }
+      // The change has the host run duck install, as a claim in duck's DM does; the step waits for it to end.
+      const end = Date.now() + 240_000;
+      for (let now = before; now.run === before.run || now.state !== "inactive"; await Bun.sleep(250)) {
+        now = await firm.claimInstall();
+        if (Date.now() > end) throw new Error(`duck's install after the new zone is ${now.state}, not done`);
+      }
+
+      const CLOCK = "What's your clock's offset from UTC?";
+      firm.model.on(said(CLOCK), call("shell", { command: "date +%z" }));
+      firm.model.on(answered("shell"), (r) => say(`It is ${r.last.trim()}.`));
+      await firm.person.send("desk", CLOCK);
+      expect((await firm.person.next(120)).text).toContain(offsetIn(ZONE).replace(":", ""));
+      // goose's block at the run's start is from the coworker's clock; the relay's, on the call after, is duck's.
+      const asked = firm.model.requests.find(said(CLOCK));
+      expect(asked?.shown).toContain(`${offsetIn(ZONE)}</current-time>`);
+      expect(asked?.shown).toContain(`time zone is ${ZONE}.`);
+      const after = firm.model.requests.find(answered("shell"));
+      expect(JSON.stringify(after?.messages.at(-1)?.content)).toContain(`${offsetIn(ZONE)}</current-time>`);
+
+      // Every day at a time two minutes on in Rosa's zone, which in the firm's is hours away.
+      const NOTE = "Remind Rosa to water the lobby plants.";
+      const REMINDER = "Time to water the lobby plants.";
+      const REMINDED = "Reminder: water the lobby plants.";
+      firm.model.on(said("Remind me every day"), () => {
+        const [hour, minute] = clock(ZONE, 2 / 60)
+          .split(":")
+          .map(Number);
+        return call(TOOLS.setTimer, { note: NOTE, repeat: `${minute} ${hour} * * *` });
+      });
+      firm.model.on(answered(TOOLS.setTimer), say("I'll remind you."));
+      firm.model.on(all(coworkerRun, said(NOTE)), call(TOOLS.tell, { text: REMINDER, urgent: true }));
+      firm.model.on(answered(TOOLS.tell), say("Told."));
+      firm.model.on(all(coworkerRun, said(REMINDER)), say(REMINDED));
+      await firm.person.send("desk", "Remind me every day to water the lobby plants, from two minutes on.");
+      expect((await firm.person.next(60)).text).toBe("I'll remind you.");
+      expect((await firm.person.next(200)).text).toBe(REMINDED);
+    },
+    2 * E2E,
+  );
+
+  test(
+    "its quiet hours fall in its person's own night, in their zone",
+    async () => {
+      const LATE = {
+        ref: "<late-3c@harbor.example>",
+        payload: {
+          from: "Lee Park <lee.park@harbor.example>",
+          subject: "3C rent late",
+          text: "3C's rent is late.",
+        },
+      };
+      const [NOTED, NIGHT] = ["3C's November rent is late.", "3C hasn't paid November's rent yet."];
+      await firm.reinstall((setup) => {
+        delete (setup.settings as { locked?: string[] }).locked;
+      });
+      // Rosa's own limit, 68 s, holds again; the step waits it out, so only quiet hours can hold what follows.
+      const lastSent = () => {
+        using db = firm.db();
+        return db
+          .query<{ at: string | null }, []>(
+            "select max(sent_at) as at from outbox where state = 'sent' and kind = 'tell' and not urgent",
+          )
+          .get()?.at;
+      };
+      await Bun.sleep(Math.max(0, Date.parse(lastSent() ?? "1970-01-01T00:00:00Z") + 69_000 - Date.now()));
+      // Quiet from a minute ago to two minutes on in Rosa's zone, hours from any quiet time in the firm's.
+      const quiet = `${clock(ZONE, -1 / 60)}-${clock(ZONE, 2 / 60)}`;
+      expect(await answerTo(buzz, firm.duckKey as string, `set ${harbor.coworker} quiet ${quiet}`)).toBe(SET);
+
+      firm.model.on(all(sorter, shows(LATE.payload.subject)), say("wake: a late rent"));
+      firm.model.on(all(coworkerRun, said(LATE.payload.text)), call(TOOLS.tell, { text: NOTED }));
+      firm.model.on(answered(TOOLS.tell), say("Told."));
+      firm.model.on(all(coworkerRun, said(NOTED)), say(NIGHT));
+      await firm.push(LATE);
+      const told = () => {
+        using db = firm.db();
+        return db.query("select 1 from outbox where text = ?").get(NOTED) !== null;
+      };
+      await until("the tell in the outbox", told, 60, firm.trouble);
+      // Its quiet hours last at least a minute from when she set them.
+      await firm.person.quiet(30);
+      expect((await firm.person.next(200)).text).toBe(NIGHT);
+    },
+    2 * E2E,
   );
 });

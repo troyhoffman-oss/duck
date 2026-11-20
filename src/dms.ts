@@ -20,8 +20,10 @@ import {
   setting,
   settingsFile,
   settingsOf,
+  zoneOf,
 } from "./setup";
 import { buzzKey, claim, hex, signs, write, writeFacts } from "./setup/coworkers";
+import { rezone } from "./timers";
 
 /** duck's one answer in its DMs, in fixed words (SPEC part 11, duck's DM). */
 export const ANSWER =
@@ -53,16 +55,18 @@ const NOT_YOURS = "That names no coworker of yours here, so nothing changed.";
 
 /**
  * Its person's settings for a coworker, in fixed words (SPEC part 1, Settings): pause or resume it, its quiet
- * hours or none, and at most how many messages an hour it sends outside them.
+ * hours or none, at most how many messages an hour it sends outside them, and their time zone.
  */
 const SETTING =
-  /^(?:(pause|resume) ([a-z][a-z0-9-]*)|set ([a-z][a-z0-9-]*) (?:quiet (none|(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d)|messages ([1-9]|[1-5]\d|60) per hour))$/;
+  /^(?:(pause|resume) ([a-z][a-z0-9-]*)|set ([a-z][a-z0-9-]*) (?:quiet (none|(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d)|messages ([1-9]|[1-5]\d|60) per hour|zone (\S+)))$/;
 const PAUSED =
   "That coworker is paused: it does no work on its own until you resume it, and it still answers you.";
 const RESUMED =
   "That coworker is resumed: it catches up on what came in while it was paused and tells you about it once.";
 const SET = "Done: that coworker's setting is changed.";
 const LOCKED = "Your firm sets that for every coworker, so nothing changed.";
+const NOT_A_ZONE = (zone: string) =>
+  `"${zone}" is not a time zone; write one such as America/Chicago, so nothing changed.`;
 
 /** The firm's most model calls of a job's one fresh run (SPEC part 6), which an owner or admin sets. */
 const LIMIT = /^set model calls per job ([1-9]\d{0,3})$/;
@@ -387,7 +391,7 @@ async function publishSettings(setup: Setup, duck: ReturnType<typeof connect>, n
     paused: { ...of("paused"), value: Boolean(of("paused").value) },
     quiet: of("quiet"),
     messages_per_hour: { ...each, value: perHour },
-    cost: Math.round((monthCosts(setup).get(name) ?? 0) * 100) / 100,
+    cost: Math.round((monthCosts(setup, personOf(setup, name).zone).get(name) ?? 0) * 100) / 100,
   });
   await publishFor(setup, duck, name, ["duck.person", `${name}'s preferences`, content]);
 }
@@ -395,31 +399,40 @@ async function publishSettings(setup: Setup, duck: ReturnType<typeof connect>, n
 /**
  * Changes the setting `set` names of the coworker it names, where `writer` is its person and the firm does
  * not lock it, in the file only duck writes, and publishes its settings (SPEC part 1, Settings). A pause keeps
- * when it began, and a resume wakes the coworker, so its catch-up starts at once.
+ * when it began, and a resume wakes the coworker, so its catch-up starts at once. A new zone moves its repeating
+ * timers to their next time there, and has the host install, which gives its container and harness the zone.
  */
 async function setFor(
   setup: Setup,
   duck: ReturnType<typeof connect>,
   writer: string,
-  [, verb, coworkerToPause, coworkerToSet, quiet, perHour]: string[],
+  [, verb, coworkerToPause, coworkerToSet, quiet, perHour, zone]: string[],
 ) {
   const name = (coworkerToPause ?? coworkerToSet) as string;
   const facts = made(setup).includes(name) ? factsOf(setup, name) : undefined;
   if (!facts?.owner || JSON.parse(facts.owner)[1] !== writer || facts.state !== "claimed") return NOT_YOURS;
-  const key = verb ? "paused" : quiet ? "quiet" : "one_message_per";
+  const key = verb ? "paused" : quiet ? "quiet" : zone ? "zone" : "one_message_per";
   if (setup.settings.locked?.includes(key)) return LOCKED;
+  if (zone && !zoneOf(zone)) return NOT_A_ZONE(zone);
   const value = verb
     ? verb === "pause" && (setting(setup, name, "paused") || new Date().toISOString())
     : quiet
       ? quiet === "none"
         ? null
         : quiet.split("-")
-      : `${Math.round(3600 / Number(perHour))}s`;
+      : zone
+        ? zoneOf(zone)
+        : `${Math.round(3600 / Number(perHour))}s`;
   write(
     settingsFile(setup, name),
     `${JSON.stringify({ ...settingsOf(setup, name), [key]: value }, null, 2)}\n`,
   );
   if (verb === "resume") running.get(name)?.wake();
+  if (zone) {
+    const db = running.get(name)?.db;
+    if (db) rezone(db, value as string);
+    writeFileSync(installFile(setup), "");
+  }
   await publishSettings(setup, duck, name).catch((e: Error) =>
     console.error(`${name}'s settings in Buzz: ${e.message}`),
   );

@@ -113,6 +113,8 @@ A coworker's name is lowercase letters, digits and dashes, from a letter. Its ha
 
 How a person installs the plugin is not built yet (see the end of this file), so have the person follow the "Without the plugin" steps. When they paste the proof, duck answers the person "That coworker is yours now. duck is starting it, and it answers in its own DM once it is running." and a systemd unit runs `duck install` on the server. No admin needs to be there.
 
+A person who lives in another time zone than the firm's sets theirs once they have claimed the coworker, in their DM with duck, such as `set <coworker> zone America/New_York`; duck installs again on its own. While duck's DM is off every coworker is in the firm's zone.
+
 **With duck's DM off.** Run `duck make <coworker> <handle>`. Give the person the key it prints and the "Without the plugin" steps above, and have them send you the proof they copy. First make sure the secret store holds that person's key for every plug the coworker gets: `duck claim` records the claim before it installs, and the install then stops on a missing key until you add it and run `duck install`. Then run `duck claim <coworker> '<proof>' "<their name>"`, which claims and installs.
 
 Check: the install ends with the lines `<coworker>: started` and `duck: kept` (after a claim in duck's DM, read them with `journalctl --user -u duck-firm-<firm>-install.service`), and `podman ps --filter label=duck.firm=<firm>` shows `duck-<firm>-<coworker>` up.
