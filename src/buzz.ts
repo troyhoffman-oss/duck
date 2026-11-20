@@ -63,7 +63,12 @@ export function connect(who: Identity, handler: (revision: Event) => void) {
   const ready = new Promise<void>((resolve) => (signedIn = resolve));
   /** Each event sent that waits on the relay's OK, by id, and the query that waits on its events. */
   const waiting = new Map<string, (taken: boolean, message: string) => void>();
-  let found: { events: Event[]; done: (events: Event[]) => void; fail: (error: Error) => void } | undefined;
+  // Each query has an id of its own: the relay answers a CLOSE with CLOSED (buzz-relay
+  // src/handlers/close.rs:22), which must not end the query after it.
+  let found:
+    | { id: string; events: Event[]; done: (events: Event[]) => void; fail: (error: Error) => void }
+    | undefined;
+  let queries = 0;
   const open = () => {
     const ws = new WebSocket(who.relay);
     current = ws;
@@ -95,12 +100,11 @@ export function connect(who: Identity, handler: (revision: Event) => void) {
         signedIn();
         send("REQ", "notices", { kinds: [44100, 44101], "#p": [me], "#t": ["system"] });
       } else if (type === "OK") waiting.get(a)?.(b === true, c);
-      else if (type === "EVENT" && a === "query") found?.events.push(b);
-      else if (type === "EOSE" && a === "query") {
-        send("CLOSE", "query");
-        found?.done(found.events);
-      } else if (type === "CLOSED" && a === "query")
-        found?.fail(new Error(`the relay refused the query: ${b}`));
+      else if (type === "EVENT" && a === found?.id) found.events.push(b);
+      else if (type === "EOSE" && a === found?.id) {
+        send("CLOSE", a);
+        found.done(found.events);
+      } else if (type === "CLOSED" && a === found?.id) found.fail(new Error(`the relay refused the query: ${b}`));
       else if (type === "EOSE" && a === "notices" && notices) {
         for (const n of notices.sort((x, y) => x.created_at - y.created_at)) notice(n);
         notices = undefined;
@@ -163,8 +167,8 @@ export function connect(who: Identity, handler: (revision: Event) => void) {
     query: async (filter: object) => {
       await ready;
       return new Promise<Event[]>((done, fail) => {
-        found = { events: [], done, fail };
-        socket?.send(JSON.stringify(["REQ", "query", filter]));
+        found = { id: `query-${++queries}`, events: [], done, fail };
+        socket?.send(JSON.stringify(["REQ", found.id, filter]));
       });
     },
     /** Ends the connection for good. */
