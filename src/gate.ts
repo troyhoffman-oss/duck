@@ -17,7 +17,7 @@ import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive } from "./archive";
 import { listChanged } from "./dms";
-import { act } from "./doors";
+import { act, askDoors, doorTo } from "./doors";
 import { add, mark, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
 import { LIST_TOOLS, type Link, link, linkedTo, logged, useList } from "./list";
@@ -577,17 +577,20 @@ function log(
   );
 }
 
-/** When the person wrote the latest of their messages that started session `s`'s latest run, if they did. */
-function personAt(c: Coworker, s: string | undefined) {
+/**
+ * When the person wrote the latest of their messages at `doors` that started session `s`'s latest run, if they
+ * did.
+ */
+function personAt(c: Coworker, s: string | undefined, doors = c.doors) {
   if (!s)
     throw new Error("goose named no session for this call, so the gate can neither hold nor answer it.");
   return (
     c.db
       .query<{ at: string | null }, string[]>(
-        `select max(received_at) as at from inbox where source in (${c.doors.map(() => "?").join(", ")}) and id in
+        `select max(received_at) as at from inbox where source in (${doors.map(() => "?").join(", ")}) and id in
           (select value from json_each((select events from runs where session = ? order by id desc limit 1)))`,
       )
-      .get(...c.doors, s)?.at ?? null
+      .get(...doors, s)?.at ?? null
   );
 }
 
@@ -630,12 +633,13 @@ function hold(
   const lines = [...(why ? [why] : []), ...effect];
   const text = `${asker}Your yes is needed for ${plug}'s ${tool}, exactly this:\n${lines.join("\n")}`;
   const id = ask(c.db, text, { plug, tool, input, files, session: s }, urgent);
-  return `The gate holds this call as ask ${id}.${why ? ` ${why}` : ""} duck asks ${personOf(c.setup, c.name).name}, showing exactly this call, and it runs only on their yes. Say what you recommend in your own words.`;
+  return `The gate holds this call as ask ${id}.${why ? ` ${why}` : ""} duck asks ${personOf(c.setup, c.name).name} at their ${doorTo(c, true).door} door, where they answer it, showing exactly this call, and it runs only on their yes. Say what you recommend in your own words.`;
 }
 
 /**
  * Takes the person's answer to an ask, given in session `s`, and says what the gate did. It takes one only
- * in a run the person's own message started, written after the question was sent (SPEC part 9).
+ * in a run the person's own message at a door but email started, written after the question was sent (SPEC
+ * part 9), since a mail's sender can be forged.
  */
 async function answerAsk(c: Coworker, input: Json, s: string | undefined) {
   const id = Number(input.ask);
@@ -645,9 +649,9 @@ async function answerAsk(c: Coworker, input: Json, s: string | undefined) {
     )
     .get(id);
   if (!row) return `Ask ${id} is not waiting on an answer.`;
-  const at = personAt(c, s);
+  const at = personAt(c, s, askDoors(c));
   if (!at || at <= row.sent_at)
-    return `Ask ${id} stays open: the gate takes an answer only in a run started by a message your person wrote after they were asked.`;
+    return `Ask ${id} stays open: the gate takes an answer only in a run started by a message your person wrote after they were asked, and never by mail.`;
   // Answered before the call goes out, so a crash during the call never runs it twice.
   c.db.run("update outbox set answer = ? where id = ?", [input.yes === true ? "yes" : "no", id]);
   if (input.yes !== true) return `Ask ${id} is a no, and its call is dropped.`;

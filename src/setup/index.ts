@@ -10,9 +10,11 @@ import { questions } from "../sorter";
 /**
  * A coworker's door. At an `http` door, `key` names the secret both sides send. At a `text` door, `address`
  * is the line's project at Photon's Spectrum, `line` the line's https:// address, `key` names the project's
- * secret and `auth` the person's own handle as Photon writes it, the one sender it takes. Every claimed
- * coworker has a `buzz` door, which duck makes, at the setup's relay; it answers anyone who mentions the
- * coworker where its `answers` is `anyone`, and otherwise only its owner.
+ * secret and `auth` the person's own handle as Photon writes it, the one sender it takes. At an `email` door,
+ * `address` is the mail service's API, `mailbox` the coworker's own address there, `key` names the secret of
+ * a key to that mailbox and `auth` the person's own mail address. Every claimed coworker has a `buzz` door,
+ * which duck makes, at the setup's relay; it answers anyone who mentions the coworker where its `answers` is
+ * `anyone`, and otherwise only its owner.
  */
 export type Door = {
   kind: string;
@@ -20,6 +22,7 @@ export type Door = {
   key: string;
   auth?: string;
   line?: string;
+  mailbox?: string;
   answers?: string;
 };
 
@@ -424,9 +427,15 @@ export function check(folder: string): string[] {
   for (const [name, own] of doors) {
     unmade("doors", name);
     for (const [door, d] of Object.entries(own))
-      if (!(d.kind === "http" || (d.kind === "text" && !!d.auth && !!d.line)))
+      if (
+        !(
+          d.kind === "http" ||
+          (d.kind === "text" && !!d.auth && !!d.line) ||
+          (d.kind === "email" && !!d.auth && !!d.mailbox)
+        )
+      )
         problems.push(
-          `door ${name}.${door} is of kind "${d.kind}"; the setup gives http, and text with a line and an auth, and duck makes each coworker's buzz door`,
+          `door ${name}.${door} is of kind "${d.kind}"; the setup gives http, text with a line and an auth, and email with a mailbox and an auth, and duck makes each coworker's buzz door`,
         );
   }
   for (const [name, plug] of Object.entries(setup.plugs ?? {})) {

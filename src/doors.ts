@@ -87,16 +87,29 @@ function taken(c: Coworker, door: string, body: Written) {
   return event === null ? null : c.wake().then(() => c.sending);
 }
 
+/** The doors of `c` an ask may go to: all its person's doors but email, since mail answers no ask. */
+export const askDoors = (c: Coworker) => c.doors.filter((d) => doorsOf(c.setup, c.name)[d]?.kind !== "email");
+
 /**
- * Sends `text` from the main conversation to the door where the person last wrote, or before they ever have,
- * their first door, with each file of the coworker's it names, which the person sees by its name: at a buzz
- * door, to the place of their last message there. It returns the door. A delivery the door does not take
- * after three tries is logged as not delivered, and the door is broken.
+ * Where `c`'s next message goes: the door among its person's own where they last wrote, or before they ever
+ * have, the first; for an `ask`, among `askDoors` where it has any. With that door's setup and their last
+ * message there.
  */
-export function deliver(c: Coworker, said: string, since: number) {
-  const last = lastEvent(c.db, c.doors);
-  const door = last?.source ?? (c.doors[0] as string);
-  const set = doorsOf(c.setup, c.name)[door] as Door;
+export function doorTo(c: Coworker, ask = false) {
+  const doors = ask && askDoors(c).length > 0 ? askDoors(c) : c.doors;
+  const last = lastEvent(c.db, doors);
+  const door = last?.source ?? (doors[0] as string);
+  return { door, set: doorsOf(c.setup, c.name)[door] as Door, last };
+}
+
+/**
+ * Sends `text` from the main conversation, an `ask` or not, to the door `doorTo` names, with each file of the
+ * coworker's it names, which the person sees by its name: at a buzz door, to the place of their last message
+ * there. It returns the door. A delivery the door does not take after three tries is logged as not delivered,
+ * and the door is broken.
+ */
+export function deliver(c: Coworker, said: string, since: number, ask = false) {
+  const { door, set, last } = doorTo(c, ask);
   const named = [...new Set(said.match(PATH) ?? [])].map((p) => p.replace(/[.,;:!?]+$/, ""));
   const files = named.filter((p) => fileOf(c.setup, c.name, p));
   const text = files.reduce((t, p) => t.replaceAll(p, basename(p)), said);
@@ -125,7 +138,9 @@ export function deliver(c: Coworker, said: string, since: number) {
       ? () => post(c, set, last?.payload ?? null, text, local)
       : set.kind === "text"
         ? () => textOut(c, set, `${c.name}-${id}`, text, local)
-        : http;
+        : set.kind === "email"
+          ? () => mailOut(c, set, last, `${c.setup.firm}-${c.name}-${id}`, text, local)
+          : http;
   c.sending = c.sending.then(async () => {
     const failed = await tried(`delivery ${c.name}-${id} at ${door}`, send);
     if (!failed) return;
@@ -250,14 +265,16 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
  * Starts buzz-acp at each buzz door of `c`. It hands each Buzz message for the coworker to `duck buzz` as an
  * ACP prompt: in a DM, from the owner or an agent the owner also owns, and where it is mentioned, from them or
  * at a door that answers anyone from anyone, as buzz-acp's gate admits in its owner-only and anyone modes.
- * When it needs a mention stays at Buzz's default. At each text door it opens Photon's stream. buzz-acp stops
- * when it cannot reach its relay after a few tries, and a stream can end, so each is kept going until the
- * coworker stops, which ends buzz-acp and the stream. It settles when every door has stopped.
+ * When it needs a mention stays at Buzz's default. At each text door it opens Photon's stream, and at each
+ * email door the mail service's. buzz-acp stops when it cannot reach its relay after a few tries, and a stream
+ * can end, so each is kept going until the coworker stops, which ends buzz-acp and the stream. It settles when
+ * every door has stopped.
  */
 export function listen(c: Coworker) {
   const port = c.setup.listen.split(":")[1];
   const doors = Object.entries(doorsOf(c.setup, c.name)).map(([door, set]) => {
     if (set.kind === "text") return textIn(c, door, set);
+    if (set.kind === "email") return mailIn(c, door, set);
     if (set.kind !== "buzz") return undefined;
     return keep(c, door, `buzz-acp at ${c.name}.${door}`, async () => {
       const acp = Bun.spawn(["buzz-acp"], {
@@ -585,4 +602,148 @@ async function textOut(c: Coworker, set: Door, id: string, words: string, files:
     })
     .finally(() => im.close());
   void typists.get(set)?.();
+}
+
+/** A mail as the mail service gives it, in the fields the email door reads. */
+type Mail = {
+  message_id: string;
+  thread_id: string;
+  from: string;
+  subject?: string;
+  text?: string;
+  extracted_text?: string;
+  attachments?: { attachment_id: string; filename?: string; content_type?: string }[];
+  /** The service's SPF and DMARC verdicts, each kept only where it speaks for the sender's From domain. */
+  authentication_results?: { spf?: string; dmarc?: string };
+};
+
+/**
+ * Calls email door `set`'s mail service at `path` under the coworker's mailbox, with the mailbox's key: a GET,
+ * or with `body` a POST, which the service sends once under `once` however often it is tried.
+ */
+async function mail<T>(c: Coworker, set: Door, path: string, body?: object, once?: string): Promise<T> {
+  const at = `${set.address}/v0/inboxes/${encodeURIComponent(set.mailbox as string)}${path}`;
+  const answer = await fetch(at, {
+    method: body ? "POST" : "GET",
+    headers: {
+      authorization: `Bearer ${secret(c.setup, set.key)}`,
+      "content-type": "application/json",
+      ...(once && { "idempotency-key": once }),
+    },
+    body: body && JSON.stringify(body),
+  });
+  if (!answer.ok) throw new Error(`the mail service answered ${path.split("?")[0]} with ${answer.status}`);
+  return answer.json() as Promise<T>;
+}
+
+/** The most mails the email door lists when its stream opens. */
+const LISTED = 100;
+
+/**
+ * Hands each mail its person sends email door `set`'s mailbox to `door`, with its files: one from their
+ * address alone that passed the mail service's sender checks, an SPF or a DMARC pass for their own domain,
+ * since a From line can be forged. Any other mail there is outside words: an event about its thread on the
+ * work lane, with whom it says it is from, its words, its files' names and its checks; its files stay at the
+ * service. The stream is kept going, and each time it opens the mail received since a day before the door
+ * last took one is listed, so mail that came while it was down is taken; the inbox takes each once, by its id.
+ */
+async function mailIn(c: Coworker, door: string, set: Door) {
+  const person = secret(c.setup, set.auth as string).toLowerCase();
+  const what = `the email door ${c.name}.${door}`;
+  let socket: WebSocket | undefined;
+  let queue = Promise.resolve();
+  c.signal.addEventListener("abort", () => socket?.close());
+  const took = async (id: string) => {
+    const m = await mail<Mail>(c, set, `/messages/${encodeURIComponent(id)}`);
+    const from = (/<([^>]*)>/.exec(m.from)?.[1] ?? m.from).trim().toLowerCase();
+    const { spf, dmarc } = m.authentication_results ?? {};
+    // The service's extracted_text leaves out the lines a mail quotes, which are not the sender's words.
+    const text = [m.subject, (m.extracted_text ?? m.text ?? "").trim()].filter(Boolean).join("\n\n");
+    if (from !== person || m.from.split("@").length !== 2 || ![spf, dmarc].includes("pass")) {
+      const payload = {
+        from: m.from,
+        text,
+        files: m.attachments?.map((a) => a.filename),
+        checks: { spf, dmarc },
+      };
+      if (add(c.db, `${door}:others`, id, JSON.stringify(payload), null, null, m.thread_id)) void c.wake();
+      return;
+    }
+    const files = (m.attachments ?? []).map(async (a) => {
+      const at = `/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(a.attachment_id)}`;
+      const got = await fetch((await mail<{ download_url: string }>(c, set, at)).download_url);
+      if (!got.ok) throw new Error(`its file ${a.filename} could not be downloaded (${got.status})`);
+      const data = Buffer.from(await got.arrayBuffer()).toString("base64");
+      return { name: a.filename ?? a.attachment_id, type: a.content_type ?? "", data };
+    });
+    taken(c, door, { id, text, files: await Promise.all(files) });
+  };
+  // One mail at a time, in the order the service gave them.
+  const next = (id: string) => {
+    queue = queue
+      .then(() => took(id))
+      .catch((e: Error) => console.error(`${what} took no mail ${id}: ${e.message}`));
+  };
+  await keep(c, door, `${what}'s stream`, async () => {
+    const ended = Promise.withResolvers<never>();
+    // AgentMail's stream is at its API's host with ws for api: wss://ws.agentmail.to for https://api.agentmail.to.
+    const stream = `${set.address.replace(/^http/, "ws").replace("//api.", "//ws.")}/v0`;
+    const headers = { authorization: `Bearer ${secret(c.setup, set.key)}` };
+    const ws = new WebSocket(stream, { headers });
+    socket = ws;
+    ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe", inbox_ids: [set.mailbox] }));
+    ws.onmessage = ({ data }) => {
+      const e = JSON.parse(String(data));
+      if (e.type === "subscribed") {
+        const last = lastEvent(c.db, [door, `${door}:others`])?.received_at;
+        const after = new Date(last ? Date.parse(last) - 86_400_000 : Date.now()).toISOString();
+        void mail<{ messages: { message_id: string }[] }>(
+          c,
+          set,
+          `/messages?ascending=true&limit=${LISTED}&after=${encodeURIComponent(after)}`,
+        ).then(
+          (listed) => {
+            for (const m of listed.messages) next(m.message_id);
+            if (listed.messages.length === LISTED)
+              console.error(
+                `${what} listed ${LISTED} mails since ${after}; mail after them may not be taken`,
+              );
+          },
+          (error: Error) => console.error(`${what} could not list its mail: ${error.message}`),
+        );
+      } else if (e.type === "event" && String(e.event_type).startsWith("message.received"))
+        next(e.message.message_id);
+      else if (e.type === "error") {
+        ended.reject(new Error(`the mail service refused it: ${e.name}: ${e.message}`));
+        ws.close();
+      }
+    };
+    ws.onclose = ({ code }) => ended.reject(new Error(`the mail service ended its stream (${code})`));
+    return ended.promise;
+  });
+}
+
+/**
+ * Mails `words`, with `files`, from email door `set`'s mailbox to its person alone, under `id`, which the mail
+ * service sends once however often it is tried: as a reply to `last`, the person's last mail, or before they
+ * have written at any door, as a new mail whose subject is its first line.
+ */
+async function mailOut(
+  c: Coworker,
+  set: Door,
+  last: Event | null,
+  id: string,
+  words: string,
+  files: string[],
+) {
+  const attachments = files.map((f) => ({
+    filename: basename(f),
+    content_type: Bun.file(f).type,
+    content: readFileSync(f).toString("base64"),
+  }));
+  const to = [secret(c.setup, set.auth as string)];
+  const [path, subject] = last
+    ? [`/messages/${encodeURIComponent(last.ref)}/reply`, undefined]
+    : ["/messages/send", words.split("\n")[0]?.slice(0, 78)];
+  await mail(c, set, path, { to, subject, text: words, attachments }, id);
 }

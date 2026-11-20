@@ -158,7 +158,7 @@ One word per thing, in code, setup, messages and docs.
 - The harness text is short. It says what each kind of memory is for and leaves how to use it to the coworker. It is re-read at every model change.
 - A few core tools are loaded. The rest are found by search.
 - **Stock tools.** Every coworker ships with tools that need no key: a shell, goose's file tools, a browser through agent-browser, and the usual tools for reading and making documents. A firm adds the rest as plugs.
-- **First reply.** The person hears back within seconds: the whole answer, or the coworker's own first line saying what it is about to do, delivered as soon as it is written while the work goes on. Code never writes a canned line for it.
+- **First reply.** The person hears back within seconds: the whole answer, or the coworker's own first line saying what it is about to do, delivered as soon as it is written while the work goes on. By mail, which is not chat, the first line goes in one mail with the answer. Code never writes a canned line for it.
 - **Quick or job.** There are two ways to do work: at once in the run, or as a job. The coworker decides. It is told to stay free for its person: do small things at once, start a job for the rest and return to the conversation, and when its person writes while it works, answer them first. Code sets no cap, and logs how long each reply took. goose's own way to hand off work, its `delegate` tool, is offered in no session.
 - A correction about a running job is added to that job's brief.
 - **Compaction is hidden.** duck compacts an idle main conversation with duck's own summary prompt, and a message that arrives mid-summary cancels it. Anything that must last is on the list or in notes before the summary is written.
@@ -239,7 +239,7 @@ One word per thing, in code, setup, messages and docs.
 - A dispatcher gathers pending rows and wakes the main conversation, which writes one message for the batch: what came in, what the coworker did, and what it held and why. Non-urgent rows make at most one message an hour unless the person's settings say otherwise.
 - **Told as it stands.** A row may wait, and the world moves meanwhile, so the main conversation is shown each row with when it was written and, for a row on an item, the item as it stands now and what its log gained since. The message says what is true now. A row whose item has since settled is not told, and a batch with nothing left to tell sends no message.
 - Quiet hours are a setting. Rows wait through them unless marked urgent.
-- A message goes to the door where the person last wrote. A team coworker's goes to its channel (part 14).
+- A message goes to the door where the person last wrote, and an ask to the last such door but email (part 11). A team coworker's goes to its channel (part 14).
 - A failed delivery is retried. When a part of duck is broken, the coworker tells the person once, plainly.
 - **Already told.** The archive holds every message sent to the person, by any path. The last few are loaded into every work-lane run so nothing is said twice. The main conversation sent them, so its own history holds them.
 - The person sets how much they hear by telling the coworker, which keeps it in their standing words and marks rows urgent with those words in view. Something the person asked to be told at a set time is urgent. So is something of use to them only before a time that comes sooner than they would next hear from the coworker, as a brief before a meeting is.
@@ -260,6 +260,7 @@ One word per thing, in code, setup, messages and docs.
 - The text door marks the person's text read when it takes it, and shows typing in their chat until the runs the text woke or steered have ended and what they said has gone out, both best effort.
 - The text door sends the coworker's markdown as iMessage's own styled text, with each table as stacked rows, since iMessage has no tables.
 - The email door is an address of the coworker's own, at a mail service the setup names. Mail from its person's address that passed the service's sender checks is the person's message. Any other mail there is outside words. Mail never answers an ask, since a sender's address can be forged.
+- What the coworker writes at the email door goes from its own address to its person alone, as one reply on the thread they last wrote on, its first line in the same mail as its answer. An ask never goes there: it goes to the door they last wrote at but email, or before they have written at one, their first such door, and the coworker is told which. Mail that came while the door was down is taken once it is back.
 - Anything a door draws as a card also works as plain text.
 - Each door has a contract test that is run against every new release of what it connects to.
 
