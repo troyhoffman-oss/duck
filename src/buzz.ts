@@ -190,7 +190,12 @@ export function connect(who: Identity, handler: (revision: Event, label: string)
         const backlog = held.sort((x, y) => x.created_at - y.created_at);
         held = undefined;
         for (const b of backlog) hand(b);
-      } else if (type === "CLOSED" && a === listening) console.error(`${what} lost its channels: ${b}`);
+      } else if (type === "CLOSED" && a === listening) {
+        // The relay ended the subscription, as it may when it limits a key: listen again in 5 s.
+        console.error(`${what} lost its channels, so it listens again in 5 s: ${b}`);
+        listening = "";
+        setTimeout(() => socket === ws && resync(), 5000);
+      }
     };
     // A frame is [type, a, b, c], `b` an event or, in an OK, whether the relay took it. One that cannot be read
     // must not end the process, which holds every coworker's runs.

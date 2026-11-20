@@ -454,7 +454,7 @@ export async function startFirm(
     };
 
     // As an admin's agent does: where duck check names duck's own Buzz key, the relay's owner authorizes it
-    // in Buzz and the setup takes her ownership proof.
+    // in Buzz and the setup takes her ownership proof, and she adds the key to the member list as an admin.
     const duckKey = given.buzz
       ? /duck's Buzz key is ([0-9a-f]{64})/.exec((await attempt("check")).out)?.[1]
       : undefined;
@@ -463,6 +463,7 @@ export async function startFirm(
       edit((setup) => {
         if (setup.buzz) setup.buzz.owner = owner;
       });
+      await given.buzz.makeAdmin(duckKey);
     }
     /** Makes `coworker` for the person `handle` names, and returns its Buzz key. */
     const make = async (coworker: string, handle: string) =>

@@ -106,6 +106,20 @@ export async function loadPlugin(buzz: Buzz, who: Writer) {
     read,
     // The relay's own answer, fresh, as Buzz reads its config artifacts (buzz-app src/features/relay/session.ts:2707-2716).
     snapshotRead: (filters: Record<string, unknown>[], _settings: { signal?: AbortSignal }) => read(filters),
+    channels: {
+      /**
+       * NIP-CL: the channels `creator` made labelled `label`, oldest first, from the relay's own metadata, as
+       * Buzz's findLabeled reads them (buzz-app src/features/relay/store.ts:3195-3245).
+       */
+      async findLabeled({ creator, label }: { creator: string; label: string }) {
+        const found = await read([{ kinds: [39000], authors: [relayAuthor], "#P": [creator], "#t": [label] }]);
+        const tag = (event: BuzzEvent, name: string) => event.tags.find((t) => t[0] === name)?.[1];
+        return found
+          .filter((c) => tag(c, "P") === creator && c.tags.some(([t, v]) => t === "t" && v === label))
+          .map((c) => ({ id: tag(c, "d"), channelType: tag(c, "t"), creator, createdAt: Number(tag(c, "created_at")) }))
+          .sort((a, b) => a.createdAt - b.createdAt);
+      },
+    },
     // Buzz's artifact writer signs only an artifact, as the person (buzz-app src/features/relay/native.ts:620-646).
     configArtifactWriter: {
       kinds: [45010],

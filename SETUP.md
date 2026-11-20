@@ -87,13 +87,13 @@ Check: `duck check` prints no line about `model` or the Claude login.
 
 ## 7. Authorize duck in the firm's Buzz community
 
-Run `duck check`. With `buzz.relay` set and no proof yet, its last lines include one that begins `still to do: duck's Buzz key is` and a 64-character key. Give that key to the community's owner or admin from question 2, with the steps exactly as duck words them:
+Run `duck check`. With `buzz.relay` set and no proof yet, its last lines include one that begins `still to do: duck's Buzz key is` and a 64-character key. Give that key to the community's owner or admin from question 2, with the steps exactly as duck words them; the last step only the owner can take:
 
-> in Buzz's desktop app the community's owner or an admin opens Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), puts that key in Application public key (hex), presses Authorize identity and then Authorize this key, presses Copy ownership proof and puts the proof in duck.yaml as buzz.owner in single quotes, since Buzz copies it as a JSON list
+> in Buzz's desktop app the community's owner or an admin opens Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), puts that key in Application public key (hex), presses Authorize identity and then Authorize this key, presses Copy ownership proof and puts the proof in duck.yaml as buzz.owner in single quotes, since Buzz copies it as a JSON list; then the community's owner opens Settings, then Community admin, then Membership, chooses Add directly, puts that key in Public identity, chooses the role Admin and presses Add member
 
-The proof is not a secret. Put it in `duck.yaml` as `buzz.owner: '<proof>'` and commit. Until it is there duck's channels are off, and coworkers can still be made and claimed with `duck make` and `duck claim` (step 9, second path).
+The plugin knows duck only by that admin role. The proof is not a secret. Put it in `duck.yaml` as `buzz.owner: '<proof>'` and commit. Until it is there duck's channels are off, and coworkers can still be made and claimed with `duck make` and `duck claim` (step 9, second path).
 
-Check: `duck check` prints no `still to do` line and no line about `buzz.owner`.
+Check: `duck check` prints no `still to do` line and no line about `buzz.owner`. After step 8's install, duck's log (`podman logs duck-<firm>`) has no line that duck's Buzz key is not an admin on the community's member list.
 
 ## 8. Check and install
 

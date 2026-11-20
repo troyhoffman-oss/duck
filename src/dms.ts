@@ -20,7 +20,7 @@ import {
   settingsOf,
   zoneOf,
 } from "./setup";
-import { buzzKey, claim, identity, signs, write, writeFacts } from "./setup/coworkers";
+import { ADMIN_STEP, buzzKey, claim, identity, signs, write, writeFacts } from "./setup/coworkers";
 import { rezone } from "./timers";
 
 /**
@@ -65,6 +65,8 @@ const NOT_ADMIN = "Only an owner or admin of this community sets that, so nothin
 
 const OFF =
   "duck's channels are off: the setup holds no ownership proof of duck's Buzz key; duck check says how";
+const NOT_LISTED = (key: string) =>
+  `duck's Buzz key ${key} is not an admin on the community's member list, so the plugin shows nothing from duck; to make it one, ${ADMIN_STEP}`;
 
 /** First value of tag `name` on `event`, or "". */
 const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1] ?? "";
@@ -148,6 +150,10 @@ export function talk(setup: Setup) {
   duck
     .send(0, [], JSON.stringify({ name: "duck", about: "The service your firm's coworkers run on." }))
     .catch((e: Error) => console.error(`duck's profile: ${e.message}`));
+  // The plugin knows duck only by a key the member list names as an admin.
+  admins(setup, duck)
+    .then((all) => all.includes(duck.me) || console.error(NOT_LISTED(duck.me)))
+    .catch((e: Error) => console.error(`duck's place on the member list: ${e.message}`));
 }
 
 /**
@@ -289,7 +295,7 @@ async function admins(setup: Setup, duck: ReturnType<typeof connect>) {
 
 /**
  * Publishes what the firm's admins see, as one `duck.firm` artifact in each owner's and admin's channel with
- * duck: each coworker's person, state, whether its goose is up, when it last ran and its cost this calendar
+ * duck, which is an admin itself: each coworker's person, state, whether its goose is up, when it last ran and its cost this calendar
  * month, and the most model calls of a job's run.
  */
 async function publishFirm(setup: Setup, duck: ReturnType<typeof connect>) {
@@ -314,7 +320,8 @@ async function publishFirm(setup: Setup, duck: ReturnType<typeof connect>) {
     coworkers,
   });
   for (const admin of await admins(setup, duck))
-    await publishArtifact(duck, admin, "firm", ["duck.firm", "Your firm's coworkers", content]);
+    if (admin !== duck.me)
+      await publishArtifact(duck, admin, "firm", ["duck.firm", "Your firm's coworkers", content]);
 }
 
 /**

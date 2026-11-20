@@ -140,8 +140,11 @@ function proves(owner: string | undefined, key: string) {
 /** duck's own Buzz key's public key, in hex. */
 const duckPublic = (setup: Setup) => hex(schnorr.getPublicKey(Buffer.from(duckKey(setup), "hex")));
 
-const STEPS =
-  "in Buzz's desktop app the community's owner or an admin opens Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), puts that key in Application public key (hex), presses Authorize identity and then Authorize this key, presses Copy ownership proof and puts the proof in duck.yaml as buzz.owner in single quotes, since Buzz copies it as a JSON list";
+/** The owner's step that makes duck's key an admin, which the plugin knows duck by (SPEC part 11). */
+export const ADMIN_STEP =
+  "the community's owner opens Settings, then Community admin, then Membership, chooses Add directly, puts that key in Public identity, chooses the role Admin and presses Add member";
+
+const STEPS = `in Buzz's desktop app the community's owner or an admin opens Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), puts that key in Application public key (hex), presses Authorize identity and then Authorize this key, presses Copy ownership proof and puts the proof in duck.yaml as buzz.owner in single quotes, since Buzz copies it as a JSON list; then ${ADMIN_STEP}`;
 
 /** What is wrong with duck's own identity where the firm has Buzz: a proof in the setup that does not sign its key. */
 export function identityProblems(setup: Setup) {

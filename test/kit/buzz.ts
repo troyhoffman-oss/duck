@@ -73,11 +73,12 @@ export function authTag(owner: Uint8Array, agent: string) {
 
 /**
  * What a firm needs of a test's Buzz: the relay's address, the person's tag for the coworker's key, which
- * `duck claim` takes, and once the coworker is made, a way to meet it there.
+ * `duck claim` takes, the owner's grant of the admin role, and once the coworker is made, a way to meet it there.
  */
 export type BuzzForFirm = {
   url: string;
   tagFor: (agent: string) => string;
+  makeAdmin: (key: string) => Promise<void>;
   meet: (agent: string) => Promise<void>;
 };
 
@@ -523,6 +524,11 @@ export async function startBuzz() {
       rename: (who: Writer, name: string) => cli(["users", "set-profile", "--name", name], undefined, who),
       /** The person's NIP-OA tag for coworker key `agent`, which claims it as hers. */
       tagFor: authFor,
+      /**
+       * The owner adds key `key` to the community's member list as an admin (NIP-43, kind 9030), as Buzz's
+       * Community admin, Membership, Add directly does.
+       */
+      makeAdmin: (key: string) => publish("rosa", signed(secrets.rosa, 9030, [["p", key], ["role", "admin"]], "")),
       /** `who`'s NIP-OA tag for Buzz key `agent`: the ownership proof Buzz's desktop copies for them. */
       proof: (who: Writer, agent: string) => authTag(secrets[who], agent),
       meet,
