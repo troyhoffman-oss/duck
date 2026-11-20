@@ -104,7 +104,8 @@ export function connect(who: Identity, handler: (revision: Event) => void) {
       else if (type === "EOSE" && a === found?.id) {
         send("CLOSE", a);
         found.done(found.events);
-      } else if (type === "CLOSED" && a === found?.id) found.fail(new Error(`the relay refused the query: ${b}`));
+      } else if (type === "CLOSED" && a === found?.id)
+        found.fail(new Error(`the relay refused the query: ${b}`));
       else if (type === "EOSE" && a === "notices" && notices) {
         for (const n of notices.sort((x, y) => x.created_at - y.created_at)) notice(n);
         notices = undefined;
