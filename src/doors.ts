@@ -5,8 +5,8 @@ import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-
 import { heard, told } from "./archive";
 import { aboutSession, add, broken, type Event, lastEvent, waiting } from "./inbox";
 import type { Coworker } from "./run";
-import { buzzKey } from "./setup/coworkers";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
+import { buzzKey } from "./setup/coworkers";
 
 /** A file as it crosses a door: its name, media type and bytes in base64. */
 type DoorFile = { name: string; type: string; data: string };
