@@ -188,7 +188,9 @@ describe("a person pauses their coworker and sets when it messages them", () => 
       {
         using db = firm.db();
         const dream = db
-          .query<{ at: string }, []>("select at from timers where note like '%dreaming.md%' and repeat is not null")
+          .query<{ at: string }, []>(
+            "select at from timers where note like '%dreaming.md%' and repeat is not null",
+          )
           .get();
         expect(dream?.at).toBe(Bun.cron.parse(timers.dreaming, Date.now(), { tz: ZONE })?.toISOString());
       }
@@ -215,7 +217,9 @@ describe("a person pauses their coworker and sets when it messages them", () => 
       const REMINDER = "Time to water the lobby plants.";
       const REMINDED = "Reminder: water the lobby plants.";
       firm.model.on(said("Remind me every day"), () => {
-        const [hour, minute] = clock(ZONE, 2 / 60).split(":").map(Number);
+        const [hour, minute] = clock(ZONE, 2 / 60)
+          .split(":")
+          .map(Number);
         return call(TOOLS.setTimer, { note: NOTE, repeat: `${minute} ${hour} * * *` });
       });
       firm.model.on(answered(TOOLS.setTimer), say("I'll remind you."));
@@ -234,7 +238,11 @@ describe("a person pauses their coworker and sets when it messages them", () => 
     async () => {
       const LATE = {
         ref: "<late-3c@harbor.example>",
-        payload: { from: "Lee Park <lee.park@harbor.example>", subject: "3C rent late", text: "3C's rent is late." },
+        payload: {
+          from: "Lee Park <lee.park@harbor.example>",
+          subject: "3C rent late",
+          text: "3C's rent is late.",
+        },
       };
       const [NOTED, NIGHT] = ["3C's November rent is late.", "3C hasn't paid November's rent yet."];
       await firm.reinstall((setup) => {
