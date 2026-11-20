@@ -397,8 +397,7 @@ describe("the Buzz door", () => {
         firm.trouble,
       );
 
-      const read = firm.model.requests.find(all(reading, said(YES)));
-      const shown = JSON.parse(String(read?.body.state)).conversation as { from: string; text: string }[];
+      const shown = firm.model.requests.find(all(reading, said(YES)))?.read?.conversation ?? [];
       const entry = (text: string) => shown.findIndex((e) => e.text === text);
       expect(shown[entry(question)]?.from).toBe("duck's question");
       expect(shown[entry(QUESTION)]?.from).toBe("the coworker");
@@ -462,12 +461,13 @@ describe("the Buzz door", () => {
         firm.trouble,
       );
 
-      const read = firm.model.requests.find((r) => {
-        if (!(reading(r) && said(YES)(r))) return false;
-        const { question: q, conversation } = JSON.parse(String(r.body.state));
-        return conversation[q.entry - 1]?.text === question;
-      });
-      const shown = JSON.parse(String(read?.body.state)).conversation as { from: string; text: string }[];
+      const read = firm.model.requests.find(
+        (r) =>
+          reading(r) &&
+          said(YES)(r) &&
+          !!r.read?.questions.some((q) => r.read?.conversation[q.entry - 1]?.text === question),
+      );
+      const shown = read?.read?.conversation ?? [];
       const entry = (text: string) => shown.findIndex((e) => e.text === text);
       expect(shown[entry(BEFORE)]?.from).toBe("the coworker");
       expect(shown[entry(question)]?.from).toBe("duck's question");

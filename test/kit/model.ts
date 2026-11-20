@@ -13,17 +13,12 @@ export type Reply = {
   error?: { status: number; type: string; message: string };
   hold?: string;
   midway?: string;
-  /** To a decisions request, these answers as they are, unchecked. */
-  answers?: Json;
 };
 
 let toolIds = 0;
 
 /** A reply of plain text. */
 export const say = (text: string): Reply => ({ content: [{ type: "text", text }] });
-
-/** A reply to a decisions request that answers `answers` as they are, choices it does not offer included. */
-export const decides = (answers: Json): Reply => ({ content: [], answers });
 
 /** A reply that calls tool `name` with `input`. */
 export const call = (name: string, input: Json = {}): Reply => ({
@@ -55,6 +50,8 @@ export class ModelRequest {
   readonly system: string;
   readonly messages: { role: string; content: unknown }[];
   readonly tools: string[];
+  /** Of duck's reading of a reply (SPEC part 9), what it shows the model: the conversation and the questions. */
+  readonly read: Reading | undefined;
   readonly started = performance.now();
   ended: number | null = null;
   /** Whether the caller hung up before it was answered. */
@@ -67,11 +64,23 @@ export class ModelRequest {
     this.model = String(body.model ?? "");
     this.stream = body.stream === true;
     this.system = textOf(body.system) || (body.questions ? JSON.stringify(body.questions) : "");
-    this.messages = Array.isArray(body.messages)
-      ? (body.messages as ModelRequest["messages"])
-      : body.state === undefined
-        ? []
-        : [{ role: "user", content: stated(body.state) }];
+    this.read = readingIn(body);
+    // A reading is shown as the questions, then each entry's text, oldest first, so its reply is the last words.
+    this.messages = this.read
+      ? [
+          {
+            role: "user",
+            content: [
+              `questions: ${JSON.stringify(this.read.questions)}`,
+              ...this.read.conversation.map((e) => e.text),
+            ].join("\n\n"),
+          },
+        ]
+      : Array.isArray(body.messages)
+        ? (body.messages as ModelRequest["messages"])
+        : body.state === undefined
+          ? []
+          : [{ role: "user", content: body.state }];
     this.tools = Array.isArray(body.tools) ? body.tools.map((t: Json) => String(t.name)) : [];
   }
 
@@ -89,7 +98,7 @@ export class ModelRequest {
 
   /** Of a decisions request that reads a reply (SPEC part 9), the reply: its conversation's final entry. */
   get reply(): string | undefined {
-    return readOf(this.body.state)?.conversation.at(-1)?.text;
+    return this.read?.conversation.at(-1)?.text;
   }
 
   /** Every text the model is shown, in order: the system text, then each message. */
@@ -237,7 +246,8 @@ export function scriptedModel({
       asked.cancelled = true;
       asked.ended = performance.now();
     });
-    const previous = requests.findLast((r) => r.model === asked.model);
+    // A reading shares no conversation with the coworker's runs, so its prefix caches nothing of theirs.
+    const previous = requests.findLast((r) => r.model === asked.model && !r.read && !asked.read);
     requests.push(asked);
     const rule = rules.find((r) => r.used < r.times && r.when(asked));
     if (!rule) {
@@ -275,16 +285,14 @@ export function scriptedModel({
     }
     if (decision) {
       asked.ended = performance.now();
-      return Response.json(
-        reply.answers ? { model: asked.model, answers: reply.answers } : decided(asked, content),
-      );
+      return Response.json(decided(asked, content));
     }
     const message = {
       id: `msg_kit_${++messageIds}`,
       type: "message",
       role: "assistant",
       model: asked.model,
-      content,
+      content: readAs(asked, content),
       stop_reason: content.some((b) => b.type === "tool_use") ? "tool_use" : "end_turn",
       stop_sequence: null,
       usage: usageOf(asked, previous, content),
@@ -379,25 +387,41 @@ export function atOnce(requests: ModelRequest[]): number {
   return most;
 }
 
-/**
- * A decisions request's state as the model is shown it: a conversation duck reads a reply in (SPEC part 9) as
- * the question it names, then each entry's text, oldest first; any other state as it is.
- */
-function stated(state: unknown) {
-  const read = readOf(state);
-  return read
-    ? [`question: ${JSON.stringify(read.question)}`, ...read.conversation.map((e) => e.text)].join("\n\n")
-    : state;
-}
+/** What duck's reading of a reply shows the model (SPEC part 9). */
+export type Reading = {
+  conversation: { from: string; at: string; text: string }[];
+  questions: { id: string; entry: number; number?: number; text: string }[];
+};
 
-/** A decisions request's state when it is a conversation duck reads a reply in (SPEC part 9), else undefined. */
-function readOf(state: unknown): { question: Json; conversation: { text: string }[] } | undefined {
+/** The reading a Messages API request is, by the JSON its user message holds, or undefined for any other. */
+function readingIn(body: Json): Reading | undefined {
+  const messages = Array.isArray(body.messages)
+    ? (body.messages as { role: string; content: unknown }[])
+    : [];
+  const [first] = messages.filter((m) => m.role === "user");
+  const content = first?.content;
+  const text =
+    typeof content === "string" ? content : Array.isArray(content) ? String(content[0]?.text ?? "") : "";
   try {
-    const read = JSON.parse(String(state));
-    return Array.isArray(read?.conversation) ? read : undefined;
+    const read = JSON.parse(text);
+    return Array.isArray(read?.conversation) && Array.isArray(read?.questions) ? read : undefined;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * A scripted reply to a reading as duck takes it: a text whose first word is yes, no or neither says that of
+ * every question it reads for, as JSON; any other reply as it is.
+ */
+function readAs(asked: ModelRequest, content: Block[]): Block[] {
+  const [only] = content;
+  const word =
+    only?.type === "text" ? /^\W*(yes|no|neither)\b/i.exec(only.text)?.[1]?.toLowerCase() : undefined;
+  if (!asked.read || content.length !== 1 || !word) return content;
+  return [
+    { type: "text", text: JSON.stringify(Object.fromEntries(asked.read.questions.map((q) => [q.id, word]))) },
+  ];
 }
 
 /**

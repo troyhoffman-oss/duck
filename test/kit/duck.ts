@@ -47,20 +47,19 @@ export const TOOLS = {
 };
 
 /**
- * A call of the firm's decision model that reads whether a person's reply says yes, no or neither to one
- * question (SPEC part 9): its one question is `reply`, and its state the question and the reply.
+ * duck's reading of a person's reply (SPEC part 9): one call of the coworker's model through the model relay,
+ * with no tools, that says yes, no or neither to each question it lists.
  */
-export const reading: When = (r) =>
-  r.model === harbor.models.sorter && Object.hasOwn((r.body.questions as object | undefined) ?? {}, "reply");
+export const reading: When = (r) => r.model === harbor.models.coworker && r.read !== undefined;
 
 /** A call of the sorter's cheap decision model (SPEC rule 10), through its decisions API. */
-export const sorter: When = (r) => r.model === harbor.models.sorter && !reading(r);
+export const sorter: When = (r) => r.model === harbor.models.sorter;
 
 /**
  * goose's compaction call: the coworker's model with no tools, which is how goose 1.59.0 sends it
- * (`complete_one_shot` with an empty tool list, crates/goose/src/context_mgmt/mod.rs).
+ * (`complete_one_shot` with an empty tool list, crates/goose/src/context_mgmt/mod.rs); not a reading.
  */
-export const summary: When = (r) => r.model === harbor.models.coworker && r.tools.length === 0;
+export const summary: When = (r) => r.model === harbor.models.coworker && r.tools.length === 0 && !reading(r);
 
 /** A run of the coworker itself, main conversation or work lane: it has the list's tool. */
 export const coworkerRun: When = (r) => r.has(TOOLS.writeItem);

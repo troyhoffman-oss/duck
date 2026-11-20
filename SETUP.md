@@ -23,7 +23,7 @@ Put these to the admin before step 2, in plain words. The admin alone decides th
 9. The firm's time zone, such as `America/Chicago`. Default: the admin's own.
 10. How work is done at the firm, in a few lines, for the sign. Default: you draft it from what the admin says and they approve it.
 11. Any tools or sources to plug in now, each an MCP server with its address and key. Default: none; plugs are added later with a line of setup.
-12. The firm's decisions API for a cheap decision model: its address, key and model. Every firm needs one, since duck reads each person's answer to a question with it; the sorter uses it too. There is no default.
+12. Whether the firm has a decisions API for the sorter's cheap model. Default: none, and the sorter is `off`.
 
 You may choose without asking: the folders, which duck's account must own, such as under its home folder (harbor's `/var/lib` and `/etc` paths need root to make); the port duck listens on; the times, quiet hours, caps and limits, which you take from harbor; the model's name, one of `claude-fable-5-2`, `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`, the names whose cost the model relay knows (any other runs and shows no cost); and each person's handle, one word from their name.
 
@@ -67,13 +67,13 @@ Make the firm's private repo, and in it a setup folder holding copies of `exampl
 - `sorter.md`: rewrite harbor's lines about Wren, Rosa and apartments for the firm. Keep the four lines that start `` - `noise`: ``, `` - `urgent`: ``, `` - `wake`: `` and `` - `addresses AI`: ``; `duck check` needs all four, even with the sorter off.
 - `sign.md`: the firm's own words on how work is done there.
 
-Set `sorter.mode` to `observe`, with the decisions API's `address`, `key` and `model`, and `request` as its provider needs. `duck check` refuses a setup without that route whatever the sorter's mode, since duck reads each person's answer to a question with it. Make the storage folder and the secret store file, both owned by duck's account, the file with mode 600. Commit the setup folder and push it to the firm's private remote with the admin's own access.
+Set `sorter.mode` to `off` unless the firm has a decisions API, in which case `observe`, with its `address`, `key` and `model`. With it `off`, delete harbor's `sorter.address`, `sorter.key`, `sorter.model` and `sorter.request`: `duck check` asks the secret store for any `key` the setup names, used or not. Make the storage folder and the secret store file, both owned by duck's account, the file with mode 600. Commit the setup folder and push it to the firm's private remote with the admin's own access.
 
 Check: the repo holds the setup and no secret, and `git status` in it is clean and up to date with its remote.
 
 ## 5. Fill the secret store
 
-The secret store is the file `secrets.file` names, one `NAME=value` line per secret, exactly so: no quotes, no `export`, no spaces around `=`, Unix line ends; duck takes everything after the `=` as the value. It holds the backup's key, secret and password, the model key on the API-key route, the decision model's key, each plug's keys and its `events.push` key, and each door's `key` and, on a text or email door, `auth`. A plug address or header that says `${NAME_{person}}` needs one line per person, with `{person}` replaced by their handle. Have the admin put the values in the file themselves. A firm with a secret store of its own fills the file from it by its own means; duck reads only the file. No value may pass through your output or a command line.
+The secret store is the file `secrets.file` names, one `NAME=value` line per secret, exactly so: no quotes, no `export`, no spaces around `=`, Unix line ends; duck takes everything after the `=` as the value. It holds the backup's key, secret and password, the model key on the API-key route, the sorter's key if it has one, each plug's keys and its `events.push` key, and each door's `key` and, on a text or email door, `auth`. A plug address or header that says `${NAME_{person}}` needs one line per person, with `{person}` replaced by their handle. Have the admin put the values in the file themselves. A firm with a secret store of its own fills the file from it by its own means; duck reads only the file. No value may pass through your output or a command line.
 
 Check: `duck check` prints no line that starts `the secret store`. It asks for a person's plug keys only once their coworker is claimed; `duck make` for a person asks for them first (step 9).
 

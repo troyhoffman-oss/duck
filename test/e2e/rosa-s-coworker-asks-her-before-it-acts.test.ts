@@ -7,7 +7,6 @@ import {
   call,
   clock,
   coworkerRun,
-  decides,
   E2E,
   type Firm,
   failure,
@@ -72,20 +71,25 @@ async function heldFile(firm: Firm, ref: string) {
 /** Dana's terms under a subject of their own, so each step's question is told apart from those still open. */
 const terms = (subject: string) => ({ ...MAIL, subject });
 const EVERY = { times: Number.POSITIVE_INFINITY };
-/** The conversation a reading of a reply was shown (SPEC part 9), and the question it reads for. */
-const stateOf = (r: ModelRequest | undefined) =>
-  JSON.parse(String(r?.body.state)) as {
-    question: { entry: number; number?: number };
-    conversation: { from: string; at: string; text: string }[];
-  };
-/** A reading of a reply for the question whose message holds `text`, and that is question `number` there. */
-const readingOf = (text: string, number?: number) => (r: ModelRequest) => {
-  if (!reading(r)) return false;
-  const { question, conversation } = stateOf(r);
-  return !!conversation[question.entry - 1]?.text.includes(text) && question.number === number;
-};
+/** Whether a question a reading lists (SPEC part 9) holds the mail with subject `subject`. */
+const about = (subject: string) => (q: { text: string }) => q.text.includes(`subject: ${subject}\n`);
+/** A reading of a reply that reads it for the held mail with subject `subject`. */
+const readingOf = (subject: string) => (r: ModelRequest) =>
+  reading(r) && !!r.read?.questions.some(about(subject));
+/** A reading's answer: what `picks` gives for each held mail by its subject, and neither to every other question. */
+const saying = (picks: Record<string, string>) => (r: ModelRequest) =>
+  say(
+    JSON.stringify(
+      Object.fromEntries(
+        (r.read?.questions ?? []).map((q) => [
+          q.id,
+          Object.entries(picks).find(([subject]) => about(subject)(q))?.[1] ?? "neither",
+        ]),
+      ),
+    ),
+  );
 /** Who wrote each entry of the conversation a reading was shown, and its text. */
-const shownIn = (r: ModelRequest | undefined) => stateOf(r).conversation.map((e) => [e.from, e.text]);
+const shownIn = (r: ModelRequest | undefined) => (r?.read?.conversation ?? []).map((e) => [e.from, e.text]);
 
 setDefaultTimeout(E2E);
 
@@ -479,8 +483,10 @@ describe("Rosa's coworker asks her before it acts", () => {
     firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", MAIL));
     firm.model.on(answered("send_mail"), call("send_mail", LEE));
     firm.model.on(answered("send_mail"), say("I've asked you about both."));
-    firm.model.on(readingOf(MAIL.subject, 1), say("yes"));
-    firm.model.on(readingOf(LEE.subject, 2), say("no"));
+    firm.model.on(
+      all(readingOf(MAIL.subject), said(BOTH)),
+      saying({ [MAIL.subject]: "yes", [LEE.subject]: "no" }),
+    );
     firm.model.on(reading, say("neither"), EVERY);
     // Dana's mail was held in the main conversation, so its outcome comes to it with her reply or after it.
     firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has the 4B terms; Lee's stay unsent."));
@@ -514,7 +520,7 @@ describe("Rosa's coworker asks her before it acts", () => {
       all(readingOf(ONCE_MORE.subject), said(REPLY)),
       failure(529, "overloaded_error", "the decision model is busy"),
     );
-    firm.model.on(all(readingOf(ONCE_MORE.subject), said(AGAIN)), say("yes"));
+    firm.model.on(all(readingOf(ONCE_MORE.subject), said(AGAIN)), saying({ [ONCE_MORE.subject]: "yes" }));
     firm.model.on(reading, say("neither"), EVERY);
     firm.model.on(
       all(coworkerRun, said(REPLY)),
@@ -549,7 +555,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const [WHAT, IS, OK] = ["What's the amount?", "It is $1,900 a month from January 1.", "ok yes"];
     firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", AMOUNT));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
-    firm.model.on(all(readingOf(AMOUNT.subject), said(OK)), say("yes"));
+    firm.model.on(all(readingOf(AMOUNT.subject), said(OK)), saying({ [AMOUNT.subject]: "yes" }));
     firm.model.on(reading, say("neither"), EVERY);
     firm.model.on(all(coworkerRun, said(WHAT)), say(IS));
     firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has the amount."));
@@ -648,10 +654,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const REPLY = "Go for it.";
     firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", NOON));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
-    firm.model.on(
-      all(readingOf(NOON.subject), said(REPLY)),
-      decides({ reply: { type: "choice", choice: "constructor" } }),
-    );
+    firm.model.on(all(readingOf(NOON.subject), said(REPLY)), saying({ [NOON.subject]: "constructor" }));
     firm.model.on(reading, say("neither"), EVERY);
     firm.model.on(
       all(coworkerRun, said(REPLY)),
@@ -706,7 +709,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const [BEFORE, AHEAD] = ["Yes, that one is fine.", "Yes, send it today."];
     firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", TODAY));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
-    firm.model.on(all(readingOf(TODAY.subject), said(AHEAD)), say("yes"));
+    firm.model.on(all(readingOf(TODAY.subject), said(AHEAD)), saying({ [TODAY.subject]: "yes" }));
     firm.model.on(reading, say("neither"), EVERY);
     firm.model.on(all(coworkerRun, said(BEFORE)), say("Noted."), EVERY);
     firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has today's terms."));
@@ -736,8 +739,8 @@ describe("Rosa's coworker asks her before it acts", () => {
     await firm.person.send("phone", AHEAD, [], new Date(Date.now() + 3_600_000).toISOString());
     await firm.person.nextWith("today's terms", 60);
     expect(firm.mail.callsTo("send_mail").map((c) => c.input)).toEqual([TODAY]);
-    const read = stateOf(firm.model.requests.find(readingOf(TODAY.subject)));
-    expect(Date.parse(String(read.conversation.at(-1)?.at))).toBeLessThanOrEqual(Date.now());
+    const read = firm.model.requests.find(readingOf(TODAY.subject))?.read;
+    expect(Date.parse(String(read?.conversation.at(-1)?.at))).toBeLessThanOrEqual(Date.now());
   });
 
   test("when what her reply answered cannot be kept, it is logged, her message still reaches the coworker answering nothing, and the question stays open", async () => {
@@ -746,7 +749,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const REPLY = "Yes, tonight is good.";
     firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", TONIGHT));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
-    firm.model.on(all(readingOf(TONIGHT.subject), said(REPLY)), say("yes"));
+    firm.model.on(all(readingOf(TONIGHT.subject), said(REPLY)), saying({ [TONIGHT.subject]: "yes" }));
     firm.model.on(reading, say("neither"), EVERY);
     firm.model.on(all(coworkerRun, said(REPLY)), say("It waits for your yes."));
     const writable = (sql: string) => {

@@ -124,9 +124,8 @@ export type Setup = {
   sign: string;
   /**
    * The sorter (SPEC part 4): its file of questions in the setup folder, its mode, the gap events that pass it
-   * wait, and its decision model's route, which also reads each answer to a question (SPEC part 9): the address
-   * of its decisions API, the name of the secret that holds its key, the model's name, and fields the firm's
-   * provider needs in every request.
+   * wait, and its decision model's route: the address of its decisions API, the name of the secret that holds
+   * its key, the model's name, and fields the firm's provider needs in every request.
    */
   sorter: {
     file: string;
@@ -403,9 +402,9 @@ export function check(folder: string): string[] {
       problems.push((error as Error).message);
     }
   for (const part of ["address", "key", "model"] as const)
-    if (!setup.sorter[part])
+    if (setup.sorter.mode !== "off" && !setup.sorter[part])
       problems.push(
-        `sorter names no ${part}: the route to the firm's decision model, which reads each person's answer to a question and which the sorter calls`,
+        `sorter names no ${part}: the route to its decision model, which mode ${setup.sorter.mode} calls`,
       );
   if (!SORTER_MODES.includes(setup.sorter.mode))
     problems.push(`sorter.mode is "${setup.sorter.mode}"; it is one of: ${SORTER_MODES.join(", ")}`);
