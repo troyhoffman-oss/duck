@@ -586,8 +586,9 @@ export async function startFirm(
         ),
       /** Whether coworker `coworker`'s goose container exists, as duck install makes it. */
       goose: async (coworker: string) =>
-        (await podman("ps", "--all", "--format", "{{.Names}}", "--filter", `name=^duck-${name}-${coworker}$`)).trim() !==
-        "",
+        (
+          await podman("ps", "--all", "--format", "{{.Names}}", "--filter", `name=^duck-${name}-${coworker}$`)
+        ).trim() !== "",
       /** Coworker `coworker`'s facts, as duck keeps them in its folder. */
       facts: (coworker: string) =>
         JSON.parse(readFileSync(join(storage, coworker, "coworker.json"), "utf8")) as Record<string, string>,
