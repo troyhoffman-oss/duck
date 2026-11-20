@@ -27,6 +27,17 @@ export function tick(db: Database, zone: string, now = Date.now()) {
   }
 }
 
+/**
+ * Moves each repeating timer not yet due to the next time its cron expression gives in time zone `zone`, its
+ * person's new one. A one-time timer is a moment, and stays.
+ */
+export function rezone(db: Database, zone: string, now = Date.now()) {
+  for (const t of db
+    .query<Timer, [string]>("select * from timers where repeat is not null and at > ?")
+    .all(new Date(now).toISOString()))
+    db.run("update timers set at = ? where id = ?", [next(t.repeat as string, zone, now), t.id]);
+}
+
 /** Runs timer tool `name` with `input` for a person in time zone `zone`, and returns its result's words. */
 export function useTimers(db: Database, zone: string, name: string, input: Record<string, unknown>) {
   if (name === "remove_timer") {

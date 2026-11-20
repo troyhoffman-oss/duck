@@ -184,18 +184,20 @@ export const monthOf = (at: Date, zone: string) =>
     .format(at)
     .slice(0, 7);
 
-/** How far duck's log has been read, and each coworker's cost in the month it was read for. */
-const tally = { month: "", read: 0, costs: new Map<string, number>() };
+/** For each zone a month is cut in: how far duck's log has been read, and each coworker's cost that month. */
+const tallies = new Map<string, { month: string; read: number; costs: Map<string, number> }>();
 
 /**
- * Each coworker's cost in US dollars this calendar month in the firm's zone, summed from the model relay's line
- * per call in duck's log, the file podman keeps in storage (src/setup/install.ts). Each look reads only what
- * the log gained since the last; a new month reads it again from the start.
+ * Each coworker's cost in US dollars this calendar month in time zone `zone`, the firm's unless given, summed
+ * from the model relay's line per call in duck's log, the file podman keeps in storage (src/setup/install.ts).
+ * Each look reads only what the log gained since the last in that zone; a new month reads it again from the start.
  */
-export function monthCosts(setup: Setup): ReadonlyMap<string, number> {
+export function monthCosts(setup: Setup, zone = setup.zone): ReadonlyMap<string, number> {
   const file = join(setup.storage.folder, "duck.log");
-  const month = monthOf(new Date(), setup.zone);
+  const month = monthOf(new Date(), zone);
   const size = existsSync(file) ? statSync(file).size : 0;
+  const tally = tallies.get(zone) ?? { month: "", read: 0, costs: new Map() };
+  tallies.set(zone, tally);
   if (month !== tally.month || size < tally.read) Object.assign(tally, { month, read: 0, costs: new Map() });
   const fd = size > tally.read ? openSync(file, "r") : undefined;
   // In pieces, so a log of many months is never held whole.
@@ -210,7 +212,7 @@ export function monthCosts(setup: Setup): ReadonlyMap<string, number> {
       const text = printed.join(" ");
       if (!text.startsWith('{"relay":')) continue;
       const { relay, cost } = JSON.parse(text) as { relay: string; cost: number | null };
-      if (cost && monthOf(new Date(at.replace(/(\.\d{3})\d+/, "$1")), setup.zone) === month)
+      if (cost && monthOf(new Date(at.replace(/(\.\d{3})\d+/, "$1")), zone) === month)
         tally.costs.set(relay, (tally.costs.get(relay) ?? 0) + cost);
     }
   }

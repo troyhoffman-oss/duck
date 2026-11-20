@@ -3,7 +3,7 @@
 
 firm: harbor
 
-# The firm's time zone, which is also each coworker's.
+# The firm's time zone, and each coworker's person's until they set their own in their DM with duck.
 zone: America/Chicago
 
 # Where duck's inbox handler and its doors listen on the firm's server.
