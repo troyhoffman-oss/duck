@@ -49,7 +49,9 @@ export function apply(ctx) {
       owners.map((creator) => s.channels.findLabeled({ creator, label: s.viewer }, settings)),
     );
     const [oldest] = found
-      .flatMap((made, i) => made.filter((c) => c.channelType === "system").map((c) => ({ ...c, key: owners[i] })))
+      .flatMap((made, i) =>
+        made.filter((c) => c.channelType === "system").map((c) => ({ ...c, key: owners[i] })),
+      )
       .sort((a, b) => (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity) || (a.id < b.id ? -1 : 1));
     return oldest ? { key: oldest.key, channel: oldest.id } : {};
   }

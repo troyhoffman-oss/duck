@@ -528,7 +528,19 @@ export async function startBuzz() {
        * The owner adds key `key` to the community's member list as an admin (NIP-43, kind 9030), as Buzz's
        * Community admin, Membership, Add directly does.
        */
-      makeAdmin: (key: string) => publish("rosa", signed(secrets.rosa, 9030, [["p", key], ["role", "admin"]], "")),
+      makeAdmin: (key: string) =>
+        publish(
+          "rosa",
+          signed(
+            secrets.rosa,
+            9030,
+            [
+              ["p", key],
+              ["role", "admin"],
+            ],
+            "",
+          ),
+        ),
       /** `who`'s NIP-OA tag for Buzz key `agent`: the ownership proof Buzz's desktop copies for them. */
       proof: (who: Writer, agent: string) => authTag(secrets[who], agent),
       meet,
