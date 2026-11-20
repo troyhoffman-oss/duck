@@ -158,4 +158,47 @@ describe("Rosa writes to her coworker by mail", () => {
     expect(firm.mail.callsTo("send_file")).toHaveLength(1);
     expect(email.sent.some((m) => m.text.includes("Your yes is needed"))).toBe(false);
   });
+
+  test("a stream that goes silent without closing is noticed and opened again, and the mail she sent meanwhile is answered, found on a later page of what is listed", async () => {
+    const QUIET = "Did the plumber come to 2A today?";
+    firm.model.on(said(QUIET), say("Yes, he fixed the leak."));
+
+    const [opened, pages] = [email.opened(), email.pages()];
+    email.hush();
+    const asked = email.person.send("2A plumber", QUIET);
+    const reply = await email.person.next(120);
+    expect([reply.replyTo, reply.text]).toEqual([asked.id, "Yes, he fixed the leak."]);
+    expect(email.opened()).toBeGreaterThan(opened);
+    expect(email.pages()).toBeGreaterThan(pages);
+    await email.quiet(5);
+  });
+
+  test("her coworker's reply reads as formatted mail, and a picture in a signature is not a file, on her mail or a stranger's", async () => {
+    const [BEHIND, OFFER] = ["Which units are behind on rent?", "We can repaint 4B next week for $900."];
+    const ANSWER =
+      "**Two units** are behind:\n\n| Unit | Owed |\n|---|---|\n| 4B | $2,100 |\n| 5C | $950 |\n\nSee [the ledger](https://ledger.harbor.example/rent).";
+    const LOGO = { name: "signature-logo.png", bytes: "a picture", inline: true };
+    firm.model.on(said(BEHIND), say(ANSWER));
+    firm.model.on(all(sorter, shows(OFFER)), say("wake: a painter offers a price"));
+    firm.model.on(all(workLane, shows(OFFER)), say("Nothing to do: a painter's offer."));
+
+    email.person.send("Rent", BEHIND, { files: [LOGO, { name: "rent-roll.txt", bytes: "4B 2100; 5C 950" }] });
+    const reply = await email.person.next(60);
+    expect(reply.text).toBe(ANSWER);
+    for (const part of [
+      "<strong>Two units</strong>",
+      "<table>",
+      "<td>4B</td><td>$2,100</td>",
+      '<a href="https://ledger.harbor.example/rent">the ledger</a>',
+    ])
+      expect(reply.html).toContain(part);
+    expect(reply.html).not.toMatch(/style|class=|<font|<html/);
+    const asked = firm.model.requests.findLast(said(BEHIND));
+    expect([asked?.shows("rent-roll.txt"), asked?.shows("signature-logo")]).toEqual([true, false]);
+
+    email.stranger.send("Repaint", OFFER, { files: [LOGO, { name: "quote-4B.txt", bytes: "$900" }] });
+    await outside(OFFER);
+    const seen = firm.model.requests.findLast(all(workLane, shows(OFFER)));
+    expect([seen?.shows("quote-4B.txt"), seen?.shows("signature-logo")]).toEqual([true, false]);
+  });
 });
