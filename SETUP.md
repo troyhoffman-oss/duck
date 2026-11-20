@@ -73,7 +73,7 @@ Check: the repo holds the setup and no secret, and `git status` in it is clean a
 
 ## 5. Fill the secret store
 
-The secret store is the file `secrets.file` names, one `NAME=value` line per secret, exactly so: no quotes, no `export`, no spaces around `=`, Unix line ends; duck takes everything after the `=` as the value. It holds the backup's key, secret and password, the model key on the API-key route, the sorter's key if it has one, each plug's keys and its `events.push` key, and each door's `key` and, on a text door, `auth`. A plug address or header that says `${NAME_{person}}` needs one line per person, with `{person}` replaced by their handle. Have the admin put the values in the file themselves. A firm with a secret store of its own fills the file from it by its own means; duck reads only the file. No value may pass through your output or a command line.
+The secret store is the file `secrets.file` names, one `NAME=value` line per secret, exactly so: no quotes, no `export`, no spaces around `=`, Unix line ends; duck takes everything after the `=` as the value. It holds the backup's key, secret and password, the model key on the API-key route, the sorter's key if it has one, each plug's keys and its `events.push` key, and each door's `key` and, on a text or email door, `auth`. A plug address or header that says `${NAME_{person}}` needs one line per person, with `{person}` replaced by their handle. Have the admin put the values in the file themselves. A firm with a secret store of its own fills the file from it by its own means; duck reads only the file. No value may pass through your output or a command line.
 
 Check: `duck check` prints no line that starts `the secret store`. It asks for a person's plug keys only once their coworker is claimed; `duck make` for a person asks for them first (step 9).
 
@@ -156,9 +156,9 @@ In `<duck>`, check out the newer commit of `main` and run `bun install --product
 ## Reference
 
 - **Commands.** `duck --help` lists them: `check`, `install`, `make`, `claim`, `import`, `backup`, `restore`.
-- **duck.yaml.** [examples/harbor/duck.yaml](examples/harbor/duck.yaml) has the keys a firm sets, each with a comment. Keys it leaves out: `buzz.owner` (step 7), `model.login` (step 6), `settings.locked`, `buzz.tools`, a plug's `others` and a text door's `line` and `auth`. The type `Setup` in [src/setup/index.ts](src/setup/index.ts) lists every key duck reads, and SPEC.md part 1 says what each means. `duck check` refuses a setup that lists people or coworkers: duck keeps those itself.
+- **duck.yaml.** [examples/harbor/duck.yaml](examples/harbor/duck.yaml) has the keys a firm sets, each with a comment. Keys it leaves out: `buzz.owner` (step 7), `model.login` (step 6), `settings.locked`, `buzz.tools`, a plug's `others`, a text door's `line` and `auth`, and an email door. The type `Setup` in [src/setup/index.ts](src/setup/index.ts) lists every key duck reads, and SPEC.md part 1 says what each means. `duck check` refuses a setup that lists people or coworkers: duck keeps those itself.
 - **Model routes.** `api-key` and `claude-login` (SPEC part 12).
-- **Doors.** Every claimed coworker has a `buzz` door, which duck makes at `buzz.relay`. The setup may add, under `doors.<coworker>`, an `http` door, or a `text` door with a `line` and an `auth`, which `duck check` reads as the name of a secret.
+- **Doors.** Every claimed coworker has a `buzz` door, which duck makes at `buzz.relay`. The setup may add, under `doors.<coworker>`, an `http` door, a `text` door with a `line` and an `auth`, which `duck check` reads as the name of a secret, or an `email` door: `kind: email`, `address` the mail service's API (`https://api.agentmail.to` for AgentMail, the first service), `mailbox` the coworker's own address there, `key` the name of the secret holding a key scoped to that one mailbox, and `auth` the name of the secret holding the person's own mail address. The email door opens no port: it holds the service's stream.
 - **Plugs.** One entry under `plugs` each: an address, headers that name secrets, the coworkers it is given to (`everyone` or a list), its tools' states (`free`, `ask first`, `removed`), and how its events arrive, pushed or polled (SPEC part 1, Plugs).
 - **What reaches duck from outside.** A plug that pushes posts to `/events/<plug>` and an `http` door's other end to `/doors/<coworker>/<door>`, both at `listen`, which harbor binds to loopback. duck ships no proxy or certificate: making that address reachable from the source is the firm's.
 
@@ -172,5 +172,5 @@ In `<duck>`, check out the newer commit of `main` and run `bun install --product
 - A coworker offered to everyone, an admin confirming a claim, and a person creating a coworker of their own.
 - The first conversation's set questions: how they want to work, their voice, history and their mail link.
 - A message written in duck's DM while duck is down gets no answer.
-- A person leaving and the handover; team coworkers; the email door.
+- A person leaving and the handover; team coworkers.
 - A real reboot of a firm's server has not been run; the boot unit is proven by starting it as a boot does.

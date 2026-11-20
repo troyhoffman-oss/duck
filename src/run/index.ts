@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { called, callStatus, cutShort, lastShown, lastTold, runEnded, runStarted, said } from "../archive";
-import { answerOthers, deliver, listen } from "../doors";
+import { answerOthers, deliver, doorTo, listen } from "../doors";
 import { JOB, lapse, OTHERS, WORK } from "../gate";
 import {
   aboutSession,
@@ -34,6 +34,8 @@ type Turn = {
   applied: Set<string>;
   started: number;
   lined: boolean;
+  /** At an email door, the first line, which waits to go in one mail with the answer. */
+  first?: string;
   rows: number[];
 };
 
@@ -128,15 +130,22 @@ export function startCoworker(setup: Setup, name: string) {
 
   /**
    * Ends the coworker's message. The person hears its first line, written before more work, at once, and the
-   * answer the run ends on; what it writes between later steps is not for them. The outbox rows the run was
-   * handed go with the first message it delivers.
+   * answer the run ends on; what it writes between later steps is not for them. Mail is not chat, so at an
+   * email door the first line goes in one mail with the answer. The outbox rows the run was handed go with the
+   * first message it delivers.
    */
   function flush(answer = false) {
     const text = message?.text.trim();
     message = null;
-    if (!text || !turn || !session) return;
-    if (answer || !turn.lined) settle(db, turn.rows.splice(0), deliver(coworker, text, turn.started));
-    turn.lined = true;
+    if (!turn || !session) return;
+    const first = !turn.lined && !!text;
+    if (text) turn.lined = true;
+    if (first && !answer && doorTo(coworker).set.kind === "email") {
+      turn.first = text;
+      return;
+    }
+    const words = answer || first ? [turn.first, text].filter(Boolean).join("\n\n") : "";
+    if (words) settle(db, turn.rows.splice(0), deliver(coworker, words, turn.started));
   }
 
   function update(id: string, u: Update) {
@@ -586,7 +595,7 @@ export function startCoworker(setup: Setup, name: string) {
     if (signal.aborted) return;
     const { rows, wait } = dueNow();
     for (const r of rows.filter((r) => r.kind === "ask"))
-      settle(db, [r.id], deliver(coworker, r.text, performance.now()));
+      settle(db, [r.id], deliver(coworker, r.text, performance.now(), true));
     if (rows.some((r) => r.kind === "tell")) wake();
     if (wait > 0) later = setTimeout(dispatch, wait);
   }

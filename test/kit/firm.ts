@@ -18,6 +18,7 @@ import { UNITS, unit } from "../../src/setup/install";
 import { type Bucket, startBucket } from "./bucket";
 import { authTag, type BuzzForFirm } from "./buzz";
 import { HARBOR, harbor } from "./duck";
+import type { EmailService } from "./email";
 import { scriptedModel } from "./model";
 import { startPerson } from "./person";
 import { listTool, type Plug, type PlugEvent, type PlugTool, startPlug } from "./plug";
@@ -174,6 +175,8 @@ async function writeSetup(
     answers?: string;
     /** A text door the coworker gets beside harbor's own. */
     text?: TextLine["door"];
+    /** An email door the coworker gets beside harbor's own. */
+    email?: EmailService["door"];
     /** The sorter's mode, where it is not harbor's. */
     sorter?: string;
     /**
@@ -219,6 +222,7 @@ async function writeSetup(
   const doors = setup.doors[harbor.coworker] as Setup["doors"][string];
   for (const door of harbor.doors) (doors[door] as { address: string }).address = given.door(door);
   if (given.text) doors.text = given.text;
+  if (given.email) doors.email = given.email;
   const mail = setup.plugs.mail as Setup["plugs"][string];
   mail.address = given.mail;
   if (given.second)
@@ -248,7 +252,7 @@ async function writeSetup(
  * firm has that Buzz relay, duck's own identity there is authorized by the relay's owner where duck check names
  * its key, the coworker is claimed with the tag of the person there and has a door named buzz on it, and the
  * person meets it there; with `text` the coworker has a door named text on
- * that line. With `mail`, those of the mail plug's tools answer as the test declares them. With `sorter`, the
+ * that line, and with `email` a door named email at that mail service. With `mail`, those of the mail plug's tools answer as the test declares them. With `sorter`, the
  * sorter runs in that mode. With `second`, the firm has a second person and coworker, at a desk door of its
  * own, and with `signed`, the mail plug signs its pushes. With `answers`, the
  * buzz door answers whom it names beyond its owner, and with `others`, the mail plug's tools have those states
@@ -264,6 +268,7 @@ export async function startFirm(
     buzz?: BuzzForFirm;
     answers?: string;
     text?: TextLine;
+    email?: EmailService;
     mail?: Record<string, PlugTool>;
     sorter?: string;
     second?: boolean;
@@ -292,6 +297,7 @@ export async function startFirm(
     HARBOR_BACKUP_SECRET: secret(),
     HARBOR_BACKUP_PASSWORD: secret(),
     ...given.text?.secrets,
+    ...given.email?.secrets,
   };
   const name = `harbor-${randomBytes(3).toString("hex")}`;
   const folder = mkdtempSync(join(tmpdir(), `${name}-`));
@@ -399,6 +405,7 @@ export async function startFirm(
       buzz: given.buzz?.url,
       answers: given.answers,
       text: given.text?.door,
+      email: given.email?.door,
       sorter: given.sorter,
       second: given.second ? theirs.address : undefined,
       signed: given.signed,
