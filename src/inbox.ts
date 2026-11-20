@@ -55,9 +55,11 @@ export function openDb(path: string) {
   for (const [table, column, definition] of ADDED)
     if (!db.query("select 1 from pragma_table_info(?) where name = ?").get(table, column))
       db.exec(`alter table ${table} add column ${column} ${definition}`);
-  // An ask an earlier build sent kept no message: it is the last one sent at its door when it was settled.
+  // An ask an earlier build sent kept no message: it is the last one sent at its door, in its own words, when it
+  // was settled. One whose words changed on the way, as a file's path does, keeps none and lapses.
   db.run(`update outbox set message = (select max(id) from messages where way = 'out' and messages.door = outbox.door
-    and at <= outbox.sent_at) where kind = 'ask' and state = 'sent' and message is null`);
+    and at <= outbox.sent_at and messages.text = outbox.text)
+    where kind = 'ask' and state = 'sent' and message is null`);
   return db;
 }
 

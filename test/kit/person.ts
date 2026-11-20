@@ -92,13 +92,13 @@ export function startPerson({
     meet(address: string, coworker: string) {
       duck = { address, coworker };
     },
-    /** Writes `text`, with `files`, at door `door`. Returns duck's answer. */
-    async send(door: string, text: string, files: File[] = []) {
+    /** Writes `text`, with `files`, at door `door`, saying it was written `at` where given. Returns duck's answer. */
+    async send(door: string, text: string, files: File[] = [], at?: string) {
       if (!duck) throw new Error("the person has no duck to write to yet");
       const response = await fetch(`${duck.address}/doors/${duck.coworker}/${door}`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-        body: JSON.stringify({ id: `person-${++sent}`, text, files: files.map(toDoor) }),
+        body: JSON.stringify({ id: `person-${++sent}`, text, files: files.map(toDoor), at }),
       });
       if (response.status !== 202)
         throw new Error(`duck answered the person's message at ${door} with ${response.status}`);

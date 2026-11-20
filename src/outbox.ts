@@ -5,7 +5,7 @@ import { ms, type Person } from "./setup";
 // SPEC part 10. A row is pending until the main conversation is handed it: sent when its message goes to a
 // door, dropped when the main conversation wrote no message for it. An ask row, which duck delivers as
 // written, also holds its call as the gate would send it, the archive's id of the message that carried it,
-// as `sent_at` when the try that delivered it began, and once given, the person's answer and the inbox event
+// as `sent_at` when the try that delivered it ended, and once given, the person's answer and the inbox event
 // of the message that gave it (SPEC part 9).
 export const OUTBOX = `
 create table if not exists outbox (id integer primary key, kind text not null check (kind in ('tell', 'ask')),

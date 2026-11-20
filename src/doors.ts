@@ -132,7 +132,7 @@ export function doorTo(c: Coworker, ask = false) {
  * Sends `text` from the main conversation, an `ask` or not, to the door `doorTo` names, with each file of the
  * coworker's it names, which the person sees by its name: at a buzz door, to the place of their last message
  * there. It returns the door, the archive's id of the message, and `delivered`: when the try the door took
- * began, or null when it took none. A delivery the door does not take after three tries is logged as not
+ * ended, or null when it took none. A delivery the door does not take after three tries is logged as not
  * delivered, and the door is broken.
  */
 export function deliver(c: Coworker, said: string, since: number, ask = false) {
@@ -168,13 +168,9 @@ export function deliver(c: Coworker, said: string, since: number, ask = false) {
         : set.kind === "email"
           ? () => mailOut(c, set, last, `${c.setup.firm}-${c.name}-${id}`, text, local)
           : http;
-  let began = 0;
   const delivered = c.sending.then(async () => {
-    const failed = await tried(`delivery ${c.name}-${id} at ${door}`, () => {
-      began = Date.now();
-      return send();
-    });
-    if (!failed) return began;
+    const failed = await tried(`delivery ${c.name}-${id} at ${door}`, send);
+    if (!failed) return Date.now();
     console.error(`message ${c.name}-${id} was not delivered at ${door}`);
     // Told once a door until the person writes again, so a telling that fails there too is not told again.
     broken(c, `${door}:${last?.id ?? 0}`, { door, undelivered: text, because: failed.message });

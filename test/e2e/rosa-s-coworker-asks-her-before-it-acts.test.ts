@@ -1,4 +1,6 @@
+import { Database } from "bun:sqlite";
 import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { join } from "node:path";
 import {
   all,
   answered,
@@ -74,7 +76,7 @@ const EVERY = { times: Number.POSITIVE_INFINITY };
 const stateOf = (r: ModelRequest | undefined) =>
   JSON.parse(String(r?.body.state)) as {
     question: { entry: number; number?: number };
-    conversation: { from: string; text: string }[];
+    conversation: { from: string; at: string; text: string }[];
   };
 /** A reading of a reply for the question whose message holds `text`, and that is question `number` there. */
 const readingOf = (text: string, number?: number) => (r: ModelRequest) => {
@@ -664,6 +666,108 @@ describe("Rosa's coworker asks her before it acts", () => {
 
     expect(firm.mail.callsTo("send_mail")).toEqual([]);
     expect(firm.model.requests.find(all(coworkerRun, said(REPLY)))?.last).toContain("which stays open");
+    const db = firm.db();
+    const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
+    db.close();
+    expect(open).toEqual([{ answer: null }]);
+  });
+
+  test("the model is shown what Rosa was sent just before the question: the coworker's own question there comes first, marked as its, so her yes that could answer either is read as neither and the call stays held", async () => {
+    const ASK = "Send Dana the 4B terms, and copy whoever should see them.";
+    const COPY = terms("4B renewal terms, with a copy");
+    const [WANT, REPLY] = ["Want me to copy Lee as well?", "yes please"];
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", COPY));
+    firm.model.on(answered("send_mail"), say(`I've asked you before it goes. ${WANT}`));
+    firm.model.on(all(readingOf(COPY.subject), said(REPLY)), say("neither"));
+    firm.model.on(reading, say("neither"), EVERY);
+    firm.model.on(all(coworkerRun, said(REPLY)), say("I'll copy Lee; the mail still waits for your yes."));
+
+    await firm.person.send("phone", ASK);
+    const before = await firm.person.nextWith(WANT, 30);
+    const question = await firm.person.nextWith(COPY.subject, 30);
+    await firm.person.send("phone", REPLY);
+    await firm.person.nextWith("still waits", 60);
+
+    expect(shownIn(firm.model.requests.find(readingOf(COPY.subject)))).toEqual([
+      ["the coworker", before.text],
+      ["duck's question", question.text],
+      ["the person", REPLY],
+    ]);
+    expect(firm.mail.callsTo("send_mail")).toEqual([]);
+    const db = firm.db();
+    const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
+    db.close();
+    expect(open).toEqual([{ answer: null }]);
+  });
+
+  test("a reply is read as written at the earlier of the time its door gives and when it came: one dated before its question reached her is read for no question there, and one dated ahead is read as written when it came, and her yes runs the call once", async () => {
+    const ASK = "Send Dana the 4B terms today.";
+    const TODAY = terms("4B renewal terms, today");
+    const [BEFORE, AHEAD] = ["Yes, that one is fine.", "Yes, send it today."];
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", TODAY));
+    firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
+    firm.model.on(all(readingOf(TODAY.subject), said(AHEAD)), say("yes"));
+    firm.model.on(reading, say("neither"), EVERY);
+    firm.model.on(all(coworkerRun, said(BEFORE)), say("Noted."), EVERY);
+    firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has today's terms."));
+    firm.model.on(all(coworkerRun, said(AHEAD)), say("Sending it."), EVERY);
+    const sentAt = () => {
+      using db = firm.db();
+      return db
+        .query<{ at: string | null }, []>(
+          "select sent_at as at from outbox where kind = 'ask' order by id desc limit 1",
+        )
+        .get()?.at;
+    };
+
+    await firm.person.send("phone", ASK);
+    await firm.person.nextWith("I've asked you", 30);
+    await firm.person.nextWith(TODAY.subject, 30);
+    await until("the question's delivery kept", () => !!sentAt(), 30, firm.trouble);
+    await firm.person.send("phone", BEFORE, [], new Date(Date.parse(String(sentAt())) - 5000).toISOString());
+    await until(
+      "her earlier-dated reply's run",
+      () => firm.model.requests.some(all(coworkerRun, said(BEFORE))),
+      60,
+      firm.trouble,
+    );
+    expect(firm.model.requests.filter(readingOf(TODAY.subject))).toEqual([]);
+
+    await firm.person.send("phone", AHEAD, [], new Date(Date.now() + 3_600_000).toISOString());
+    await firm.person.nextWith("today's terms", 60);
+    expect(firm.mail.callsTo("send_mail").map((c) => c.input)).toEqual([TODAY]);
+    const read = stateOf(firm.model.requests.find(readingOf(TODAY.subject)));
+    expect(Date.parse(String(read.conversation.at(-1)?.at))).toBeLessThanOrEqual(Date.now());
+  });
+
+  test("when what her reply answered cannot be kept, it is logged, her message still reaches the coworker answering nothing, and the question stays open", async () => {
+    const ASK = "Send Dana the 4B terms tonight.";
+    const TONIGHT = terms("4B renewal terms, tonight");
+    const REPLY = "Yes, tonight is good.";
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", TONIGHT));
+    firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
+    firm.model.on(all(readingOf(TONIGHT.subject), said(REPLY)), say("yes"));
+    firm.model.on(reading, say("neither"), EVERY);
+    firm.model.on(all(coworkerRun, said(REPLY)), say("It waits for your yes."));
+    const writable = (sql: string) => {
+      using db = new Database(join(firm.folder, "storage", harbor.coworker, "duck.db"));
+      db.run("pragma busy_timeout = 10000");
+      db.run(sql);
+    };
+
+    await firm.person.send("desk", ASK);
+    await firm.person.nextWith("I've asked you", 30);
+    await firm.person.nextWith(TONIGHT.subject, 30);
+    // An answer the database refuses to keep, as a full disk would.
+    writable(
+      "create trigger kit_unkept before update of answer on outbox begin select raise(abort, 'the kit keeps no answer'); end",
+    );
+    await firm.person.send("desk", REPLY);
+    await firm.person.nextWith("waits for your yes", 60);
+    writable("drop trigger kit_unkept");
+
+    expect(firm.mail.callsTo("send_mail")).toEqual([]);
+    expect(await firm.logs()).toContain("answered was not kept: the kit keeps no answer");
     const db = firm.db();
     const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
     db.close();

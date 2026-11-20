@@ -409,4 +409,63 @@ describe("the Buzz door", () => {
     },
     E2E,
   );
+
+  test(
+    "the coworker's message in a channel thread where the person wrote is kept as a message to her, and the decision model is shown it, marked as the coworker's, ahead of the question that followed it there",
+    async () => {
+      firm.model.clear();
+      const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
+      const printed = (text: string) => all(main, answered(TOOLS.buzz), said(text));
+      const [ARCHIVE, BEFORE, YES] = [
+        "Archive harbor-ops when you can.",
+        "Before I archive it: shall I tell Theo first?",
+        "Yes, go on.",
+      ];
+      let root = "";
+      firm.model.on(all(main, said(ARCHIVE)), () =>
+        call(TOOLS.buzz, {
+          args: ["messages", "send", "--channel", buzz.channel, "--reply-to", root, "--content", "-"],
+          input: BEFORE,
+        }),
+      );
+      firm.model.on(
+        printed("event_id"),
+        call(TOOLS.buzz, { args: ["channels", "archive", "--channel", buzz.channel] }),
+      );
+      firm.model.on(printed("The gate holds"), say("I've asked you first."));
+      firm.model.on(reading, say("neither"), { times: Number.POSITIVE_INFINITY });
+      firm.model.on(all(main, said(YES)), say("Noted."));
+
+      root = (await buzz.write("rosa", "harbor-ops", ARCHIVE)).id;
+      let question = "";
+      for (let waited = 0; !question; waited++) {
+        if (waited === 120) throw new Error("waited 60 s for the question in the thread");
+        firm.trouble.check();
+        await Bun.sleep(500);
+        const thread = await buzz.thread(root);
+        question = thread.find((m) => m.content.includes("Your yes is needed"))?.content ?? "";
+      }
+      await buzz.write("rosa", "harbor-ops", YES, { reply: root });
+      await until(
+        "her yes read and handed on",
+        () => firm.model.requests.some(all(main, said(YES))),
+        60,
+        firm.trouble,
+      );
+
+      const read = firm.model.requests.find((r) => {
+        if (!(reading(r) && said(YES)(r))) return false;
+        const { question: q, conversation } = JSON.parse(String(r.body.state));
+        return conversation[q.entry - 1]?.text === question;
+      });
+      const shown = JSON.parse(String(read?.body.state)).conversation as { from: string; text: string }[];
+      const entry = (text: string) => shown.findIndex((e) => e.text === text);
+      expect(shown[entry(BEFORE)]?.from).toBe("the coworker");
+      expect(shown[entry(question)]?.from).toBe("duck's question");
+      expect(entry(BEFORE)).toBeLessThan(entry(question));
+      expect(shown.at(-1)).toMatchObject({ from: "the person", text: YES });
+      firm.trouble.check();
+    },
+    E2E,
+  );
 });

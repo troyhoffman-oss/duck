@@ -591,8 +591,8 @@ export function startCoworker(setup: Setup, name: string) {
   /**
    * The dispatcher (SPEC part 10): delivers the ask rows that may go as duck wrote them, all in one message,
    * wakes the main conversation when tell rows may, and looks again once more may. The asks wait while the
-   * person lane runs or has tells to write, so that they are the last message the person was sent when they
-   * answer (SPEC part 9); the lane looks again when it rests.
+   * person lane runs or has tells to write, so that the asks a run held go in one message, after what it wrote
+   * the person of them; the lane looks again when it rests.
    */
   function dispatch() {
     clearTimeout(later);
@@ -604,7 +604,7 @@ export function startCoworker(setup: Setup, name: string) {
       const text = asks.map((r, i) => (asks.length === 1 ? r.text : `${i + 1}. ${r.text}`)).join("\n\n");
       const sent = deliver(coworker, text, performance.now(), true);
       const ids = asks.map((r) => r.id);
-      // Each is sent from when the try that delivered it began, which a reply must come after (SPEC part 9).
+      // Each is sent from when the try that delivered it ended, which a reply must come after (SPEC part 9).
       settle(db, ids, sent.door, null, sent.id);
       void sent.delivered.then(
         (at) => at !== null && !signal.aborted && settle(db, ids, sent.door, at, sent.id),
@@ -676,7 +676,9 @@ export function startCoworker(setup: Setup, name: string) {
     lapse(db, person);
     wake();
   }, ms(setup.timers.every));
-  // A message a stop caught while duck read it is read again before the coworker gets it (SPEC part 9).
+  // Each message a stop caught while duck read it is read again: the reads start here and the doors open while
+  // they go on, and each message, with those after it at its door, waits for the coworker until its read is
+  // kept (SPEC part 9).
   for (const e of db
     .query<{ id: number }, []>("select id from inbox where state = 'reading' order by id")
     .all())

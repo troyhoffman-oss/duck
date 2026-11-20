@@ -87,6 +87,11 @@ export class ModelRequest {
     return textOf(content);
   }
 
+  /** Of a decisions request that reads a reply (SPEC part 9), the reply: its conversation's final entry. */
+  get reply(): string | undefined {
+    return readOf(this.body.state)?.conversation.at(-1)?.text;
+  }
+
   /** Every text the model is shown, in order: the system text, then each message. */
   get shown(): string {
     return [this.system, ...this.messages.map((m) => textOf(m.content))].join("\n");
@@ -146,11 +151,11 @@ function textOf(value: unknown): string {
 /** A predicate over a request. */
 export type When = (request: ModelRequest) => boolean;
 
-/** A request whose last user message holds `text`. */
+/** A request whose last user message holds `text`: of one that reads a reply (SPEC part 9), the reply. */
 export const said =
   (text: string): When =>
   (r) =>
-    r.last.includes(text);
+    (r.reply ?? r.last).includes(text);
 /** A request that shows `text` anywhere. */
 export const shows =
   (text: string): When =>
@@ -379,11 +384,19 @@ export function atOnce(requests: ModelRequest[]): number {
  * the question it names, then each entry's text, oldest first; any other state as it is.
  */
 function stated(state: unknown) {
+  const read = readOf(state);
+  return read
+    ? [`question: ${JSON.stringify(read.question)}`, ...read.conversation.map((e) => e.text)].join("\n\n")
+    : state;
+}
+
+/** A decisions request's state when it is a conversation duck reads a reply in (SPEC part 9), else undefined. */
+function readOf(state: unknown): { question: Json; conversation: { text: string }[] } | undefined {
   try {
-    const { question, conversation } = JSON.parse(String(state));
-    return [`question: ${JSON.stringify(question)}`, ...conversation.map((e: Json) => e.text)].join("\n\n");
+    const read = JSON.parse(String(state));
+    return Array.isArray(read?.conversation) ? read : undefined;
   } catch {
-    return state;
+    return undefined;
   }
 }
 
