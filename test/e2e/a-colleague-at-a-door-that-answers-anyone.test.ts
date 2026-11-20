@@ -275,4 +275,19 @@ describe("a colleague at a Buzz door that answers anyone", () => {
     },
     E2E,
   );
+
+  test(
+    "words with an at-sign that names no one, and an email address, reach the person in her DM and a colleague in their thread as written",
+    async () => {
+      const WORDS = "Ask @nobody about it, or write to harbor.ops@example.com, then tell @everyone.";
+      firm.model.on(all(main, said("Who do I ask about the 4B boiler?")), say(WORDS));
+      firm.model.on(all(othersRun, said("Who should I ask about the 4B boiler?")), say(WORDS));
+      await buzz.person.send("Who do I ask about the 4B boiler?");
+      expect((await buzz.person.next(60)).content).toBe(WORDS);
+      const { id: root } = await buzz.write("theo", "harbor-ops", "Who should I ask about the 4B boiler?");
+      await buzz.inThread(root, WORDS, 60);
+      firm.trouble.check();
+    },
+    E2E,
+  );
 });
