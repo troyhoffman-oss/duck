@@ -327,8 +327,21 @@ export async function startFirm(
     trouble,
   });
   const bucket = startBucket({ name: "backup", key: secrets.HARBOR_BACKUP_KEY, reach: bothReach() });
-  const person = startPerson({ doors: harbor.doors, key: secrets.HARBOR_DOOR_KEY, reach, trouble });
-  const theirs = startPerson({ doors: ["desk"], key: secrets.HARBOR_DOOR_KEY, reach, trouble });
+  // Duck has a door's answer to delivery `<coworker>-<message>` once no question the message carries lacks the
+  // time its delivery ended (SPEC part 9).
+  const heard = (id: string) => {
+    const [, coworker = "", message] = /^(.+)-(\d+)$/.exec(id) ?? [];
+    const file = join(storage, coworker, "duck.db");
+    if (!existsSync(file)) return true;
+    const db = new Database(file, { readonly: true });
+    try {
+      return !db.query("select 1 from outbox where message = ? and sent_at is null").get(Number(message));
+    } finally {
+      db.close();
+    }
+  };
+  const person = startPerson({ doors: harbor.doors, key: secrets.HARBOR_DOOR_KEY, reach, trouble, heard });
+  const theirs = startPerson({ doors: ["desk"], key: secrets.HARBOR_DOOR_KEY, reach, trouble, heard });
   const running = new Set<ReturnType<typeof Bun.spawn>>();
   /** The plugs a test adds to the setup. */
   const added: Plug[] = [];

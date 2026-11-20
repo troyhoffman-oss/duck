@@ -43,7 +43,7 @@ const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
 const work = (r: ModelRequest) => r.has(TOOLS.tell);
 const others = [...Object.values(MIDRUN), ...Object.values(YESES)];
 
-test.failing(
+test(
   "at the Buzz door only the owner's own words are the person's: an agent she owns reaches the work lane as outside words; that agent's words and another person's DM and mention neither start nor steer her run nor answer her ask; hers do all three",
   async () => {
     await using buzz = await startBuzz();

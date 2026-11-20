@@ -4,12 +4,14 @@ import { ms, type Person } from "./setup";
 
 // SPEC part 10. A row is pending until the main conversation is handed it: sent when its message goes to a
 // door, dropped when the main conversation wrote no message for it. An ask row, which duck delivers as
-// written, also holds its call as the gate would send it and, once given, the person's answer (SPEC part 9).
+// written, also holds its call as the gate would send it, the archive's id of the message that carried it,
+// as `sent_at` when the try that delivered it ended, and once given, the person's answer and the inbox event
+// of the message that gave it (SPEC part 9).
 export const OUTBOX = `
 create table if not exists outbox (id integer primary key, kind text not null check (kind in ('tell', 'ask')),
   text text not null, item_id integer, urgent integer not null default 0, state text not null default 'pending'
   check (state in ('pending', 'sent', 'dropped')), created_at text not null, sent_at text, door text, held text,
-  answer text check (answer in ('yes', 'no')));`;
+  answer text check (answer in ('yes', 'no')), message integer, answered_by integer);`;
 
 export type Row = {
   id: number;
@@ -53,6 +55,19 @@ export const openAsks = (db: Database) =>
     )
     .all()
     .map((r) => `- ask ${r.id}: ${r.text}`);
+
+/** A note for each ask the person's messages, inbox events `ids`, answered, for the person named `name`. */
+export const answeredBy = (db: Database, ids: number[], name: string) =>
+  db
+    .query<{ id: number; answer: string }, number[]>(
+      `select id, answer from outbox where answered_by in (${ids.map(() => "?").join(", ")}) order by id`,
+    )
+    .all(...ids)
+    .map(
+      (a) =>
+        `Note from duck: ${name}'s message below answers ask ${a.id}: ${a.answer === "yes" ? "a yes, so duck runs its call once, exactly as shown, and what came of it goes to the conversation that made it" : "a no, so its call is dropped"}.\n\n`,
+    )
+    .join("");
 
 /** The work lane's own tool (SPEC part 10), which the gate serves as duck's own. */
 export const TELL = {
@@ -102,13 +117,23 @@ export function due(db: Database, person: Person, now = Date.now(), held = false
   return { rows: rows.filter(may), wait: rows.length > 0 ? wait : 0 };
 }
 
-/** Rows `ids` as the main conversation left them: sent to `door` at `now`, or with no door, dropped. */
-export function settle(db: Database, ids: number[], door: string | null, now = Date.now()) {
+/**
+ * Rows `ids` as the main conversation or the dispatcher left them: sent to `door` at `now`, or with no time
+ * yet, in the archive's message `message` if given; or with no door, dropped.
+ */
+export function settle(
+  db: Database,
+  ids: number[],
+  door: string | null,
+  now: number | null = Date.now(),
+  message?: number,
+) {
   for (const id of ids)
-    db.run("update outbox set state = ?, sent_at = ?, door = ? where id = ?", [
+    db.run("update outbox set state = ?, sent_at = ?, door = ?, message = ? where id = ?", [
       door ? "sent" : "dropped",
-      door ? new Date(now).toISOString() : null,
+      door && now !== null ? new Date(now).toISOString() : null,
       door,
+      message ?? null,
       id,
     ]);
 }

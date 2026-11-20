@@ -126,7 +126,7 @@ describe("Rosa writes to her coworker by mail", () => {
     await email.quiet(5);
   });
 
-  test.failing("an ask goes where it can be answered: the question waits at her desk, where she last wrote but by mail, her yes by mail is not read and leaves the call held, and her yes at the desk, which duck reads, releases it", async () => {
+  test("an ask goes where it can be answered: the question waits at her desk, where she last wrote but by mail, her yes by mail is not read and leaves the call held, and her yes at the desk, which duck reads, releases it", async () => {
     const [FILE, SEND, YES] = ["/duck/home/lease-4B.txt", "Send Dana the 4B lease.", "Yes, send it."];
     /** What the session that made a held call is told on a yes. */
     const OUTCOME = '"answer":"yes"';

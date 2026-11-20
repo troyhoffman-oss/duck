@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { called, callStatus, cutShort, lastShown, lastTold, runEnded, runStarted, said } from "../archive";
 import { answerOthers, deliver, doorTo, listen } from "../doors";
-import { JOB, lapse, OTHERS, WORK } from "../gate";
+import { cutHeld, JOB, lapse, OTHERS, readIn, WORK } from "../gate";
 import {
   aboutSession,
   add,
@@ -18,7 +18,7 @@ import {
 import { AT_ONCE, checkerText, ended, endRef, type Job, moved, resume, take, workerText } from "../jobs";
 import { gained, openItems, useList } from "../list";
 import { history, memory, upTo } from "../notes";
-import { due, openAsks, type Row, settle, tells } from "../outbox";
+import { answeredBy, due, openAsks, type Row, settle, tells } from "../outbox";
 import { container, doorsOf, duckAddress, HOME, jobCalls, ms, personOf, type Setup } from "../setup";
 import { GOOSE_PORT } from "../setup/install";
 import { line, logLine, screen } from "../sorter";
@@ -118,12 +118,13 @@ export function startCoworker(setup: Setup, name: string) {
 
   const [home, files, sending] = [join(own, "home"), join(own, "files"), Promise.resolve()];
   resume(db);
+  cutHeld(db);
   const keep = history(join(own, "history"), home);
   const memories = [
     `${person.name}'s standing words, from standing.md`,
     "the first line of each file in notes/",
     "the open items on your list",
-    `what ${person.name} was asked and has not answered; their plain reply may answer one`,
+    `what ${person.name} was asked and has not answered; duck reads their reply to each and tells you what it answered`,
   ];
   // What each session was last shown of those, as hashes. After a restart a session is shown all of them again.
   const seen = new Map<string, (number | bigint)[]>();
@@ -145,7 +146,7 @@ export function startCoworker(setup: Setup, name: string) {
       return;
     }
     const words = answer || first ? [turn.first, text].filter(Boolean).join("\n\n") : "";
-    if (words) settle(db, turn.rows.splice(0), deliver(coworker, words, turn.started));
+    if (words) settle(db, turn.rows.splice(0), deliver(coworker, words, turn.started).door);
   }
 
   function update(id: string, u: Update) {
@@ -299,7 +300,10 @@ export function startCoworker(setup: Setup, name: string) {
     return { run: runStarted(db, s, ids), text: changed.join("") + logs + told + note + words };
   }
 
-  /** What came in with `events`: each event from outside the doors as its source gave it, then what the person wrote. */
+  /**
+   * What came in with `events`: each event from outside the doors as its source gave it, then what the person
+   * wrote, with what it answered of the questions they were asked.
+   */
   function cameIn(events: Event[]) {
     const other = events.filter((e) => !doors.includes(e.source));
     const label = (e: Event) =>
@@ -307,7 +311,7 @@ export function startCoworker(setup: Setup, name: string) {
     const lines = other.map((e) => line(e) + label(e));
     const note = other.length > 0 ? `Note from duck: what came in.\n${lines.join("\n")}\n\n` : "";
     const ids = events.map((e) => e.id);
-    return note + said(db, ids);
+    return note + answeredBy(db, ids, person.name) + said(db, ids);
   }
 
   /**
@@ -378,8 +382,6 @@ export function startCoworker(setup: Setup, name: string) {
       [turn, message] = [null, null];
     }
     ran = true;
-    // An ask the run raised goes once it ends, so the person's reply starts a run of its own.
-    dispatch();
   }
 
   /** Hands what the person wrote during their own run to that run. */
@@ -587,16 +589,28 @@ export function startCoworker(setup: Setup, name: string) {
   );
 
   /**
-   * The dispatcher (SPEC part 10): delivers the ask rows that may go as duck wrote them, wakes the main
-   * conversation when tell rows may, and looks again once more may.
+   * The dispatcher (SPEC part 10): delivers the ask rows that may go as duck wrote them, all in one message,
+   * wakes the main conversation when tell rows may, and looks again once more may. The asks wait while the
+   * person lane runs or has tells to write, so that the asks a run held go in one message, after what it wrote
+   * the person of them; the lane looks again when it rests.
    */
   function dispatch() {
     clearTimeout(later);
     if (signal.aborted) return;
     const { rows, wait } = dueNow();
-    for (const r of rows.filter((r) => r.kind === "ask"))
-      settle(db, [r.id], deliver(coworker, r.text, performance.now(), true));
-    if (rows.some((r) => r.kind === "tell")) wake();
+    const [asks, telling] = [rows.filter((r) => r.kind === "ask"), rows.some((r) => r.kind === "tell")];
+    if (asks.length > 0 && !telling && !personLane.busy()) {
+      // Several questions are numbered, so a reply can name one.
+      const text = asks.map((r, i) => (asks.length === 1 ? r.text : `${i + 1}. ${r.text}`)).join("\n\n");
+      const sent = deliver(coworker, text, performance.now(), true);
+      const ids = asks.map((r) => r.id);
+      // Each is sent from when the try that delivered it ended, which a reply must come after (SPEC part 9).
+      settle(db, ids, sent.door, null, sent.id);
+      void sent.delivered.then(
+        (at) => at !== null && !signal.aborted && settle(db, ids, sent.door, at, sent.id),
+      );
+    }
+    if (telling) wake();
     if (wait > 0) later = setTimeout(dispatch, wait);
   }
 
@@ -662,6 +676,13 @@ export function startCoworker(setup: Setup, name: string) {
     lapse(db, person);
     wake();
   }, ms(setup.timers.every));
+  // Each message a stop caught while duck read it is read again: the reads start here and the doors open while
+  // they go on, and each message, with those after it at its door, waits for the coworker until its read is
+  // kept (SPEC part 9).
+  for (const e of db
+    .query<{ id: number }, []>("select id from inbox where state = 'reading' order by id")
+    .all())
+    void readIn(coworker, e.id).then(() => wake());
   const listening = listen(coworker);
   return coworker;
 }

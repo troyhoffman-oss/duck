@@ -109,7 +109,7 @@ describe("the Buzz door", () => {
     E2E,
   );
 
-  test.failing(
+  test(
     "the coworker works in Buzz as itself: it reads Buzz's help, lists where it is, reads a channel, writes there and in a DM to another agent, whose answers come back to its conversation, gives and gets files by name and no path, saves none through a link, and a delete waits for its person's yes",
     async () => {
       const THEO = "The 4B boiler is fixed.";
@@ -332,6 +332,147 @@ describe("the Buzz door", () => {
         firm.trouble.check();
         await Bun.sleep(500);
       }
+      firm.trouble.check();
+    },
+    E2E,
+  );
+
+  test(
+    "the coworker's own question, sent with buzz into the person's DM after a held call was asked, is kept as a message to her and shown to the decision model between the question and her reply, which is read at the time Buzz gives it",
+    async () => {
+      const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
+      const printed = (text: string) => all(main, answered(TOOLS.buzz), said(text));
+      // The delete's outcome can reach the main conversation after the step before has ended, under its rules.
+      await until(
+        "the delete's outcome told",
+        () => firm.model.requests.some(all(main, said('"answer":"yes"'))),
+        60,
+        firm.trouble,
+      );
+      firm.model.clear();
+      const [ARCHIVE, MORE, QUESTION, YES] = [
+        "Archive harbor-ops.",
+        "Anything else before you do?",
+        "Shall I also archive harbor-lease? Reply yes.",
+        "Yes!",
+      ];
+      firm.model.on(
+        all(main, said(ARCHIVE)),
+        call(TOOLS.buzz, { args: ["channels", "archive", "--channel", buzz.channel] }),
+      );
+      firm.model.on(all(main, answered(TOOLS.buzz)), say("I've asked you first."));
+      firm.model.on(
+        all(main, said(MORE)),
+        call(TOOLS.buzz, { args: ["dms", "open", "--pubkey", buzz.keys.rosa] }),
+      );
+      firm.model.on(printed("dm_id"), (r) =>
+        call(TOOLS.buzz, {
+          args: [
+            "messages",
+            "send",
+            "--channel",
+            /"dm_id":\s*"([0-9a-f-]{36})"/.exec(r.last)?.[1] ?? "",
+            "--content",
+            "-",
+          ],
+          input: QUESTION,
+        }),
+      );
+      firm.model.on(printed("event_id"), say("I've asked you something in our DM."));
+      firm.model.on(reading, say("neither"), { times: Number.POSITIVE_INFINITY });
+      firm.model.on(all(main, said(YES)), say("Noted."));
+
+      await buzz.person.send(ARCHIVE);
+      // What the run before left on its way to her comes first.
+      let question = "";
+      while (!question.includes("Your yes is needed")) question = (await buzz.person.next(60)).content;
+      expect(question).toContain('["channels","archive"');
+      await buzz.person.send(MORE);
+      for (let seen = ""; !seen.includes("in our DM"); ) seen = (await buzz.person.next(60)).content;
+      await buzz.person.send(YES);
+      await until(
+        "her yes read and answered",
+        () => firm.model.requests.some(all(main, said(YES))),
+        60,
+        firm.trouble,
+      );
+
+      const shown = firm.model.requests.find(all(reading, said(YES)))?.read?.conversation ?? [];
+      const entry = (text: string) => shown.findIndex((e) => e.text === text);
+      expect(shown[entry(question)]?.from).toBe("duck's question");
+      expect(shown[entry(QUESTION)]?.from).toBe("the coworker");
+      expect(entry(question)).toBeLessThan(entry(QUESTION));
+      expect(shown.at(-1)).toMatchObject({
+        from: "the person",
+        text: YES,
+        at: expect.stringMatching(/\.000Z$/),
+      });
+      const db = firm.db();
+      const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
+      db.close();
+      expect(open).toEqual([{ answer: null }]);
+      firm.trouble.check();
+    },
+    E2E,
+  );
+
+  test(
+    "the coworker's message in a channel thread where the person wrote is kept as a message to her, and the decision model is shown it, marked as the coworker's, ahead of the question that followed it there",
+    async () => {
+      firm.model.clear();
+      const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
+      const printed = (text: string) => all(main, answered(TOOLS.buzz), said(text));
+      const [CLEAN, BEFORE, YES] = [
+        "Clean up harbor-ops when you can.",
+        "Before I take my note down: shall I tell Theo first?",
+        "Yes, go on.",
+      ];
+      let root = "";
+      firm.model.on(all(main, said(CLEAN)), () =>
+        call(TOOLS.buzz, {
+          args: ["messages", "send", "--channel", buzz.channel, "--reply-to", root, "--content", "-"],
+          input: BEFORE,
+        }),
+      );
+      // A delete of that very message, so its question is told apart from the one the step before left open.
+      firm.model.on(printed("event_id"), (r) =>
+        call(TOOLS.buzz, {
+          args: ["messages", "delete", "--event", /"event_id":\s*"([0-9a-f]{64})"/.exec(r.last)?.[1] ?? ""],
+        }),
+      );
+      firm.model.on(printed("The gate holds"), say("I've asked you first."));
+      firm.model.on(reading, say("neither"), { times: Number.POSITIVE_INFINITY });
+      firm.model.on(all(main, said(YES)), say("Noted."));
+
+      root = (await buzz.write("rosa", "harbor-ops", CLEAN)).id;
+      let question = "";
+      for (let waited = 0; !question; waited++) {
+        if (waited === 120) throw new Error("waited 60 s for the question in the thread");
+        firm.trouble.check();
+        await Bun.sleep(500);
+        const thread = await buzz.thread(root);
+        question = thread.find((m) => m.content.includes("Your yes is needed"))?.content ?? "";
+      }
+      await buzz.write("rosa", "harbor-ops", YES, { reply: root });
+      await until(
+        "her yes read and handed on",
+        () => firm.model.requests.some(all(main, said(YES))),
+        60,
+        firm.trouble,
+      );
+
+      const read = firm.model.requests.find(
+        (r) =>
+          reading(r) &&
+          said(YES)(r) &&
+          !!r.read?.questions.some((q) => r.read?.conversation[q.entry - 1]?.text === question),
+      );
+      const shown = read?.read?.conversation ?? [];
+      const entry = (text: string) => shown.findIndex((e) => e.text === text);
+      expect(shown[entry(BEFORE)]?.from).toBe("the coworker");
+      expect(shown[entry(question)]?.from).toBe("duck's question");
+      expect(entry(BEFORE)).toBeLessThan(entry(question));
+      expect(shown.at(-1)).toMatchObject({ from: "the person", text: YES });
       firm.trouble.check();
     },
     E2E,

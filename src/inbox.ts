@@ -11,7 +11,7 @@ import { factsOf, gives, ms, type Setup, secret } from "./setup";
 import { logLine, SORTER } from "./sorter";
 import { TIMERS } from "./timers";
 
-/** An inbox row (SPEC part 2). `state` is pending, running or done. */
+/** An inbox row (SPEC part 2). `state` is pending, running or done, or for a person's message, first reading. */
 export type Event = {
   id: number;
   source: string;
@@ -39,6 +39,8 @@ const ADDED: [string, string, string][] = [
   ["jobs", "title", "text"],
   ["jobs", "started_at", "text"],
   ["jobs", "since", "text"],
+  ["outbox", "message", "integer"],
+  ["outbox", "answered_by", "integer"],
 ];
 
 /** A coworker's database file, with its tables made, and an earlier build's brought up to them. */
@@ -53,6 +55,11 @@ export function openDb(path: string) {
   for (const [table, column, definition] of ADDED)
     if (!db.query("select 1 from pragma_table_info(?) where name = ?").get(table, column))
       db.exec(`alter table ${table} add column ${column} ${definition}`);
+  // An ask an earlier build sent kept no message: it is the last one sent at its door, in its own words, when it
+  // was settled. One whose words changed on the way, as a file's path does, keeps none and lapses.
+  db.run(`update outbox set message = (select max(id) from messages where way = 'out' and messages.door = outbox.door
+    and at <= outbox.sent_at and messages.text = outbox.text)
+    where kind = 'ask' and state = 'sent' and message is null`);
   return db;
 }
 
@@ -87,7 +94,8 @@ const among = (sources: string[], not = false) =>
  * The events no run has finished, with the sorter's answers, pending or running when a restart cut their
  * run: from `sources` or for session `main`, and with `theirs`, in a session an event from `sources` is in;
  * or `not` those. The person lane's are from its doors or for the main conversation, the others lane's from
- * its doors' others or in their sessions, and the work lane's are the rest.
+ * its doors' others or in their sessions, and the work lane's are the rest. A person's message duck is still
+ * reading waits, with those after it at its door, so they come in the order written (SPEC part 9).
  */
 export const waiting = (
   db: Database,
@@ -98,7 +106,9 @@ export const waiting = (
 ) =>
   db
     .query<Event, (string | null)[]>(
-      `select inbox.*, answer, why from inbox left join sorter on event = inbox.id where state != 'done'
+      `select inbox.*, answer, why from inbox left join sorter on event = inbox.id where state not in ('done', 'reading')
+        and not exists (select 1 from inbox earlier where earlier.state = 'reading' and earlier.source = inbox.source
+          and earlier.id < inbox.id)
         and ${not ? "not " : ""}(${among(sources)} or coalesce(session = ?, 0)${theirs ? ` or coalesce(session in (select session from inbox where ${among(sources)}), 0)` : ""}) order by id`,
     )
     .all(...sources, main ?? null, ...(theirs ? sources : []));

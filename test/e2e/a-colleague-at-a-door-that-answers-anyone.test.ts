@@ -70,7 +70,7 @@ describe("a colleague at a Buzz door that answers anyone", () => {
     await buzz?.[Symbol.asyncDispose]();
   }, E2E);
 
-  test.failing(
+  test(
     "a colleague's call that `others` makes ask first is held, the person is asked with the colleague named, and on her yes, which duck reads, it runs once and the colleague hears in their thread",
     async () => {
       const ASK = "Can you send Dana the 4B renewal terms?";

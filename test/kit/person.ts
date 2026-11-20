@@ -26,20 +26,25 @@ const toDoor = (f: File): DoorFile => ({
 /**
  * The person's side of `http` doors, one per name in `doors`, each with the door's `key`. It sends what a
  * person writes to duck's door at `duck` (set with `meet`), and takes what duck delivers at each door's
- * `address`. A delivery repeated with an id it already holds is the same message.
+ * `address`. A delivery repeated with an id it already holds is the same message. A real person cannot answer a
+ * message before duck has the door's answer to delivering it, so a delivery reaches the person only once
+ * `heard(id)` says duck has it.
  */
 export function startPerson({
   doors,
   key,
   reach = LOCAL,
   trouble = new Trouble(),
+  heard = () => true,
 }: {
   doors: string[];
   key: string;
   reach?: Reach;
   trouble?: Trouble;
+  heard?: (id: string) => boolean;
 }) {
   const received: Delivered[] = [];
+  const answered = new Set<string>();
   const refused: Delivered[] = [];
   const refusing: string[] = [];
   const taken = new Set<string>();
@@ -78,7 +83,11 @@ export function startPerson({
     },
   });
 
-  const unread = () => received.filter((m) => !taken.has(m.id));
+  const reached = (m: Delivered) => {
+    if (!answered.has(m.id) && heard(m.id)) answered.add(m.id);
+    return answered.has(m.id);
+  };
+  const unread = () => received.filter((m) => !taken.has(m.id) && reached(m));
 
   return {
     /** Where duck delivers at door `door`. */
@@ -92,13 +101,13 @@ export function startPerson({
     meet(address: string, coworker: string) {
       duck = { address, coworker };
     },
-    /** Writes `text`, with `files`, at door `door`. Returns duck's answer. */
-    async send(door: string, text: string, files: File[] = []) {
+    /** Writes `text`, with `files`, at door `door`, saying it was written `at` where given. Returns duck's answer. */
+    async send(door: string, text: string, files: File[] = [], at?: string) {
       if (!duck) throw new Error("the person has no duck to write to yet");
       const response = await fetch(`${duck.address}/doors/${duck.coworker}/${door}`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-        body: JSON.stringify({ id: `person-${++sent}`, text, files: files.map(toDoor) }),
+        body: JSON.stringify({ id: `person-${++sent}`, text, files: files.map(toDoor), at }),
       });
       if (response.status !== 202)
         throw new Error(`duck answered the person's message at ${door} with ${response.status}`);
