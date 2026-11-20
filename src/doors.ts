@@ -13,7 +13,7 @@ type DoorFile = { name: string; type: string; data: string };
  * Where in Buzz a message was written: the channel, the event an answer threads under, if any, the root of
  * its thread, if it is in one, and whether the channel is a DM.
  */
-type Place = { channel: string; reply?: string; root?: string; dm?: boolean };
+type Place = { channel: string; reply?: string; root?: string; dm?: boolean; key?: string };
 
 const PATH = new RegExp(`(?:${HOME}|${FILES})/[^\\s"'\`<>()]+`, "g");
 
@@ -253,10 +253,13 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
     ? JSON.parse(payload)
     : { channel: JSON.parse((await buzz(env, ["dms", "open", "--pubkey", owner])).toString()).dm_id };
   const reply = place.reply ? ["--reply-to", place.reply] : [];
+  // Buzz refuses a message whose "@word" names no member, unless a mention is given; it then leaves the word as
+  // text. The one it answers is in the channel, so mentioning them costs nothing.
+  const to = ["--mention", place.key ?? owner];
   const attached = files.flatMap((f) => ["--file", f]);
   await buzz(
     env,
-    ["messages", "send", "--channel", place.channel, ...reply, ...attached, "--content", "-"],
+    ["messages", "send", "--channel", place.channel, ...reply, ...to, ...attached, "--content", "-"],
     text,
   );
 }

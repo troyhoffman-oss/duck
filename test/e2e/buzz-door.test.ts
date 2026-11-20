@@ -339,4 +339,16 @@ describe("the Buzz door", () => {
     },
     E2E,
   );
+
+  test(
+    "words with an at-sign that names no one, and an email address, reach the person as written",
+    async () => {
+      const WORDS = "Ask @nobody about it, or write to harbor.ops@example.com, then tell @everyone.";
+      firm.model.on(said("Who do I ask about the 4B boiler?"), say(WORDS));
+      await buzz.person.send("Who do I ask about the 4B boiler?");
+      expect((await buzz.person.next(60)).content).toBe(WORDS);
+      firm.trouble.check();
+    },
+    E2E,
+  );
 });
