@@ -49,7 +49,7 @@ export function make(folder: string, name: string, handle?: string, person?: str
   const setup = readSetup(folder);
   checkName(name);
   if (existsSync(factsFile(setup, name))) throw new Error(`duck has made coworker ${name} already`);
-  // A claim in duck's DM gives no handle, so a coworker made for a person has theirs now; "" is no handle.
+  // A claim from Buzz gives no handle, so a coworker made for a person has theirs now; "" is no handle.
   if (handle !== undefined || person) checkHandle(setup, name, handle ?? "");
   // Made for a person, it is claimed and installed with no admin there, so the keys its plugs need are here first.
   const missing = person ? lacking(setup, plugKeys(setup, name, handle)) : [];
@@ -156,12 +156,12 @@ export function identityProblems(setup: Setup) {
 export function identityToDo(setup: Setup) {
   return setup.buzz && !setup.buzz.owner
     ? [
-        `still to do: duck's Buzz key is ${duckPublic(setup)}; ${STEPS}. Until then duck's DM is off, and coworkers are made and claimed with duck make and duck claim`,
+        `still to do: duck's Buzz key is ${duckPublic(setup)}; ${STEPS}. Until then duck's channels are off, and coworkers are made and claimed with duck make and duck claim`,
       ]
     : [];
 }
 
-/** duck's own identity in Buzz where the setup's proof signs its key; with none, duck's DM is off. */
+/** duck's own identity in Buzz where the setup's proof signs its key; with none, duck's channels are off. */
 export function identity(setup: Setup) {
   const owner = setup.buzz?.owner;
   if (setup.buzz && owner && proves(owner, duckPublic(setup)))

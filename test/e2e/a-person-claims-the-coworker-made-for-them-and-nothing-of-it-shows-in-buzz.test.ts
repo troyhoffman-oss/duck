@@ -39,7 +39,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     E2E,
   );
 
-  test.failing(
+  test(
     "an admin's duck make for a person by their Buzz name shows it in their New agent, from a channel only they and duck read, which Buzz lists nowhere and where nothing counts as unread or notifies",
     async () => {
       const made = await firm.duck("make", "lark", "ana", "Ana");
@@ -66,7 +66,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     E2E,
   );
 
-  test.failing(
+  test(
     "a proof that does not fit a coworker made for the one who sends it is refused in fixed words, and nothing is claimed",
     async () => {
       // Ana's proof sent by Theo, and Theo's own proof for Ana's coworker, from a channel Theo makes with duck.
@@ -80,7 +80,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     E2E,
   );
 
-  test.failing(
+  test(
     "a person who adds in New agent the coworker made for them has it as theirs, and it starts with no admin",
     async () => {
       expect(await plugin.add("lark", "Lark")).toEqual({ pubkey: lark });
@@ -95,7 +95,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     E2E,
   );
 
-  test.failing(
+  test(
     "a make for a person waits for their plug key, and a claim that comes while duck installs for an earlier one is not lost",
     async () => {
       const kiteKey = "HARBOR_MAIL_KEY_ana_kite";
@@ -157,7 +157,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     E2E,
   );
 
-  test.failing(
+  test(
     "a person who sends again the proof of the coworker they claimed is told in fixed words it is theirs already, and anyone else who sends it learns nothing",
     async () => {
       // The step before put duck's channels back in the setup; installing it starts duck with them on.

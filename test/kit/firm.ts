@@ -529,7 +529,7 @@ export async function startFirm(
       systemd,
       units,
       /**
-       * Where the unit `duck install` wrote to install again after a claim in duck's DM stands: its state, and
+       * Where the unit `duck install` wrote to install again after a claim from Buzz stands: its state, and
        * the id systemd gives each of its runs.
        */
       async claimInstall() {

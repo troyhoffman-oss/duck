@@ -15,9 +15,6 @@ export type Event = {
   sig: string;
 };
 
-/** Where a message is: its channel, and the channel's type as the relay's notice names it, such as dm. */
-export type Place = { channel: string; type: string };
-
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 const now = () => Math.floor(Date.now() / 1000);
 const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1] ?? "";
@@ -37,12 +34,14 @@ function sign(who: Identity, created_at: number, kind: number, tags: string[][],
 }
 
 /**
- * Holds `who`'s connection to its relay (NIP-42, with the owner's tag) and hands `handler` once each message
- * (kind 9) someone else writes, from when it starts, in a channel the relay's notices (44100, 44101) say `who` is
- * in, asking again on each, since a subscription's channels are fixed when sent. It connects again when the
- * relay goes, and 5 minutes after a refused sign-in, until closed. Returns what publishes an event as `who`.
+ * Holds `who`'s connection to its relay (NIP-42, with the owner's tag) and hands `handler` once each artifact
+ * revision (kind 45010, NIP-AR) someone else writes, from when it starts, in a system channel (NIP-CL) the
+ * relay's notices (44100, 44101) say `who` is in, asking again on each, since a subscription's channels are fixed
+ * when sent. A notice names its channel's type, and the relay sends one of a system channel only to a filter
+ * that names that type (buzz-relay src/handlers/side_effects.rs:1318-1327). It connects again when the relay goes, and 5
+ * minutes after a refused sign-in, until closed. Returns what publishes an event as `who`, and `who`'s key.
  */
-export function connect(who: Identity, handler: (message: Event, place: Place) => void) {
+export function connect(who: Identity, handler: (revision: Event) => void) {
   const me = hex(schnorr.getPublicKey(Buffer.from(who.key, "hex")));
   const what = `the Buzz connection of ${me.slice(0, 8)}`;
   const started = now();
@@ -54,8 +53,8 @@ export function connect(who: Identity, handler: (message: Event, place: Place) =
   };
   /** A writer's clock is not duck's: an ask reaches back as far as the relay takes a time (ingest.rs), 900 s. */
   const since = () => Math.max(started, now() - 900);
-  /** Each channel `who` is in, with its type. */
-  const channels = new Map<string, string>();
+  /** Each system channel `who` is in. */
+  const channels = new Set<string>();
   /** Each message handed on, by id, with when duck first saw it, kept 2,000 s, past its last ask again. */
   const seen = new Map<string, number>();
   let socket: WebSocket | undefined;
@@ -73,10 +72,10 @@ export function connect(who: Identity, handler: (message: Event, place: Place) =
     const send = (...frame: unknown[]) => ws.send(JSON.stringify(frame));
     const listen = () =>
       channels.size > 0
-        ? send("REQ", "messages", { kinds: [9], "#h": [...channels.keys()], since: since() })
+        ? send("REQ", "messages", { kinds: [45010], "#h": [...channels], since: since() })
         : send("CLOSE", "messages");
     const notice = (n: Event) =>
-      n.kind === 44100 ? channels.set(tagOf(n, "h"), tagOf(n, "t")) : channels.delete(tagOf(n, "h"));
+      n.kind === 44100 ? channels.add(tagOf(n, "h")) : channels.delete(tagOf(n, "h"));
     const take = (type: string, a: string, b: Event & boolean, c: string) => {
       if (type === "AUTH") {
         const auth = signed(22242, Object.entries({ relay: who.relay, challenge: a }), "");
@@ -90,7 +89,7 @@ export function connect(who: Identity, handler: (message: Event, place: Place) =
         }
         socket = ws;
         signedIn();
-        send("REQ", "notices", { kinds: [44100, 44101], "#p": [me] });
+        send("REQ", "notices", { kinds: [44100, 44101], "#p": [me], "#t": ["system"] });
       } else if (type === "OK") waiting.get(a)?.(b === true, c);
       else if (type === "EVENT" && a === "query") found?.events.push(b);
       else if (type === "EOSE" && a === "query") {
@@ -107,11 +106,10 @@ export function connect(who: Identity, handler: (message: Event, place: Place) =
         notice(b);
         listen();
       } else if (type === "EVENT" && a === "messages") {
-        const place = { channel: tagOf(b, "h"), type: channels.get(tagOf(b, "h")) ?? "" };
-        if (seen.has(b.id) || b.pubkey === me || !place.type) return;
+        if (seen.has(b.id) || b.pubkey === me || !channels.has(tagOf(b, "h"))) return;
         seen.set(b.id, now());
         for (const [id, at] of seen) if (at < now() - 2000) seen.delete(id);
-        handler(b, place);
+        handler(b);
       }
     };
     // A frame is [type, a, b, c], `b` an event or, in an OK, whether the relay took it. One that cannot be read
@@ -135,6 +133,7 @@ export function connect(who: Identity, handler: (message: Event, place: Place) =
   open();
 
   return {
+    me,
     /**
      * Publishes event `kind` with `tags` and `content` as `who` once signed in: the relay's OK message, or its
      * reason, or that it gave none in 10 s, so a relay that never answers holds no caller.

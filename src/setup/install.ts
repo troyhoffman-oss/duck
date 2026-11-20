@@ -192,8 +192,8 @@ function boot(firm: string) {
 }
 
 /**
- * While duck's DM is on, writes and starts the path unit that runs duck install in `folder` when a claim or a
- * stop in the DM leaves its empty file in storage, since the duck container has no podman; with it off, takes
+ * While duck's channels are on, writes and starts the path unit that runs duck install in `folder` when a claim
+ * or a stop there leaves its empty file in storage, since the duck container has no podman; with it off, takes
  * them away. The service takes the file before it installs, and systemd looks for it again when the service
  * ends, so a claim made during an install gets an install of its own.
  */
@@ -207,7 +207,7 @@ function claims(setup: Setup, folder: string) {
     exec("systemctl", ["--user", "daemon-reload"]);
     return;
   }
-  const about = `Description=duck's firm ${setup.firm}: duck install, after a claim in duck's DM`;
+  const about = `Description=duck's firm ${setup.firm}: duck install, after a claim from Buzz`;
   const lines = {
     [service]: [
       "[Unit]",

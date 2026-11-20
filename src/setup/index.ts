@@ -38,9 +38,8 @@ export type Facts = {
   state: "unclaimed" | "claimed" | "stopped";
   made_at: string;
   claimed_at: string | null;
-  /** The Buzz key of the person it was made for, and when duck's offer to them was taken. */
+  /** The Buzz key of the person it was made for. */
   for?: string;
-  offered_at?: string;
   /** The name and picture, an HTTPS address, its person gave it in Buzz, which its profile shows. */
   called?: string;
   picture?: string;
@@ -88,7 +87,7 @@ export type Person = {
   paused?: string | null;
 };
 
-/** What a coworker's person may change of its settings in duck's DM, which the setup may lock (SPEC part 1). */
+/** What a coworker's person may change of its settings in the plugin, which the setup may lock (SPEC part 1). */
 export type Settings = {
   /** When its person paused it, or false. */
   paused?: string | false;
@@ -146,7 +145,7 @@ export type Setup = {
   notes?: { standing?: number; lines?: number; log?: number };
   /**
    * The most model calls of a job's one fresh run, its worker's or its checker's, by the model relay's count
-   * (SPEC part 6), until an admin sets another in duck's DM. With none named there is none.
+   * (SPEC part 6), until an admin sets another in the plugin's Coworkers card. With none named there is none.
    */
   jobs?: { calls?: number };
   /** The firm's default for each coworker's settings (SPEC part 1, Settings). */
@@ -179,7 +178,7 @@ export function readSetup(folder: string): Setup {
 export const factsFile = (setup: Setup, coworker: string) =>
   join(setup.storage.folder, coworker, "coworker.json");
 export const keysFile = (setup: Setup, coworker: string) => join(setup.storage.folder, coworker, "keys.env");
-/** The empty file a claim in duck's DM leaves for the host's duck install; with a dot, no coworker is named so. */
+/** The empty file a claim from Buzz leaves for the host's duck install; with a dot, no coworker is named so. */
 export const installFile = (setup: Setup) => join(setup.storage.folder, "install.wanted");
 
 /**
@@ -227,7 +226,7 @@ export const claimed = (setup: Setup) => made(setup).filter((c) => factsOf(setup
 
 /**
  * Coworker `coworker`'s person: their name, and its settings, read each time they are looked at, so what its
- * person changes in duck's DM holds from the outbox's next look.
+ * person changes in the plugin holds from the outbox's next look.
  */
 export const personOf = (setup: Setup, coworker: string): Person => ({
   name: factsOf(setup, coworker).name ?? "",

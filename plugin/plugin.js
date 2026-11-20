@@ -1,17 +1,17 @@
 // duck's plugin for Buzz's desktop app (SPEC part 11, The plugin). It registers the duck coworker type in New
-// agent. It holds no address and no key: it reads what duck writes in the person's DM with duck and writes
-// there only, in the fixed words a person could type, and Buzz itself signs the claim.
+// agent. It holds no address and no key: it reads what duck writes in the person's channel with duck, a system
+// channel Buzz lists nowhere, and writes there only its requests, artifacts Buzz signs as the person, in fixed
+// words; Buzz itself signs the claim.
 export const inject = ["react", "agents", "relay", "settingsCards"];
 
-/** duck's offer of a coworker (src/dms.ts), with the coworker's Buzz key on a line of its own. */
-const OFFER = /^Your firm made a coworker for you: ([a-z][a-z0-9-]*)\./;
-const KEY = /^[0-9a-f]{64}$/m;
 /** duck's answers to a claim that stands: the first claim, and the same proof sent again. */
 const YOURS = /^That coworker is yours (now|already)\./;
 const PUBLISHED = "Done: that coworker's profile in Buzz shows it now.";
 const STOPPED = /^That coworker is stopped\./;
-/** How long duck has to answer in its DM. */
+/** How long duck has to answer a request. */
 const WAIT_MS = 30_000;
+/** NIP-AR's artifact kind, the one kind Buzz's artifact writer signs. */
+const ARTIFACT = 45010;
 
 /** duck's mark, the small duck's track of brand/duck-track-small.svg, which follows the text colour. */
 const TRACK =
@@ -34,7 +34,8 @@ export function apply(ctx) {
 
   /**
    * duck in this community: the agent whose profile says it is duck, signed with the tag of an owner or admin
-   * on the member list the relay signs, and the person's DM with it.
+   * on the member list the relay signs, and the person's channel with it, if duck has made one: the oldest
+   * system channel duck made labelled with the person's key (NIP-CL), as Buzz finds its config channels.
    */
   async function duck() {
     const s = session();
@@ -44,10 +45,11 @@ export function apply(ctx) {
       .filter((p) => owners.includes(p.tags.find(([tag]) => tag === "auth")?.[1]) && saysDuck(p.content))
       .sort((a, b) => b.created_at - a.created_at)[0];
     if (!found) throw new Error("This community has no duck that its owner or an admin set up.");
-    return {
-      key: found.pubkey,
-      dm: await s.directMessages.open([found.pubkey], AbortSignal.timeout(WAIT_MS)),
-    };
+    const labelled = await s.channels.findLabeled(
+      { creator: found.pubkey, label: s.viewer },
+      { consistency: "strong", signal: AbortSignal.timeout(WAIT_MS) },
+    );
+    return { key: found.pubkey, channel: labelled.find((c) => c.channelType === "system")?.id };
   }
   function saysDuck(content) {
     try {
@@ -57,30 +59,39 @@ export function apply(ctx) {
     }
   }
 
-  /** duck's messages in the person's DM with it, oldest first. */
-  const said = async (d) =>
-    (await session().read([{ kinds: [9], "#h": [d.dm], authors: [d.key], limit: 100 }])).sort(
-      (a, b) => a.created_at - b.created_at,
-    );
+  /** The current artifacts in the person's channel with duck that `filter` matches, as the relay answers. */
+  const current = async (d, filter) =>
+    d.channel
+      ? session().snapshotRead([{ artifact: "current", "#h": [d.channel], limit: 100, ...filter }], {
+          signal: AbortSignal.timeout(WAIT_MS),
+        })
+      : [];
+  /** What duck published of `types` in the person's channel with it. */
+  const published = async (d, ...types) =>
+    (await current(d, { "#type": types })).filter((a) => a.pubkey === d.key);
+  /** The Buzz key of the coworker an artifact of duck's is for. */
+  const agentOf = (a) => a.tags.find(([tag]) => tag === "agent")?.[1];
 
   /** Each coworker duck offered the person, by its name, with its Buzz key. */
-  async function offers(d) {
-    const found = new Map();
-    for (const m of await said(d)) {
-      const [name, key] = [OFFER.exec(m.content)?.[1], KEY.exec(m.content)?.[0]];
-      if (name && key) found.set(name, key);
-    }
-    return found;
-  }
+  const offers = async (d) =>
+    new Map((await published(d, "duck.offer")).map((a) => [JSON.parse(a.content).coworker, agentOf(a)]));
 
-  /** Writes `text` in the person's DM with duck and resolves with duck's next message there. */
+  /**
+   * Writes `text` as a request in the person's channel with duck, a `duck.request` artifact Buzz signs as them,
+   * and resolves with duck's answer, its revision of that request.
+   */
   async function tell(text) {
-    const d = await duck();
-    const before = new Set((await said(d)).map((m) => m.id));
-    await session().messages.send(d.dm, text, [d.key]);
+    const [d, s] = [await duck(), session()];
+    if (!d.channel) throw new Error("duck never offered you this coworker.");
+    const id = crypto.randomUUID();
+    const tags = Object.entries({ ar: "1", d: id, h: d.channel, type: "duck.request", title: "Request" });
+    const signal = AbortSignal.timeout(WAIT_MS);
+    const template = { kind: ARTIFACT, created_at: Math.floor(Date.now() / 1000), content: text };
+    const request = await s.configArtifactWriter.sign({ ...template, tags: [...tags, ["op", "create"]] }, signal);
+    await s.configArtifactWriter.publish(request, signal);
     for (const end = Date.now() + WAIT_MS; Date.now() < end; await sleep(500)) {
-      const answer = (await said(d)).find((m) => !before.has(m.id));
-      if (answer) return answer.content;
+      const [answer] = await current(d, { "#d": [id] });
+      if (answer?.pubkey === d.key) return answer.content;
     }
     throw new Error("duck did not answer in 30 seconds. Try again, or tell your firm's admin.");
   }
@@ -90,9 +101,10 @@ export function apply(ctx) {
     if (!(typeof fits === "string" ? answer === fits : fits.test(answer))) throw new Error(answer);
   }
 
-  /** The name duck knows the coworker whose Buzz key is `pubkey` by, from its offer. */
+  /** The name duck knows the coworker whose Buzz key is `pubkey` by, from its offer or its preferences. */
   async function nameOf(pubkey) {
-    for (const [name, key] of await offers(await duck())) if (key === pubkey) return name;
+    const own = (await published(await duck(), "duck.offer", "duck.person")).find((a) => agentOf(a) === pubkey);
+    if (own) return JSON.parse(own.content).coworker;
     throw new Error("duck never offered you this coworker.");
   }
   /** Asks duck to publish the coworker's profile with `name` and, where given, `picture`. */
@@ -156,8 +168,8 @@ export function apply(ctx) {
     ["waiting", "Waiting"],
   ];
   /**
-   * What duck published of `type` in the person's DM with duck, for the coworker whose key is `pubkey` where
-   * given: null while it reads, false for nothing, or the error; and what reads it again.
+   * What duck published of `type` in the person's channel with duck, for the coworker whose key is `pubkey`
+   * where given: null while it reads, false for nothing, or the error; and what reads it again.
    */
   function usePublished(type, pubkey) {
     const [found, setFound] = React.useState(null);
@@ -166,12 +178,7 @@ export function apply(ctx) {
       let shown = true;
       duck()
         .then(async (d) => {
-          const all = await session().read([
-            { artifact: "current", "#h": [d.dm], "#type": [type], limit: 50 },
-          ]);
-          const mine = all.find(
-            (a) => a.pubkey === d.key && (!pubkey || a.tags.some(([t, v]) => t === "agent" && v === pubkey)),
-          );
+          const mine = (await published(d, type)).find((a) => !pubkey || agentOf(a) === pubkey);
           return mine ? JSON.parse(mine.content) : false;
         })
         .then((content) => shown && setFound(content))
@@ -182,7 +189,7 @@ export function apply(ctx) {
     }, [type, pubkey, reads]);
     return [found, () => setReads(reads + 1)];
   }
-  /** The coworker's list as duck publishes it to its person, in their DM with duck: view only. */
+  /** The coworker's list as duck publishes it to its person, in their channel with duck: view only. */
   function ToDos({ agent }) {
     const [published] = usePublished("duck.list", agent.pubkey);
     if (published === null) return note("Reading its list…");
@@ -232,14 +239,14 @@ export function apply(ctx) {
 
   /** duck's answers when a setting changed (src/dms.ts); any other is a refusal, shown as it is. */
   const SETTLED = /^(That coworker is (paused|resumed):|Done: that coworker's setting is changed\.)/;
-  /** Its person's settings for the coworker, as duck publishes them; a change is the fixed words in duck's DM. */
+  /** Its person's settings for the coworker, as duck publishes them; a change is a request in fixed words. */
   function Preferences({ agent }) {
     const [prefs, reread] = usePublished("duck.person", agent.pubkey);
     const [refused, setRefused] = React.useState("");
     if (prefs === null) return note("Reading its preferences…");
     if (prefs instanceof Error) return note(prefs.message);
     if (!prefs) return note("duck has not shown its preferences yet.");
-    const { coworker, paused, quiet, messages_per_hour: perHour, cost } = prefs;
+    const { coworker, paused, quiet, messages_per_hour: perHour, zone, cost } = prefs;
     const send = (words) =>
       tell(words)
         .then((answer) => setRefused(SETTLED.test(answer) ? "" : answer))
@@ -271,6 +278,16 @@ export function apply(ctx) {
           onChange: (e) => send(`${e.target.checked ? "pause" : "resume"} ${coworker}`),
         }),
         h("span", { className: "text-body" }, "Paused: it does no work on its own and still answers you"),
+      ),
+      row(
+        zone,
+        h("span", { className: "text-body" }, "Time zone"),
+        input("Time zone", zone, {
+          type: "text",
+          defaultValue: zone.value,
+          onBlur: (e) =>
+            e.target.value && e.target.value !== zone.value && send(`set ${coworker} zone ${e.target.value}`),
+        }),
       ),
       h(
         "section",
@@ -334,8 +351,8 @@ export function apply(ctx) {
         ? "Stopped"
         : "Not added yet";
   /**
-   * The firm's coworkers as duck publishes them to each owner and admin, in their DM with duck, and the most
-   * model calls of a job's run, which a change sets in the fixed words there.
+   * The firm's coworkers as duck publishes them to each owner and admin, in their channel with duck, and the
+   * most model calls of a job's run, which a change sets by a request in fixed words.
    */
   function Coworkers() {
     const [firm, reread] = usePublished("duck.firm");
@@ -460,7 +477,7 @@ export function apply(ctx) {
         if (picture) pictures.set(key, picture);
         return { pubkey: key, ...(picture && { picture }) };
       },
-      // Buzz's ownership proof, sent alone, is the claim duck takes in its DM, as a pasted one is.
+      // Buzz's ownership proof, sent alone, is the claim duck takes.
       async activate({ pubkey, name, auth }) {
         await ask(JSON.stringify(auth), YOURS);
         await profile({ pubkey, name, picture: pictures.get(pubkey) });

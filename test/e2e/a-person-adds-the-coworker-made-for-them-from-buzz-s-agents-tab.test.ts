@@ -72,7 +72,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     }
   }
 
-  test.failing(
+  test(
     "duck's offer shows in the person's New agent, and duck's own profile says it is duck, with the tag of the community's owner",
     async () => {
       const made = await firm.duck("make", "lark", "ana", "Ana");
@@ -87,7 +87,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test.failing(
+  test(
     "a person adds it in New agent with a name and a picture of their own, and it starts with no admin, showing both",
     async () => {
       expect(await plugin.add("lark", "Pip", PICTURE)).toEqual({ pubkey: lark, picture: PICTURE });
@@ -102,7 +102,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test.failing(
+  test(
     "a person's new name for it in Buzz is its profile's, and the same claim sent again still stands",
     async () => {
       await plugin.edit(lark, "Pippa", PICTURE);
@@ -114,7 +114,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test.failing(
+  test(
     "deleting it in Buzz stops it and keeps its folder, and adding it again brings it back as it was",
     async () => {
       const before = firm.facts("lark");
@@ -133,7 +133,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test.failing(
+  test(
     "a coworker whose profile Buzz already shows keeps its name, picture and about across a duck restart, and its person's rename in Buzz changes only its name",
     async () => {
       const wren = buzz.keys.wren;
@@ -162,7 +162,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test.failing(
+  test(
     "a person's delete in Buzz stops only their coworker, inside the running duck: another coworker's run goes on, duck's container stays, and nothing of the stopped one answers",
     async () => {
       firm.model.on(said(CODE), say("Noted: 4417 for the annex."));
@@ -200,7 +200,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     E2E,
   );
 
-  test.failing(
+  test(
     "claimed again in the same duck, the stopped coworker starts clean: the run the stop cut short comes back once, with its memory, and one buzz-acp serves it",
     async () => {
       firm.model.on(all(said(LEASE), shows(CUT), shows(CODE)), say(BACK));

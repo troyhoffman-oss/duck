@@ -3,7 +3,7 @@
 
 firm: harbor
 
-# The firm's time zone, and each coworker's person's until they set their own in their DM with duck.
+# The firm's time zone, and each coworker's person's until they set their own in duck's plugin.
 zone: America/Chicago
 
 # Where duck's inbox handler and its doors listen on the firm's server.
@@ -66,7 +66,7 @@ notes:
   log: 8000
 
 # The most model calls of one fresh run of a job, its worker's or its checker's, by the model relay's count.
-# A run that reaches it is cut off. An admin sets another in duck's DM. With none named there is none.
+# A run that reaches it is cut off. An admin sets another in duck's plugin. With none named there is none.
 jobs:
   calls: 200
 

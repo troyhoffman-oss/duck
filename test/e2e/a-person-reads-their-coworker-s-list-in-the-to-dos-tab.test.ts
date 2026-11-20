@@ -57,7 +57,7 @@ describe("a person reads their coworker's list in the To-dos tab, and nobody els
     await buzz?.[Symbol.asyncDispose]();
   }, E2E);
 
-  test.failing(
+  test(
     "a mail that becomes an item the person holds shows in their To-dos under Needs you, and another member reads none of it",
     async () => {
       const empty = await plugin.tab("To-dos", buzz.keys.wren, (l) => l[0] === "Nothing is on its list yet.");
@@ -91,7 +91,7 @@ describe("a person reads their coworker's list in the To-dos tab, and nobody els
     E2E,
   );
 
-  test.failing(
+  test(
     "an item the coworker closes moves to Done this week, folded away",
     async () => {
       firm.model.on(all(sorter, shows(SIGNED.payload.subject)), say("wake: the renewal is signed"));

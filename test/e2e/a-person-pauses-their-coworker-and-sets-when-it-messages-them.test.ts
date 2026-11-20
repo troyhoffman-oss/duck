@@ -67,7 +67,7 @@ describe("a person pauses their coworker and sets when it messages them", () => 
       ?.state;
   };
 
-  test.failing(
+  test(
     "while paused an event starts no run and its person's own message is answered, and on resume it catches up and tells them once",
     async () => {
       const firmWide = await preferences((l) => l.includes("When it messages you"));
@@ -107,7 +107,7 @@ describe("a person pauses their coworker and sets when it messages them", () => 
     E2E,
   );
 
-  test.failing(
+  test(
     "its person turns quiet hours off, and a setting the firm locks is refused in fixed words and changes nothing",
     async () => {
       const shown = await preferences((l) => l.includes("When it messages you"));
@@ -133,7 +133,7 @@ describe("a person pauses their coworker and sets when it messages them", () => 
     E2E,
   );
 
-  test.failing(
+  test(
     "another member reads nothing of a person's preferences",
     async () => {
       const channel = (await buzz.channelWith("rosa", firm.duckKey as string)) as string;
@@ -162,7 +162,7 @@ describe("a person pauses their coworker and sets when it messages them", () => 
     E2E,
   );
 
-  test.failing(
+  test(
     "its person sets their own time zone in the Preferences tab, and one that is not a zone is refused saying so; the coworker's clock, the time the model sees and a repeating timer then go by theirs",
     async () => {
       const file = join(firm.folder, "storage", harbor.coworker, "settings.json");
@@ -229,7 +229,7 @@ describe("a person pauses their coworker and sets when it messages them", () => 
     2 * E2E,
   );
 
-  test.failing(
+  test(
     "its quiet hours fall in its person's own night, in their zone",
     async () => {
       const LATE = {

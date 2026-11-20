@@ -48,7 +48,7 @@ describe("an admin sees each coworker and sets the model calls of a job", () => 
   const coworkers = (fits: (shown: string[]) => boolean) => rosa.card("Coworkers", fits);
   const firmFile = () => join(firm.folder, "storage", "settings.json");
 
-  test.failing(
+  test(
     "the owner's card shows each coworker and the limit, and a change holds in the running duck at once",
     async () => {
       const duck = await firm.duckId();
@@ -99,7 +99,7 @@ describe("an admin sees each coworker and sets the model calls of a job", () => 
     E2E,
   );
 
-  test.failing(
+  test(
     "a member who is not an admin has no card, is refused in fixed words, and reads none of what the admin sees",
     async () => {
       const theo = await loadPlugin(buzz, "theo");

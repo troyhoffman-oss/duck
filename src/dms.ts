@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { connect, type Event } from "./buzz";
 import { type Item, shown } from "./list";
@@ -23,17 +23,9 @@ import {
 import { buzzKey, claim, identity, signs, write, writeFacts } from "./setup/coworkers";
 import { rezone } from "./timers";
 
-/** duck's one answer in its DMs, in fixed words (SPEC part 11, duck's DM). */
-export const ANSWER =
-  "I'm duck, the service your firm's coworkers run on. I answer every message here with these same words. To talk with your coworker, write to it in its own DM.";
-
-/** duck's offer of coworker `name`, whose Buzz key is `key`, to the person it was made for; the plugin reads it. */
-const offerOf = (name: string, key: string) =>
-  `Your firm made a coworker for you: ${name}. To make it yours, in Buzz's desktop app (the phone app cannot) with duck's plugin: open Agents, press New agent (and Create a new agent if it asks), choose duck as the harness, name it, press Create agent and then Let’s go. Without the plugin: open Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), put this key in Application public key (hex), press Authorize identity and then Authorize this key:\n${key}\nThen press Copy ownership proof and paste the proof here as your reply.`;
-
 /**
- * duck's answers to a proof pasted in its DM: one that claims a coworker, one from the person a claimed coworker
- * was made for whose proof signs its key, and one that claims nothing.
+ * duck's answers to the ownership proof the plugin sends: one that claims a coworker, one from the person a
+ * claimed coworker was made for whose proof signs its key, and one that claims nothing.
  */
 const YOURS =
   "That coworker is yours now. duck is starting it, and it answers in its own DM once it is running.";
@@ -41,8 +33,8 @@ const MINE = "That coworker is yours already.";
 const NOT_FIT = "That proof does not fit a coworker made for you here, so nothing changed.";
 
 /**
- * What a coworker's person may ask of duck for it in its DM, in fixed words (SPEC part 11, duck's DM): a new
- * name, a new picture at an HTTPS address, or that it stop. Buzz's desktop asks the same through the plugin.
+ * What a coworker's person may ask of duck for it through the plugin, in fixed words (SPEC part 11, duck's
+ * channel): a new name, a new picture at an HTTPS address, or that it stop.
  */
 const FORM =
   /^(?:rename ([a-z][a-z0-9-]*) to (.+)|picture ([a-z][a-z0-9-]*) (https:\/\/\S+)|remove ([a-z][a-z0-9-]*))$/;
@@ -71,15 +63,19 @@ const LIMIT = /^set model calls per job ([1-9]\d{0,3})$/;
 const LIMITED = "Done: a job's run is cut off at that many model calls from its next call.";
 const NOT_ADMIN = "Only an owner or admin of this community sets that, so nothing changed.";
 
-const OFF = "duck's DM is off: the setup holds no ownership proof of duck's Buzz key; duck check says how";
+const OFF =
+  "duck's channels are off: the setup holds no ownership proof of duck's Buzz key; duck check says how";
+
+/** First value of tag `name` on `event`, or "". */
+const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1] ?? "";
 
 /**
- * duck in its DMs (SPEC part 11, duck's DM), once the setup's proof signs its key: a person's message that is an
- * ownership proof is a claim, one in a fixed form changes a coworker of theirs, and any other gets the one fixed
- * answer; each coworker made for a person is offered to them, at start and when `duck make` says (SIGHUP). A
- * message that carries an owner's tag is an agent's, and gets none, so duck and an agent never answer each other
- * for ever. Claims, changes and offers go one at a time, since the connection asks one query at a time; the
- * fixed answer waits on nothing.
+ * duck in its channels (SPEC part 11, duck's channel), once the setup's proof signs its key: a person's request
+ * (a `duck.request` artifact the plugin writes) that is an ownership proof is a claim, and one in a fixed form
+ * changes a coworker of theirs; duck answers each with its revision of that request, in fixed words. Each
+ * coworker made for a person is offered to them, at start and when `duck make` says (SIGHUP). A request that
+ * carries an owner's tag is an agent's, and gets none, nor does one in no form duck knows. Claims, changes,
+ * offers and what duck publishes go one at a time, since the connection asks one query at a time.
  */
 export function talk(setup: Setup) {
   const me = identity(setup);
@@ -91,23 +87,24 @@ export function talk(setup: Setup) {
     sending = done.then(() => {}).catch(() => {});
     return done;
   };
-  const duck = connect(me, (message, place) => {
-    if (place.type !== "dm" || message.tags.some((t) => t[0] === "auth")) return;
-    const proof = proofIn(message.content);
-    const form = FORM.exec(message.content.trim());
-    const set = SETTING.exec(message.content.trim());
-    const limit = LIMIT.exec(message.content.trim());
+  const duck = connect(me, (asked) => {
+    if (tagOf(asked, "type") !== "duck.request" || tagOf(asked, "op") !== "create" || tagOf(asked, "auth"))
+      return;
+    const text = asked.content.trim();
+    const [proof, form, set, limit] = [proofIn(text), FORM.exec(text), SETTING.exec(text), LIMIT.exec(text)];
     const words = proof
-      ? after(() => claimFrom(setup, duck, message.pubkey, proof))
+      ? after(() => claimFrom(setup, duck, asked.pubkey, proof))
       : form
-        ? after(() => change(setup, message.pubkey, form))
+        ? after(() => change(setup, asked.pubkey, form))
         : set
-          ? after(() => setFor(setup, duck, message.pubkey, set))
+          ? after(() => setFor(setup, duck, asked.pubkey, set))
           : limit
-            ? after(() => limitJobs(setup, duck, message.pubkey, Number(limit[1])))
-            : Promise.resolve(ANSWER);
+            ? after(() => limitJobs(setup, duck, asked.pubkey, Number(limit[1])))
+            : Promise.reject(new Error("it is in no form duck knows"));
     words
-      .then((text) => duck.send(9, [["h", place.channel]], text))
+      .then((answer) =>
+        revise(duck, [tagOf(asked, "h"), tagOf(asked, "d")], ["duck.request", "Request", answer], asked),
+      )
       .catch((e: Error) => console.error(`an answer: ${e.message}`));
   });
   const offerAll = () => {
@@ -164,7 +161,7 @@ export function talk(setup: Setup) {
  */
 type Running = ReadonlyMap<string, { db: Database; up(): boolean; wake(): unknown }>;
 let running: Running = new Map();
-/** Has duck publish what the firm's admins see in turn; nothing while duck's DM is off. */
+/** Has duck publish what the firm's admins see in turn; nothing while duck's channels are off. */
 let firmChanged = () => {};
 
 /**
@@ -178,12 +175,12 @@ export function coworkersChanged(coworkers: Running) {
 
 /** Each running coworker's database, by its name, which its list is read from. */
 const lists = new Map<string, Database>();
-/** Has duck publish coworker `name`'s list in turn; nothing while duck's DM is off. */
+/** Has duck publish coworker `name`'s list in turn; nothing while duck's channels are off. */
 let listed = (_name: string) => {};
 
 /**
- * Publishes coworker `name`'s list, on its database `db`, to its person in their DM with duck, where only they
- * and duck read it (SPEC part 11, The plugin): at start and after each write to it.
+ * Publishes coworker `name`'s list, on its database `db`, to its person in their channel with duck, where only
+ * they and duck read it (SPEC part 11, The plugin): at start and after each write to it.
  */
 export function listChanged(name: string, db: Database) {
   lists.set(name, db);
@@ -210,33 +207,68 @@ function artifactId(h: string, type: string, key: string) {
   return id.toString("hex").replace(/^(.{8})(.{4})(.{4})(.{4})/, "$1-$2-$3-$4-");
 }
 
+/** Each person's channel with duck, by their Buzz key. */
+const channels = new Map<string, string>();
+
 /**
- * Writes the artifact (NIP-AR) of `type` keyed `key`, titled `title`, with `content`, in the DM of the person
- * whose Buzz key is `to` with duck, unless it would not change; `tags` add to it.
+ * The channel of the person whose Buzz key is `to` with duck (NIP-CL): a private system channel duck made with
+ * them as its one other member, labelled with their key, which Buzz's apps list nowhere and count nothing in as
+ * unread. duck makes it the first time it writes there; with more than one, every reader takes the oldest.
+ */
+async function channelFor(duck: ReturnType<typeof connect>, to: string) {
+  const known = channels.get(to);
+  if (known) return known;
+  const [oldest] = (await duck.query({ kinds: [39000], "#P": [duck.me], "#t": [to] }))
+    .filter((c) => tagOf(c, "t") === "system")
+    .sort((a, b) => Number(tagOf(a, "created_at")) - Number(tagOf(b, "created_at")));
+  const id = (oldest && tagOf(oldest, "d")) || randomUUID();
+  if (!oldest) {
+    const made = { h: id, name: "duck", channel_type: "system", visibility: "private", t: to, p: to };
+    await duck.send(9007, Object.entries(made), "");
+  }
+  channels.set(to, id);
+  return id;
+}
+
+/**
+ * Writes artifact `d` in channel `h` (NIP-AR) of `type`, titled `title`, with `content`: a revision of `head`
+ * where given, else its first; `tags` add to it.
+ */
+const revise = (
+  duck: ReturnType<typeof connect>,
+  [h, d]: string[],
+  [type, title, content]: [string, string, string],
+  head?: Event,
+  tags: string[][] = [],
+) =>
+  duck.send(
+    45010,
+    [
+      ...Object.entries({ ar: "1", d, h, type, title }),
+      ...(head ? [["op", "update"], ["prev", head.id]] : [["op", "create"]]),
+      ...tags,
+    ],
+    content,
+  );
+
+/**
+ * Writes the artifact (NIP-AR) of `type` keyed `key`, titled `title`, with `content`, in the channel of the
+ * person whose Buzz key is `to` with duck, unless it would not change; `tags` add to it.
  */
 async function publishArtifact(
   duck: ReturnType<typeof connect>,
   to: string,
   key: string,
-  [type, title, content]: [string, string, string],
+  artifact: [string, string, string],
   tags: string[][] = [],
 ) {
-  const opened = await duck.send(41010, [["p", to]], "");
-  const dm = JSON.parse(opened.slice("response:".length)).channel_id;
-  const d = artifactId(dm, type, key);
-  const [head] = await duck.query({ artifact: "current", "#h": [dm], "#d": [d] });
-  if (head?.content === content) return;
-  const envelope = Object.entries({ ar: "1", d, h: dm, type, title });
-  const op = head
-    ? [
-        ["op", "update"],
-        ["prev", head.id],
-      ]
-    : [["op", "create"]];
-  await duck.send(45010, [...envelope, ...op, ...tags], content);
+  const h = await channelFor(duck, to);
+  const d = artifactId(h, artifact[0], key);
+  const [head] = await duck.query({ artifact: "current", "#h": [h], "#d": [d] });
+  if (head?.content !== artifact[2]) await revise(duck, [h, d], artifact, head, tags);
 }
 
-/** Writes claimed coworker `name`'s artifact in its person's DM with duck, naming the coworker's Buzz key. */
+/** Writes claimed coworker `name`'s artifact in its person's channel with duck, naming its Buzz key. */
 async function publishFor(
   setup: Setup,
   duck: ReturnType<typeof connect>,
@@ -267,9 +299,9 @@ async function admins(setup: Setup, duck: ReturnType<typeof connect>) {
 }
 
 /**
- * Publishes what the firm's admins see, as one `duck.firm` artifact in each owner's and admin's DM with duck:
- * each coworker's person, state, whether its goose is up, when it last ran and its cost this calendar month,
- * and the most model calls of a job's run.
+ * Publishes what the firm's admins see, as one `duck.firm` artifact in each owner's and admin's channel with
+ * duck: each coworker's person, state, whether its goose is up, when it last ran and its cost this calendar
+ * month, and the most model calls of a job's run.
  */
 async function publishFirm(setup: Setup, duck: ReturnType<typeof connect>) {
   const costs = monthCosts(setup);
@@ -342,6 +374,7 @@ async function publishSettings(setup: Setup, duck: ReturnType<typeof connect>, n
     paused: { ...of("paused"), value: Boolean(of("paused").value) },
     quiet: of("quiet"),
     messages_per_hour: { ...each, value: perHour },
+    zone: of("zone"),
     cost: Math.round((monthCosts(setup, personOf(setup, name).zone).get(name) ?? 0) * 100) / 100,
   });
   await publishFor(setup, duck, name, ["duck.person", `${name}'s preferences`, content]);
@@ -392,7 +425,8 @@ async function setFor(
 
 /**
  * Does what `form` asks for coworker it names, where `writer` is its person: publishes its profile with the
- * new name or picture, or stops it, keeping its folder, and has the host install (SPEC part 11, duck's DM).
+ * new name or picture, or stops it, keeping its folder, and has the host install (SPEC part 11, duck's
+ * channel).
  */
 async function change(
   setup: Setup,
@@ -472,19 +506,18 @@ function contentOf(event?: Event): Record<string, unknown> {
   }
 }
 
-/** Offers each unclaimed coworker made for a person and not yet offered, in their DM with duck; sent once taken. */
+/**
+ * Offers each coworker made for a person, in their channel with duck, as its `duck.offer` artifact naming its
+ * Buzz key, which the plugin shows in New agent; it stays there, so one stopped can be added again.
+ */
 async function offer(setup: Setup, duck: ReturnType<typeof connect>) {
   for (const name of made(setup)) {
-    const facts = factsOf(setup, name);
-    if (facts.state !== "unclaimed" || !facts.for || facts.offered_at) continue;
-    try {
-      const opened = await duck.send(41010, [["p", facts.for]], "");
-      const dm = JSON.parse(opened.slice("response:".length)).channel_id;
-      await duck.send(9, [["h", dm]], offerOf(name, buzzKey(setup, name)));
-      writeFacts(setup, name, { ...factsOf(setup, name), offered_at: new Date().toISOString() });
-    } catch (e) {
-      console.error(`${name}'s offer, sent again at duck's next start: ${(e as Error).message}`);
-    }
+    const { for: person } = factsOf(setup, name);
+    if (!person) continue;
+    const content = JSON.stringify({ version: 1, coworker: name });
+    await publishArtifact(duck, person, name, ["duck.offer", `${name}, made for you`, content], [
+      ["agent", buzzKey(setup, name)],
+    ]).catch((e: Error) => console.error(`${name}'s offer, sent again at duck's next start: ${e.message}`));
   }
 }
 
@@ -516,7 +549,7 @@ async function claimFrom(setup: Setup, duck: ReturnType<typeof connect>, writer:
   try {
     claim(setup, name, JSON.stringify(proof), person);
   } catch (e) {
-    console.error(`a claim in duck's DM: ${(e as Error).message}`);
+    console.error(`a claim: ${(e as Error).message}`);
     return NOT_FIT;
   }
   writeFileSync(installFile(setup), "");
@@ -553,7 +586,7 @@ export async function member(setup: Setup, given: string) {
 
 /**
  * The key of the person `member` names for `duck make`, which the firm's running duck looks up, as only it
- * reaches Buzz as duck; with duck's DM off, or that duck not running, it refuses.
+ * reaches Buzz as duck; with duck's channels off, or that duck not running, it refuses.
  */
 export function personFor(setup: Setup, member: string) {
   if (!identity(setup)) throw new Error(OFF);
@@ -562,5 +595,5 @@ export function personFor(setup: Setup, member: string) {
   if (asked.exitCode === 0) return asked.stdout.toString().trim();
   if (asked.exitCode === 1)
     throw new Error(asked.stderr.toString().trim() || "duck could not reach Buzz in 30 s");
-  throw new Error("duck's DM is off while the firm's duck container is not running; duck install starts it");
+  throw new Error("duck's channels are off while the firm's duck container is not running; duck install starts it");
 }

@@ -6,7 +6,7 @@ In this file `duck <command>` means `bun <duck>/src/duck.ts <command>`, where `<
 
 ## What duck is, in one paragraph
 
-Each firm runs duck on its own Linux server, under rootless podman. One `duck-<firm>` container holds duck itself; each coworker runs goose in a `duck-<firm>-<coworker>` container that holds no keys. People talk to their coworker in Buzz. duck has an identity of its own in the firm's Buzz community, and a person's DM with it (duck's DM) is where duck offers them a coworker and takes their claim. The firm's setup is one file, `duck.yaml`, in a private repo of the firm's own. duck keeps its coworkers, their facts and their keys itself, in the storage folder the setup names.
+Each firm runs duck on its own Linux server, under rootless podman. One `duck-<firm>` container holds duck itself; each coworker runs goose in a `duck-<firm>-<coworker>` container that holds no keys. People talk to their coworker in Buzz. duck has an identity of its own in the firm's Buzz community, and a private system channel between it and each person (duck's channel), which Buzz lists nowhere, is where duck's plugin finds the coworker offered to them and sends their claim. Nobody chats with duck. The firm's setup is one file, `duck.yaml`, in a private repo of the firm's own. duck keeps its coworkers, their facts and their keys itself, in the storage folder the setup names.
 
 ## Ask the admin first
 
@@ -91,7 +91,7 @@ Run `duck check`. With `buzz.relay` set and no proof yet, its last lines include
 
 > in Buzz's desktop app the community's owner or an admin opens Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), puts that key in Application public key (hex), presses Authorize identity and then Authorize this key, presses Copy ownership proof and puts the proof in duck.yaml as buzz.owner in single quotes, since Buzz copies it as a JSON list
 
-The proof is not a secret. Put it in `duck.yaml` as `buzz.owner: '<proof>'` and commit. Until it is there duck's DM is off, and coworkers can still be made and claimed with `duck make` and `duck claim` (step 9, second path).
+The proof is not a secret. Put it in `duck.yaml` as `buzz.owner: '<proof>'` and commit. Until it is there duck's channels are off, and coworkers can still be made and claimed with `duck make` and `duck claim` (step 9, second path).
 
 Check: `duck check` prints no `still to do` line and no line about `buzz.owner`.
 
@@ -99,31 +99,33 @@ Check: `duck check` prints no `still to do` line and no line about `buzz.owner`.
 
 Run `duck check` and fix each line it prints until its last line is `the setup is ready to install` and it exits 0. A `still to do` line above it does not stop an install; step 7 deals with it. Then run `duck install`. The first install builds duck's two images, which takes a while.
 
-Check: `duck install` exits 0 and its last line is `duck: started`. `podman ps --filter label=duck.firm=<firm>` shows `duck-<firm>` up. `systemctl --user is-enabled duck-firm-<firm>.service` prints `enabled`. With duck's DM on, `systemctl --user is-active duck-firm-<firm>-install.path` prints `active`. In Buzz, the admin writes anything to duck in a DM and gets back: "I'm duck, the service your firm's coworkers run on. I answer every message here with these same words. To talk with your coworker, write to it in its own DM."
+Check: `duck install` exits 0 and its last line is `duck: started`. `podman ps --filter label=duck.firm=<firm>` shows `duck-<firm>` up. `systemctl --user is-enabled duck-firm-<firm>.service` prints `enabled`. With duck's channels on, `systemctl --user is-active duck-firm-<firm>-install.path` prints `active`.
 
 ## 9. Make the first coworker, and its person claims it
 
 A coworker's name is lowercase letters, digits and dashes, from a letter. Its handle is the person's one word, letters, digits and underscores, unique in the firm.
 
-**With duck's DM on.** Run `duck make <coworker> <handle> "<their name in Buzz>"`. A name that is not exactly one person's in Buzz is refused; give their 64-character Buzz key instead. A make is also refused, naming the secret, while a plug the coworker gets lacks that person's key in the secret store. duck prints `duck made coworker <coworker>; its Buzz key is <key>` and sends the person, in their DM with duck, the coworker's name, its key and these words on how to claim it:
+**With duck's channels on.** Run `duck make <coworker> <handle> "<their name in Buzz>"`. A name that is not exactly one person's in Buzz is refused; give their 64-character Buzz key instead. A make is also refused, naming the secret, while a plug the coworker gets lacks that person's key in the secret store. duck prints `duck made coworker <coworker>; its Buzz key is <key>` and offers the coworker to the person in duck's channel. With duck's plugin, in Buzz's desktop app (the phone app cannot), they claim it themselves:
 
-> To make it yours, in Buzz's desktop app (the phone app cannot) with duck's plugin: open Agents, press New agent (and Create a new agent if it asks), choose duck as the harness, name it, press Create agent and then Let’s go. Without the plugin: open Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), put this key in Application public key (hex), press Authorize identity and then Authorize this key:
-> [the coworker's key, on a line of its own]
-> Then press Copy ownership proof and paste the proof here as your reply.
+> open Agents, press New agent (and Create a new agent if it asks), choose duck as the harness, name it, press Create agent and then Let’s go
 
-How a person installs the plugin is not built yet (see the end of this file), so have the person follow the "Without the plugin" steps. When they paste the proof, duck answers the person "That coworker is yours now. duck is starting it, and it answers in its own DM once it is running." and a systemd unit runs `duck install` on the server. No admin needs to be there.
+duck claims it for them, and a systemd unit runs `duck install` on the server. No admin needs to be there. How a person installs the plugin is not built yet (see the end of this file), so until it is, the person claims it without the plugin, as below.
 
-A person who lives in another time zone than the firm's sets theirs once they have claimed the coworker, in their DM with duck, such as `set <coworker> zone America/New_York`; duck installs again on its own. While duck's DM is off every coworker is in the firm's zone.
+A person who lives in another time zone than the firm's sets theirs once they have claimed the coworker, in the plugin's Preferences tab; duck installs again on its own. Without the plugin, or while duck's channels are off, every coworker is in the firm's zone.
 
-**With duck's DM off.** Run `duck make <coworker> <handle>`. Give the person the key it prints and the "Without the plugin" steps above, and have them send you the proof they copy. First make sure the secret store holds that person's key for every plug the coworker gets: `duck claim` records the claim before it installs, and the install then stops on a missing key until you add it and run `duck install`. Then run `duck claim <coworker> '<proof>' "<their name>"`, which claims and installs.
+**Without the plugin, or with duck's channels off.** With duck's channels off, run `duck make <coworker> <handle>`. Give the person the key `duck make` printed and these steps, in Buzz's desktop app (the phone app cannot):
 
-Check: the install ends with the lines `<coworker>: started` and `duck: kept` (after a claim in duck's DM, read them with `journalctl --user -u duck-firm-<firm>-install.service`), and `podman ps --filter label=duck.firm=<firm>` shows `duck-<firm>-<coworker>` up.
+> open Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), put the key in Application public key (hex), press Authorize identity and then Authorize this key, then press Copy ownership proof and send the proof to your admin
+
+and have them send you the proof they copy. First make sure the secret store holds that person's key for every plug the coworker gets: `duck claim` records the claim before it installs, and the install then stops on a missing key until you add it and run `duck install`. Then run `duck claim <coworker> '<proof>' "<their name>"`, which claims and installs.
+
+Check: the install ends with the lines `<coworker>: started` and `duck: kept` (after a claim from the plugin, read them with `journalctl --user -u duck-firm-<firm>-install.service`), and `podman ps --filter label=duck.firm=<firm>` shows `duck-<firm>-<coworker>` up.
 
 **Optional, before the claim: history from before.** If the person used Claude, ChatGPT or a Hermes agent, `duck import <coworker> <kind> <path>` loads it, with kind `claude` (a claude.ai export's `conversations.json`), `chatgpt` (a ChatGPT export's `conversations.json` or one of its parts) or `hermes` (a Hermes `state.db` or profile folder). It prints what it loaded, and the coworker dreams over it.
 
 ## 10. The plugin
 
-duck's plugin is `plugin/manifest.json` and `plugin/plugin.js` in this repo, the same files for every firm. In Buzz's desktop app it adds duck as a harness in New agent, which claims a coworker without pasting; a To-dos and a Preferences tab on the coworker's page; and, for the community's owners and admins, a Coworkers card in Settings. Everything it does is also a message a person could type in their DM with duck, so a person without it loses nothing they cannot do by hand. How a person installs it is not built yet, so a setup today skips this step.
+duck's plugin is `plugin/manifest.json` and `plugin/plugin.js` in this repo, the same files for every firm. In Buzz's desktop app it adds duck as a harness in New agent, which claims a coworker; a To-dos and a Preferences tab on the coworker's page; and, for the community's owners and admins, a Coworkers card in Settings. It talks with duck only in duck's channel, which Buzz lists nowhere. Without it, as on Buzz's phone app, a person claims a coworker only through an admin's `duck claim`, and cannot pause it, set its quiet hours, messages an hour or their time zone, rename it, change its picture or remove it. How a person installs it is not built yet, so a setup today skips this step.
 
 Check: none; the claim in step 9 works without it.
 
@@ -151,9 +153,9 @@ In `<duck>`, check out the newer commit of `main` and run `bun install --product
 
 - `duck check` names each problem on a line of its own, with what to do.
 - `duck install` stops at the first failure: `the setup has problems; run duck check:` with the lines; a podman command and podman's own error; or `duck is not ready after 120 s; see podman logs duck-<firm>`.
-- duck's log is `duck.log` in the storage folder. It outlives a new container. It holds, among the rest, a backup that failed, an offer not sent, and `duck's DM is off: …` when the setup holds no proof.
+- duck's log is `duck.log` in the storage folder. It outlives a new container. It holds, among the rest, a backup that failed, an offer not sent, and `duck's channels are off: …` when the setup holds no proof.
 - A coworker's goose: `podman logs duck-<firm>-<coworker>`.
-- An install a claim in duck's DM started: `journalctl --user -u duck-firm-<firm>-install.service`.
+- An install a claim from the plugin started: `journalctl --user -u duck-firm-<firm>-install.service`.
 
 ## Reference
 
@@ -173,6 +175,6 @@ In `<duck>`, check out the newer commit of `main` and run `bun install --product
 - The office plug, for Microsoft 365 and Google Workspace mail, calendar and files, and the link that connects a person's mail.
 - A coworker offered to everyone, an admin confirming a claim, and a person creating a coworker of their own.
 - The first conversation's set questions: how they want to work, their voice, history and their mail link.
-- A message written in duck's DM while duck is down gets no answer.
+- A request the plugin sends while duck is down gets no answer; the plugin says duck did not answer.
 - A person leaving and the handover; team coworkers.
 - A real reboot of a firm's server has not been run; the boot unit is proven by starting it as a boot does.
