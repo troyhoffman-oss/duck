@@ -291,6 +291,7 @@ One word per thing, in code, setup, messages and docs.
 - The firm picks its model route in setup. There are two: a subscription login through the vendor's own CLI, and an API key in Anthropic's format, which the relay adds as it forwards. Another provider's route is added when a firm asks for it. On a login route the harness text says the account is the firm's, not the person's.
 - Every call is logged: coworker, session, tokens in and out, the share read from cache, cost and wait.
 - The relay never changes the start of a prompt between calls in a session.
+- Every model call carries the time now, in the person's zone: where a call's last message holds no turn-context block of goose's, the relay adds one at its end, in goose's form, and no later call repeats it.
 
 ## 13. Archive
 

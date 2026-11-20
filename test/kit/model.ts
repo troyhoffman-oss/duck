@@ -70,10 +70,16 @@ export class ModelRequest {
     this.tools = Array.isArray(body.tools) ? body.tools.map((t: Json) => String(t.name)) : [];
   }
 
-  /** The text of the last user message, tool results included. */
+  /**
+   * The text of the last user message, tool results included, without the turn-context blocks that say the time,
+   * which goose and duck's model relay add (SPEC part 12).
+   */
   get last(): string {
     const last = this.messages.findLast((m) => m.role === "user");
-    return last ? textOf(last.content) : "";
+    const content = Array.isArray(last?.content)
+      ? (last.content as Json[]).filter((b) => !String(b.text ?? "").startsWith("<turn-context>"))
+      : last?.content;
+    return textOf(content);
   }
 
   /** Every text the model is shown, in order: the system text, then each message. */
