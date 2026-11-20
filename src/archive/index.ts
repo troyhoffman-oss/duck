@@ -131,14 +131,21 @@ const [ROWS, CHARS] = [30, 1000];
 /** The archive's one tool (SPEC part 13), which the gate serves as duck's own on the person and work lanes. */
 export const ARCHIVE_TOOL = {
   name: "read_archive",
-  description: `Reads the archive: every message between you and your person, and those loaded from products they used before you, oldest first. With \`query\`, plain words, only the messages that hold every one of them; each word is matched as written, as a whole word, with no search syntax. With \`session\`, only that conversation's. With \`from\`, an ISO 8601 time, only those from then on. Each line gives a message's time, who wrote it, its door or earlier product, its session and its first ${CHARS} characters. A call shows at most ${ROWS} messages: to read on, call again with \`from\` set to the last time shown, whose message is shown again. To read the stretch around a message, give its session and a \`from\` a little before its time.`,
+  description: `Reads the archive: every message between you and your person, and those loaded from products they used before you, oldest first. With \`query\`, plain words, only the messages that hold every one of them; each word is matched as written, as a whole word, with no search syntax. With \`session\`, only that conversation's. With \`from\` or \`to\`, ISO 8601 times, only those from or until then. Each line gives a message's time, who wrote it, its door or earlier product, its session and its first ${CHARS} characters; a longer one's line ends with its id, and \`message\` set to that id shows it whole. A call shows at most ${ROWS} messages, oldest first: the first ${ROWS} from \`from\`, or with \`to\` the last ${ROWS} until it; fewer means none lie beyond them that way. To read on, call again with \`from\` set to the last time shown, or to read back, with \`to\` set to the first; that message is shown again. To read the stretch around a message, give its session and a \`from\` a little before its time.`,
   inputSchema: {
     type: "object",
-    properties: { query: { type: "string" }, session: { type: "string" }, from: { type: "string" } },
+    properties: {
+      query: { type: "string" },
+      session: { type: "string" },
+      from: { type: "string" },
+      to: { type: "string" },
+      message: { type: "integer" },
+    },
   },
 };
 
 type Message = {
+  id: number;
   at: string;
   way: string;
   door: string;
@@ -150,7 +157,8 @@ type Message = {
 
 /** Runs the archive's tool with `input` for the person named `person`, and returns its result's words. */
 export function readArchive(db: Database, person: string, input: Record<string, unknown>) {
-  const from = input.from === undefined ? "" : new Date(String(input.from)).toISOString();
+  const time = (t: unknown) => (t === undefined ? null : new Date(String(t)).toISOString());
+  const back = input.to === undefined ? "" : "desc";
   // Each word is an FTS5 string, so no character in it is syntax, and FTS5 requires every one.
   const words = String(input.query ?? "")
     .split(/\s+/)
@@ -159,14 +167,26 @@ export function readArchive(db: Database, person: string, input: Record<string, 
     .join(" ");
   // A person's message is in the session of the run that read it.
   const found = db
-    .query<Message, (string | null)[]>(
+    .query<Message, (string | number | null)[]>(
       `select * from (select m.at, m.id, m.way, m.door, m.source, m.author, coalesce(m.session, i.session) as session, m.text
-        from messages m left join inbox i on i.id = m.event where m.at >= ?3
+        from messages m left join inbox i on i.id = m.event where (?3 is null or m.at >= ?3) and (?4 is null or m.at <= ?4)
+        and (?5 is null or m.id = ?5)
         and (?1 is null or m.id in (select rowid from messages_text where messages_text match ?1)))
-        where ?2 is null or session = ?2 order by at, id limit ${ROWS}`,
+        where ?2 is null or session = ?2 order by at ${back}, id ${back} limit ${ROWS}`,
     )
-    .all(words || null, (input.session as string) ?? null, from);
+    .all(
+      words || null,
+      (input.session as string) ?? null,
+      time(input.from),
+      time(input.to),
+      (input.message as number) ?? null,
+    );
+  if (back) found.reverse();
+  const cut = (m: Message) =>
+    input.message === undefined && m.text.length > CHARS
+      ? `${m.text.slice(0, CHARS)}… (cut from ${m.text.length} characters; read it whole with message ${m.id})`
+      : m.text;
   const line = (m: Message) =>
-    `- ${m.at}, ${m.way === "in" ? `${m.author ?? person} wrote` : `to ${person}`} at ${m.door}${m.source ? `, loaded from ${m.source}` : ""}${m.session ? `, session ${m.session}` : ""}: ${m.text.length > CHARS ? `${m.text.slice(0, CHARS)}…` : m.text}`;
+    `- ${m.at}, ${m.way === "in" ? `${m.author ?? person} wrote` : `to ${person}`} at ${m.door}${m.source ? `, loaded from ${m.source}` : ""}${m.session ? `, session ${m.session}` : ""}: ${cut(m)}`;
   return found.length > 0 ? found.map(line).join("\n") : "No message matches.";
 }

@@ -85,3 +85,42 @@ test("archive search: every message written or imported is found by a word in it
     setSystemTime();
   }
 });
+
+test("archive reading back: stepping `to` back to the first time shown reads every message, until a read comes back short, and a cut message is read whole by its id", () => {
+  for (let seed = 1; seed <= 100; seed++) {
+    const next = random(seed);
+    const db = openDb(":memory:");
+    /** Each message's text by the time it was written, some longer than a line shows. */
+    const want = new Map<string, string>();
+    for (let i = Math.floor(next() * 100); i > 0; i--) {
+      const at = new Date(Date.UTC(2020, 0) + Math.floor(next() * 6 * 365 * 86_400_000));
+      const text = `About the harbor, w${i}x.${next() < 0.3 ? " and the dock".repeat(Math.floor(next() * 200)) : ""}`;
+      setSystemTime(at);
+      heard(db, "desk", i, text, []);
+      want.set(at.toISOString(), text);
+    }
+    setSystemTime();
+
+    const shown = new Map<string, string>();
+    for (let to = new Date().toISOString(); ; ) {
+      const page = readArchive(db, "Rosa", { to });
+      if (page === "No message matches.") break;
+      const lines = page.split("\n");
+      expect(times(page)).toEqual(times(page).toSorted());
+      for (const l of lines) shown.set(times(l)[0] as string, l);
+      if (lines.length < 30) break;
+      to = times(page)[0] as string;
+    }
+    expect([...shown.keys()].sort()).toEqual([...want.keys()].sort());
+    for (const [at, line] of shown) {
+      const text = want.get(at) as string;
+      if (text.length <= 1000) {
+        expect(line).toEndWith(`: ${text}`);
+        continue;
+      }
+      const id = /read it whole with message (\d+)\)$/.exec(line)?.[1];
+      expect(line).toEndWith(`: ${text.slice(0, 1000)}… (cut from ${text.length} characters; read it whole with message ${id})`);
+      expect(readArchive(db, "Rosa", { message: Number(id) })).toEndWith(`: ${text}`);
+    }
+  }
+});
