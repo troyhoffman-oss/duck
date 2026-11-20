@@ -73,7 +73,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
   }
 
   test(
-    "duck's offer shows in the person's New agent, and duck's own profile says it is duck, with the tag of the community's owner",
+    "duck's offer shows in the person's New agent, carrying the tag by which the community's owner authorised duck",
     async () => {
       const made = await firm.duck("make", "lark", "ana", "Ana");
       lark = /its Buzz key is ([0-9a-f]{64})/.exec(made)?.[1] as string;
@@ -81,8 +81,11 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
       expect(plugin.type.title).toBe("duck");
       const offered = "lark, made for you by your firm. The name you give it above is its own.";
       expect((await plugin.create((l) => l.includes(offered))).lines).toEqual(["Your coworker", offered]);
-      const own = await profileOf(duck(), (p) => p.duck === true);
-      expect(own.owner).toBe(buzz.keys.rosa);
+      const channel = (await buzz.channelWith("ana", duck())) as string;
+      const [offer] = await buzz.query("ana", [
+        { artifact: "current", "#h": [channel], "#type": ["duck.offer"] },
+      ]);
+      expect(offer?.tags.find((t) => t[0] === "auth")?.[1]).toBe(buzz.keys.rosa);
     },
     E2E,
   );
