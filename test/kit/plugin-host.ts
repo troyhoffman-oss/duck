@@ -12,6 +12,7 @@ type AgentType = {
   id: string;
   title: string;
   defaults(): { config: object };
+  Create: (props: object) => unknown;
   remote: Remote;
   tabs: { title: string; component: (props: object) => unknown }[];
 };
@@ -85,25 +86,51 @@ function react() {
  * their relay session, which reads and writes as them in the test's Buzz, and the agents service, which keeps
  * the agent type it registers and calls it in the order Buzz's code does. Buzz's own code, React and the New
  * agent dialog are not here: what the plugin draws is read as its words, and how it looks is seen only in Buzz.
+ * The session writes only what Buzz's own artifact writer does, an artifact (kind 45010) signed as `who`; the
+ * test's relay, Buzz's own at the pinned commit, decides who reads and writes each channel.
  */
 export async function loadPlugin(buzz: Buzz, who: Writer) {
   const types: AgentType[] = [];
   const agents: { pubkey: string }[] = [];
+  const relayAuthor = await buzz.relayKey();
+  // Buzz's desktop reads over the relay's HTTP query, which pages with a limit; on its socket, a read of
+  // current artifacts is a sync, which takes none.
+  const read = (filters: Record<string, unknown>[]): Promise<BuzzEvent[]> =>
+    buzz.query(
+      who,
+      filters.map(({ limit, ...f }) => ("artifact" in f ? f : { limit, ...f })),
+    );
+  const tag = (event: BuzzEvent, name: string) => event.tags.find((t) => t[0] === name)?.[1];
   const session = {
     viewer: buzz.keys[who],
-    relayAuthor: await buzz.relayKey(),
-    // Buzz's desktop reads over the relay's HTTP query, which pages with a limit; on its socket, a read of
-    // current artifacts is a sync, which takes none.
-    read: (filters: Record<string, unknown>[]): Promise<BuzzEvent[]> =>
-      buzz.query(
-        who,
-        filters.map(({ limit, ...f }) => ("artifact" in f ? f : { limit, ...f })),
-      ),
-    messages: {
-      // Buzz keeps one DM per pair, so the DM with the key mentioned is the channel the plugin opened.
-      send: (_channel: string, content: string, [to]: string[]) => buzz.write(who, "dm", content, { to }),
+    relayAuthor,
+    read,
+    // The relay's own answer, fresh, as Buzz reads its config artifacts (buzz-app src/features/relay/session.ts:2707-2716).
+    snapshotRead: (filters: Record<string, unknown>[], _settings: { signal?: AbortSignal }) => read(filters),
+    channels: {
+      /**
+       * NIP-CL: the channels `creator` made labelled `label`, oldest first, from the relay's own metadata, as
+       * Buzz's findLabeled reads them (buzz-app src/features/relay/store.ts:3195-3245).
+       */
+      async findLabeled({ creator, label }: { creator: string; label: string }) {
+        const found = await read([
+          { kinds: [39000], authors: [relayAuthor], "#P": [creator], "#t": [label] },
+        ]);
+        return found
+          .filter((c) => tag(c, "P") === creator && c.tags.some(([t, v]) => t === "t" && v === label))
+          .sort((a, b) => Number(tag(a, "created_at")) - Number(tag(b, "created_at")))
+          .map((c) => ({ id: tag(c, "d"), channelType: tag(c, "t"), creator }));
+      },
     },
-    directMessages: { open: ([to]: string[]) => buzz.dmWith(who, to as string) },
+    // Buzz's artifact writer signs only an artifact, as the person (buzz-app src/features/relay/native.ts:620-646).
+    configArtifactWriter: {
+      kinds: [45010],
+      async sign(template: { kind: number; tags: string[][]; content: string }) {
+        if (template.kind !== 45010) throw new Error("Not an artifact");
+        return buzz.sign(who, template.kind, template.tags, template.content);
+      },
+      publish: (event: BuzzEvent) => buzz.publish(who, event),
+    },
   };
   // A path in a variable, since the plugin is plain JavaScript that the type checker does not read.
   const file = join(import.meta.dir, "..", "..", "plugin", "plugin.js");
@@ -170,6 +197,9 @@ export async function loadPlugin(buzz: Buzz, who: Writer) {
     });
   return {
     type,
+    /** What New agent shows for the duck type once it has read (see `opened`). */
+    create: (fits: (shown: string[]) => boolean) =>
+      opened(type.Create, { config: type.defaults().config, onChange: () => {}, disabled: false }, fits),
     /**
      * Create agent, then Let's go, in New agent for coworker `coworker` with `name` and `picture`: provision,
      * then `finish` (service.ts:4383-4425). Returns what provision did.

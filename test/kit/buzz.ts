@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,7 +53,7 @@ async function settled<T>(what: string, step: () => Promise<T>, seconds = 60): P
 const pub = (key: Uint8Array) => Buffer.from(schnorr.getPublicKey(key)).toString("hex");
 
 /** Event `kind` with `tags` and `content`, signed with secret key `key` (NIP-01). */
-function signed(key: Uint8Array, kind: number, tags: string[][], content: string) {
+function signed(key: Uint8Array, kind: number, tags: string[][], content: string): BuzzEvent {
   const [pubkey, created_at] = [pub(key), Math.floor(Date.now() / 1000)];
   const id = createHash("sha256")
     .update(JSON.stringify([0, pubkey, created_at, kind, tags, content]))
@@ -349,6 +349,100 @@ export async function startBuzz() {
       return { seen, [Symbol.dispose]: () => ws.close() };
     }
 
+    /** The events the relay keeps that `filters` match, as `who` reads them. */
+    async function query(who: Writer, filters: object[]) {
+      const found: BuzzEvent[] = [];
+      (await subscribe(who, filters, (event) => found.push(event))).close();
+      return found;
+    }
+
+    /**
+     * Sends `event` on the relay's socket signed in as `who` (NIP-42), as Buzz's apps publish, and resolves once
+     * the relay takes it, or throws its reason.
+     */
+    async function publish(who: Writer, event: BuzzEvent) {
+      const taken = Promise.withResolvers<void>();
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { host: new URL(url).host } });
+      const send = (...frame: unknown[]) => ws.send(JSON.stringify(frame));
+      let signIn = "";
+      ws.onmessage = (m) => {
+        const [type, a, b, c] = JSON.parse(String(m.data));
+        if (type === "AUTH") {
+          const auth = signed(
+            secrets[who],
+            22242,
+            [
+              ["relay", url],
+              ["challenge", a],
+            ],
+            "",
+          );
+          signIn = auth.id;
+          send("AUTH", auth);
+        } else if (type === "OK" && a === signIn)
+          b === true ? send("EVENT", event) : taken.reject(new Error(`the relay refused the sign-in: ${c}`));
+        else if (type === "OK" && a === event.id)
+          b === true ? taken.resolve() : taken.reject(new Error(`the relay refused it: ${c}`));
+      };
+      ws.onclose = () => taken.reject(new Error("the relay closed the socket before it took the event"));
+      try {
+        await Promise.race([
+          taken.promise,
+          Bun.sleep(30_000).then(() => Promise.reject(new Error("waited 30 s for the relay to take it"))),
+        ]);
+      } finally {
+        ws.close();
+      }
+    }
+
+    /** First value of tag `name` on `event`. */
+    const tagOf = (event: BuzzEvent, name: string) => event.tags.find((t) => t[0] === name)?.[1];
+    /**
+     * The system channel (NIP-CL) key `duck` made labelled with `who`'s key, as `who` finds it: the oldest, as
+     * every reader picks one, or none.
+     */
+    async function channelWith(who: Writer, duck: string) {
+      const found = await query(who, [{ kinds: [39000], "#P": [duck], "#t": [keys[who]] }]);
+      const [oldest] = found
+        .filter((c) => tagOf(c, "t") === "system")
+        .sort((a, b) => Number(tagOf(a, "created_at")) - Number(tagOf(b, "created_at")));
+      return oldest && (tagOf(oldest, "d") as string);
+    }
+    /** Each system channel a writer made with duck themselves, by the writer. */
+    const own = new Map<Writer, string>();
+    /**
+     * Duck's answer to `words`, a request (a `duck.request` artifact, NIP-AR) `who` writes in their channel with
+     * key `duck`: the one duck made for them, or else one they make with it themselves; waiting up to 60 s for
+     * duck's revision of it.
+     */
+    async function askDuck(who: Writer, duck: string, words: string) {
+      let channel = (await channelWith(who, duck)) ?? own.get(who);
+      if (!channel) {
+        channel = randomUUID();
+        const tags = [
+          ["h", channel],
+          ["name", "asks"],
+          ["channel_type", "system"],
+          ["p", duck],
+        ];
+        await publish(who, signed(secrets[who], 9007, [...tags, ["visibility", "private"]], ""));
+        own.set(who, channel);
+      }
+      const d = randomUUID();
+      const envelope = { ar: "1", d, h: channel, type: "duck.request", title: "Request", op: "create" };
+      await publish(who, signed(secrets[who], 45010, Object.entries(envelope), words));
+      const head = { artifact: "current", "#h": [channel], "#d": [d] };
+      return settled(
+        `duck's answer to "${words}"`,
+        async () => {
+          const [answer] = await query(who, [head]);
+          if (answer?.pubkey !== duck) throw new Error("none yet");
+          return answer.content;
+        },
+        60,
+      );
+    }
+
     return {
       url,
       /** Each writer's and the coworker's public key, in hex. */
@@ -357,12 +451,16 @@ export async function startBuzz() {
       write,
       /** The typing the coworker shows in the person's DM from now (see `typing`). */
       typing,
-      /** The events the relay keeps that `filters` match, as `who` reads them. */
-      async query(who: Writer, filters: object[]) {
-        const found: BuzzEvent[] = [];
-        (await subscribe(who, filters, (event) => found.push(event))).close();
-        return found;
-      },
+      query,
+      /** Event `kind` with `tags` and `content`, signed as `who`. */
+      sign: (who: Writer, kind: number, tags: string[][], content: string) =>
+        signed(secrets[who], kind, tags, content),
+      publish,
+      channelWith,
+      askDuck,
+      /** What Buzz lists for `who`: their channels and their DMs, as Buzz's CLI lists them. */
+      listed: async (who: Writer) =>
+        `${await cli(["channels", "list", "--member"], undefined, who)}${await cli(["dms", "list"], undefined, who)}`,
       /** The key the relay signs its own events with, such as its member list, from its NIP-11 document. */
       async relayKey() {
         const nip11 = await fetch(`http://127.0.0.1:${port}`, {
