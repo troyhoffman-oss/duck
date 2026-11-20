@@ -222,7 +222,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     });
   });
 
-  test.failing("ask first: Rosa is asked with the exact mail, and her no, which duck reads from her own words and the question alone, runs nothing and comes to the conversation that made the call with her message", async () => {
+  test.failing("ask first: Rosa is asked with the exact mail, and her no, which duck reads from her own words and what she was sent, runs nothing and comes to the conversation that made the call with her message", async () => {
     const ASK = "Send Dana the 4B renewal terms.";
     firm.model.on(said(ASK), call("send_mail", MAIL));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
@@ -242,7 +242,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const read = firm.model.requests.filter(reading);
     expect(read.map((r) => r.last)).toEqual([expect.stringContaining(`${question.text}\n\n`)]);
     expect(read[0]?.last).toEndWith(NO);
-    expect(read[0]?.shows("I've asked you before it goes.")).toBe(false);
+    expect(read[0]?.shows("I've asked you before it goes.")).toBe(true);
     expect(firm.model.requests.find(all(coworkerRun, said(NO)))?.last).toContain("answers ask");
     const db = firm.db();
     const answers = db.query("select answer from outbox where kind = 'ask'").all();
