@@ -412,10 +412,10 @@ export async function startBuzz() {
     const own = new Map<Writer, string>();
     /**
      * Duck's answer to `words`, a request (a `duck.request` artifact, NIP-AR) `who` writes in their channel with
-     * key `duck`: the one duck made for them, or else one they make with it themselves; waiting up to 60 s for
-     * duck's revision of it.
+     * key `duck`: the one duck made for them, or else one they make with it themselves, a look-alike labelled
+     * with their own key; waiting up to `seconds` for duck's revision of it, or none where it gives none.
      */
-    async function askDuck(who: Writer, duck: string, words: string) {
+    async function askDuck(who: Writer, duck: string, words: string, seconds = 60) {
       let channel = (await channelWith(who, duck)) ?? own.get(who);
       if (!channel) {
         channel = randomUUID();
@@ -424,6 +424,7 @@ export async function startBuzz() {
           ["name", "asks"],
           ["channel_type", "system"],
           ["p", duck],
+          ["t", keys[who]],
         ];
         await publish(who, signed(secrets[who], 9007, [...tags, ["visibility", "private"]], ""));
         own.set(who, channel);
@@ -439,8 +440,8 @@ export async function startBuzz() {
           if (answer?.pubkey !== duck) throw new Error("none yet");
           return answer.content;
         },
-        60,
-      );
+        seconds,
+      ).catch(() => undefined);
     }
 
     return {
