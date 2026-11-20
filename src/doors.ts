@@ -6,6 +6,7 @@ import { heard, told } from "./archive";
 import { aboutSession, add, broken, type Event, lastEvent, waiting } from "./inbox";
 import type { Coworker } from "./run";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
+import { buzzKey } from "./setup/coworkers";
 
 /** A file as it crosses a door: its name, media type and bytes in base64. */
 type DoorFile = { name: string; type: string; data: string };
@@ -248,10 +249,13 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
     ? JSON.parse(payload)
     : { channel: JSON.parse((await buzz(env, ["dms", "open", "--pubkey", owner])).toString()).dm_id };
   const reply = place.reply ? ["--reply-to", place.reply] : [];
+  // Buzz refuses a message whose "@word" names no member, unless a mention is given; it then leaves the word as
+  // text. Its own key is always a member, and the tag it adds notifies no one and starts no run.
+  const mention = ["--mention", buzzKey(c.setup, c.name)];
   const attached = files.flatMap((f) => ["--file", f]);
   await buzz(
     env,
-    ["messages", "send", "--channel", place.channel, ...reply, ...attached, "--content", "-"],
+    ["messages", "send", "--channel", place.channel, ...reply, ...mention, ...attached, "--content", "-"],
     text,
   );
 }
