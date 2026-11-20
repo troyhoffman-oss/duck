@@ -35,8 +35,8 @@ function sign(who: Identity, created_at: number, kind: number, tags: string[][],
 
 /**
  * Holds `who`'s connection to its relay (NIP-42, with the owner's tag) and hands `handler` once each artifact
- * revision (kind 45010, NIP-AR) someone else writes, from when it starts, in a system channel (NIP-CL) the
- * relay's notices (44100, 44101) say `who` is in, asking again on each, since a subscription's channels are fixed
+ * revision (kind 45010, NIP-AR) someone else writes, from when it starts, in a system channel (NIP-CL) `who`
+ * made that the relay's notices (44100, 44101) say `who` is in, asking again on each, since a subscription's channels are fixed
  * when sent. A notice names its channel's type, and the relay sends one of a system channel only to a filter
  * that names that type (buzz-relay src/handlers/side_effects.rs:1318-1327). It connects again when the relay goes, and 5
  * minutes after a refused sign-in, until closed. Returns what publishes an event as `who`, and `who`'s key.
@@ -74,8 +74,12 @@ export function connect(who: Identity, handler: (revision: Event) => void) {
       channels.size > 0
         ? send("REQ", "messages", { kinds: [45010], "#h": [...channels], since: since() })
         : send("CLOSE", "messages");
+    // Only a channel `who` made itself: the relay names the creator as the one who added each first member
+    // (buzz-relay src/handlers/side_effects.rs:2796-2841), so one anyone else makes with `who` in it is never read.
     const notice = (n: Event) =>
-      n.kind === 44100 ? channels.add(tagOf(n, "h")) : channels.delete(tagOf(n, "h"));
+      n.kind === 44100
+        ? JSON.parse(n.content).actor === me && channels.add(tagOf(n, "h"))
+        : channels.delete(tagOf(n, "h"));
     const take = (type: string, a: string, b: Event & boolean, c: string) => {
       if (type === "AUTH") {
         const auth = signed(22242, Object.entries({ relay: who.relay, challenge: a }), "");

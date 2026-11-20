@@ -73,8 +73,10 @@ const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === na
  * duck in its channels (SPEC part 11, duck's channel), once the setup's proof signs its key: a person's request
  * (a `duck.request` artifact the plugin writes) that is an ownership proof is a claim, and one in a fixed form
  * changes a coworker of theirs; duck answers each with its revision of that request, in fixed words. Each
- * coworker made for a person is offered to them, at start and when `duck make` says (SIGHUP). A request that
- * carries an owner's tag is an agent's, and gets none, nor does one in no form duck knows. Claims, changes,
+ * coworker made for a person is offered to them, at start and when `duck make` says (SIGHUP). The writer is the
+ * key that signed the request, which the relay takes only from that key signed in (NIP-42), and duck takes a
+ * request only in the channel it made for that writer. One that carries an owner's tag is an agent's and gets
+ * no answer, nor does a revision of a request or one in no form duck knows. Claims, changes,
  * offers and what duck publishes go one at a time, since the connection asks one query at a time.
  */
 export function talk(setup: Setup) {
@@ -90,18 +92,16 @@ export function talk(setup: Setup) {
   const duck = connect(me, (asked) => {
     if (tagOf(asked, "type") !== "duck.request" || tagOf(asked, "op") !== "create" || tagOf(asked, "auth"))
       return;
-    const text = asked.content.trim();
+    const [text, writer] = [asked.content.trim(), asked.pubkey];
     const [proof, form, set, limit] = [proofIn(text), FORM.exec(text), SETTING.exec(text), LIMIT.exec(text)];
-    const words = proof
-      ? after(() => claimFrom(setup, duck, asked.pubkey, proof))
-      : form
-        ? after(() => change(setup, asked.pubkey, form))
-        : set
-          ? after(() => setFor(setup, duck, asked.pubkey, set))
-          : limit
-            ? after(() => limitJobs(setup, duck, asked.pubkey, Number(limit[1])))
-            : Promise.reject(new Error("it is in no form duck knows"));
-    words
+    after(async () => {
+      if (!(await madeFor(duck, tagOf(asked, "h"), writer))) throw new Error("its channel is not its writer's");
+      if (proof) return claimFrom(setup, duck, writer, proof);
+      if (form) return change(setup, writer, form);
+      if (set) return setFor(setup, duck, writer, set);
+      if (limit) return limitJobs(setup, duck, writer, Number(limit[1]));
+      throw new Error("it is in no form duck knows");
+    })
       .then((answer) =>
         revise(duck, [tagOf(asked, "h"), tagOf(asked, "d")], ["duck.request", "Request", answer], asked),
       )
@@ -231,6 +231,17 @@ async function channelFor(duck: ReturnType<typeof connect>, to: string) {
 }
 
 /**
+ * Whether channel `h` is one duck made for the person whose Buzz key is `writer`: a system channel, duck its
+ * creator and their key its label, by the relay's own record of it, which no client can write.
+ */
+async function madeFor(duck: ReturnType<typeof connect>, h: string, writer: string) {
+  const [made] = await duck.query({ kinds: [39000], "#d": [h] });
+  const has = (name: string, value: string) => !!made?.tags.some(([t, v]) => t === name && v === value);
+  // Its first `t` is its type, then its labels (NIP-CL).
+  return !!made && tagOf(made, "t") === "system" && has("P", duck.me) && has("t", writer);
+}
+
+/**
  * Writes artifact `d` in channel `h` (NIP-AR) of `type`, titled `title`, with `content`: a revision of `head`
  * where given, else its first; `tags` add to it.
  */
@@ -265,7 +276,8 @@ async function publishArtifact(
   const h = await channelFor(duck, to);
   const d = artifactId(h, artifact[0], key);
   const [head] = await duck.query({ artifact: "current", "#h": [h], "#d": [d] });
-  if (head?.content !== artifact[2]) await revise(duck, [h, d], artifact, head, tags);
+  // Its person may revise it too, so only duck's own revision is taken as unchanged.
+  if (head?.content !== artifact[2] || head.pubkey !== duck.me) await revise(duck, [h, d], artifact, head, tags);
 }
 
 /** Writes claimed coworker `name`'s artifact in its person's channel with duck, naming its Buzz key. */
