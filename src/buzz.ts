@@ -181,7 +181,8 @@ export function connect(who: Identity, handler: (revision: Event, label: string)
       } else if (type === "OK") waiting.get(a)?.(b === true, c);
       else if (type === "EVENT" && a === found?.id) found.events.push(b);
       else if (type === "EOSE" && a === found?.id) found.end();
-      else if (type === "CLOSED" && a === found?.id) found.end(new Error(`the relay refused the query: ${b}`));
+      else if (type === "CLOSED" && a === found?.id)
+        found.end(new Error(`the relay refused the query: ${b}`));
       else if (type === "EOSE" && a === "notices") live = true;
       else if (type === "EVENT" && a === "notices" && live) resync();
       else if (type === "EVENT" && a === listening) held ? held.push(b) : hand(b);

@@ -66,7 +66,9 @@ export function apply(ctx) {
       .sort((a, b) => Number(tagOf(a, "created_at")) - Number(tagOf(b, "created_at")));
     for (const c of labelled) {
       const [key, channel] = [tagOf(c, "P"), tagOf(c, "d")];
-      const written = await s.snapshotRead([{ artifact: "current", "#h": [channel], limit: 100 }], { signal });
+      const written = await s.snapshotRead([{ artifact: "current", "#h": [channel], limit: 100 }], {
+        signal,
+      });
       if (written.some((a) => a.pubkey === key && owners.includes(tagOf(a, "auth")))) return { key, channel };
     }
     return {};
