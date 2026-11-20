@@ -220,4 +220,42 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     },
     E2E,
   );
+
+  test(
+    "an agent the owner authorised but did not make admin, whose channel like duck's for a person is older than duck's and holds an offer, is not taken for duck",
+    async () => {
+      // Heron stands in for a coworker: an agent the owner's tag authorises, on no member list as an admin.
+      const tag = JSON.parse(buzz.tagFor(buzz.keys.heron)) as string[];
+      const fake = randomUUID();
+      const made = {
+        h: fake,
+        name: "duck",
+        channel_type: "system",
+        visibility: "private",
+        t: buzz.keys.theo,
+      };
+      const channel = [...Object.entries(made), ["p", buzz.keys.theo], tag];
+      await buzz.publish("heron", buzz.sign("heron", 9007, channel, ""));
+      const envelope = {
+        ar: "1",
+        d: randomUUID(),
+        h: fake,
+        type: "duck.offer",
+        title: "heron",
+        op: "create",
+      };
+      const offer = [...Object.entries(envelope), ["agent", buzz.keys.heron], tag];
+      await buzz.publish(
+        "heron",
+        buzz.sign("heron", 45010, offer, JSON.stringify({ version: 1, coworker: "heron" })),
+      );
+      firm.addSecret("HARBOR_MAIL_KEY_theo");
+      await firm.duck("make", "robin", "theo", buzz.keys.theo);
+      const shown = await (await loadPlugin(buzz, "theo")).create((l) =>
+        l.some((t) => t.startsWith("robin,")),
+      );
+      expect(shown.lines.join(" ")).not.toContain("heron");
+    },
+    E2E,
+  );
 });
