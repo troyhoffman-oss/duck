@@ -379,7 +379,7 @@ describe("the Buzz door", () => {
       // What the run before left on its way to her comes first.
       let question = "";
       while (!question.includes("Your yes is needed")) question = (await buzz.person.next(60)).content;
-      expect(question).toContain("channels archive");
+      expect(question).toContain('["channels","archive"');
       await buzz.person.send(MORE);
       for (let seen = ""; !seen.includes("in our DM"); ) seen = (await buzz.person.next(60)).content;
       await buzz.person.send(YES);

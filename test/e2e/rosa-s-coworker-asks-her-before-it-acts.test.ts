@@ -494,7 +494,8 @@ describe("Rosa's coworker asks her before it acts", () => {
     await firm.person.nextWith("Dana has the 4B terms", 60);
 
     expect(firm.mail.callsTo("send_mail").map((c) => c.input)).toEqual([MAIL]);
-    expect(firm.model.requests.filter(reading).every((r) => r.last.includes(question.text))).toBe(true);
+    const readings = firm.model.requests.filter(all(reading, said(BOTH)));
+    expect(readings.length > 0 && readings.every((r) => r.last.includes(question.text))).toBe(true);
     const db = firm.db();
     const answers = db.query("select answer from outbox where kind = 'ask' order by id desc limit 2").all();
     db.close();
