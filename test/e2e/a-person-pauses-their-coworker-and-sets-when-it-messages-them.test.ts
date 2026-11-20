@@ -154,7 +154,8 @@ describe("a person pauses their coworker and sets when it messages them", () => 
       });
       expect(JSON.parse(prefs?.content as string).cost).toBeGreaterThan(0);
       const d = prefs?.tags.find((t) => t[0] === "d")?.[1] as string;
-      expect(await buzz.query("rosa", [{ ids: [prefs?.id] }])).toHaveLength(1);
+      // A system channel is read only by naming it (buzz-relay src/handlers/system_channels.rs:1-23).
+      expect(await buzz.query("rosa", [{ ids: [prefs?.id], "#h": [channel] }])).toHaveLength(1);
       expect(await buzz.query("theo", [{ ids: [prefs?.id] }])).toEqual([]);
       expect(await buzz.query("theo", [{ kinds: [45010], "#d": [d] }])).toEqual([]);
       await expect(buzz.query("theo", [{ kinds: [45010], "#h": [channel] }])).rejects.toThrow("restricted");
