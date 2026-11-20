@@ -311,8 +311,9 @@ export async function install(folder: string) {
   const ours = podman(["ps", "--all", "--filter", `label=duck.firm=${setup.firm}`, "--format", "{{.Names}}"]);
   for (const name of ours?.split("\n") ?? []) if (name && !wanted.includes(name)) podman(["rm", "-f", name]);
   boot(setup.firm);
+  // It waits only for the coworkers it installed: one claimed since gets an install of its own.
   const ready = () =>
-    fetch(`http://${setup.listen}/ready`)
+    fetch(`http://${setup.listen}/ready?${new URLSearchParams({ coworkers: names.join(",") })}`)
       .then((r) => r.ok)
       .catch(() => false);
   for (const end = Date.now() + 120_000; !(await ready()); await Bun.sleep(200))

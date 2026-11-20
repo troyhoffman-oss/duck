@@ -111,9 +111,14 @@ async function serve() {
       if (part === "events") return push(setup, name, request, arrive);
       const coworker = coworkers.get(name);
       if (part === "doors" && coworker) return take(coworker, door, request);
-      // Ready once duck runs every coworker claimed now and each one's goose has been up.
-      if (part === "ready")
-        return new Response(null, { status: claimed(setup).every((n) => up.has(n)) ? 204 : 503 });
+      // Ready once duck runs each coworker named and each one's goose has been up. An install names those it
+      // installed, so a coworker claimed since waits for its own install and holds this one up for nobody.
+      if (part === "ready") {
+        const named = new URL(request.url).searchParams.get("coworkers");
+        if (named === null) return new Response("name the coworkers: /ready?coworkers=a,b", { status: 400 });
+        const ready = named.split(",").every((n) => n === "" || up.has(n));
+        return new Response(null, { status: ready ? 204 : 503 });
+      }
       return new Response("not found", { status: 404 });
     },
   });

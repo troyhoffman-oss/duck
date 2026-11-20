@@ -153,8 +153,9 @@ export function connect(who: Identity, handler: (revision: Event, label: string)
         return sync();
       });
     synced.catch((e: Error) => {
+      if (closed) return;
       console.error(`${what} could not read its channels: ${e.message}`);
-      if (socket && !closed) setTimeout(resync, 5000);
+      if (socket) setTimeout(resync, 5000);
     });
     return synced;
   };
@@ -213,7 +214,7 @@ export function connect(who: Identity, handler: (revision: Event, label: string)
         listening = "";
         for (const done of waiting.values()) done(false, "the relay went");
         found?.end(new Error("the relay went"));
-        console.error(`${what} lost the relay; it connects again in 5 s`);
+        if (!closed) console.error(`${what} lost the relay; it connects again in 5 s`);
       }
       if (!closed) setTimeout(open, wait);
     };

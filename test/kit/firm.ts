@@ -605,7 +605,13 @@ export async function startFirm(
       /** Starts that unit, as systemd does when the server boots, and waits until duck is ready. */
       async boot() {
         await systemd("start");
-        const ready = async () => (await fetch(`${address}/ready`).catch(() => null))?.status === 204;
+        // Every coworker claimed, as duck install names those it installed.
+        const coworkers = readdirSync(storage)
+          .filter((f) => existsSync(join(storage, f, "coworker.json")) && firm.facts(f).state === "claimed")
+          .join(",");
+        const ready = async () =>
+          (await fetch(`${address}/ready?${new URLSearchParams({ coworkers })}`).catch(() => null))?.status ===
+          204;
         for (const end = Date.now() + 120_000; !(await ready()); await Bun.sleep(200))
           if (Date.now() > end) throw new Error("duck is not ready 120 s after its unit started");
       },
