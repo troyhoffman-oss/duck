@@ -119,16 +119,16 @@ export function connect(who: Identity, handler: (revision: Event, label: string)
   };
   /**
    * Asks the relay again which system channels `who` made, page by page back to the first, since it answers
-   * newest first up to its page limit (buzz-relay src/handlers/req.rs:1324, 1360-1364), then listens to them.
+   * newest first up to its page limit (buzz-relay src/handlers/req.rs:1324, 1360-1364): a page short of it, or
+   * with nothing new, is the last. Then it listens to them.
    */
   const sync = async () => {
     const all = new Map<string, Event>();
     for (let until: number | undefined; ; ) {
-      const page = (await query({ kinds: [39000], "#P": [me], "#t": ["system"], limit: 1000, until })).filter(
-        (c) => !all.has(tagOf(c, "d")),
-      );
-      if (page.length === 0) break;
-      for (const c of page) all.set(tagOf(c, "d"), c);
+      const page = await query({ kinds: [39000], "#P": [me], "#t": ["system"], limit: 1000, until });
+      const fresh = page.filter((c) => !all.has(tagOf(c, "d")));
+      for (const c of fresh) all.set(tagOf(c, "d"), c);
+      if (page.length < 1000 || fresh.length === 0) break;
       until = Math.min(...page.map((c) => c.created_at));
     }
     // Its first `t` is its type, then its label (NIP-CL).

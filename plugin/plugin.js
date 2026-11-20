@@ -38,16 +38,18 @@ export function apply(ctx) {
   /**
    * Each system channel (NIP-CL) the person is in, by the relay's own record of it, which no client writes;
    * the relay reaches one only for a read that names its type (buzz-relay src/handlers/system_channels.rs:14-19)
-   * and answers newest first up to its page limit, so this reads page by page back to the first.
+   * and answers newest first up to its page limit, so this reads page by page back to the first: a page short
+   * of the limit, or with nothing new, is the last.
    */
   async function systemChannels(signal) {
     const s = session();
     const all = new Map();
     for (let until; ; ) {
       const filter = { kinds: [39000], authors: [s.relayAuthor], "#t": ["system"], limit: 500, until };
-      const page = (await s.snapshotRead([filter], { signal })).filter((c) => !all.has(tagOf(c, "d")));
-      if (page.length === 0) return [...all.values()];
-      for (const c of page) all.set(tagOf(c, "d"), c);
+      const page = await s.snapshotRead([filter], { signal });
+      const fresh = page.filter((c) => !all.has(tagOf(c, "d")));
+      for (const c of fresh) all.set(tagOf(c, "d"), c);
+      if (page.length < 500 || fresh.length === 0) return [...all.values()];
       until = Math.min(...page.map((c) => c.created_at));
     }
   }
