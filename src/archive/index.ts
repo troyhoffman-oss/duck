@@ -18,10 +18,13 @@ create trigger if not exists messages_written after insert on messages begin
 
 const now = () => new Date().toISOString();
 
-/** Keeps a person's message, the text of inbox event `event`, with the paths of its files. */
-export const heard = (db: Database, door: string, event: number, text: string, files: string[]) =>
+/**
+ * Keeps a person's message, the text of inbox event `event`, with the paths of its files, as written at `at`:
+ * the door's own time where it gives one, else now.
+ */
+export const heard = (db: Database, door: string, event: number, text: string, files: string[], at = now()) =>
   db.run("insert into messages (at, way, door, event, text, files) values (?, 'in', ?, ?, ?, ?)", [
-    now(),
+    at,
     door,
     event,
     text,

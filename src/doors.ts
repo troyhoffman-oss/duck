@@ -3,8 +3,8 @@ import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-ai/advanced-imessage/grpc";
 import { heard, told } from "./archive";
-import { answered, readReply } from "./gate";
-import { aboutSession, add, broken, type Event, lastEvent, waiting } from "./inbox";
+import { readIn } from "./gate";
+import { aboutSession, add, broken, type Event, lastEvent, mark as state, waiting } from "./inbox";
 import type { Coworker } from "./run";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
 import { buzzKey } from "./setup/coworkers";
@@ -29,6 +29,8 @@ type Written = {
   files?: DoorFile[];
   place?: Place;
   writer?: { key: string; name: string; where: string };
+  /** When it was written, by the door's own clock, where the door gives it. */
+  at?: string;
 };
 
 /**
@@ -46,8 +48,7 @@ export async function take(c: Coworker, door: string, request: Request) {
     return new Response("wrong key", { status: 401 });
   const body = (await request.json()) as Written;
   let ended: Promise<unknown> | null = null;
-  if (set.kind !== "buzz" || body.writer?.key === ownerOf(c.setup, c.name))
-    ended = (await taken(c, door, body))?.ended ?? null;
+  if (set.kind !== "buzz" || body.writer?.key === ownerOf(c.setup, c.name)) ended = taken(c, door, body);
   else {
     const { name: from, key, where } = body.writer ?? {};
     const { channel, root, dm } = body.place ?? {};
@@ -89,29 +90,27 @@ export function saved(folder: string, name: string, bytes: Buffer) {
 
 /**
  * Writes what the person wrote at `door` as an inbox event, with their files where the coworker reads them
- * and cannot change them, and wakes the coworker. A buzz door's message keeps its place as the payload. What
- * it answers of the questions duck asked them is read first and kept with it, so no run sees it before (SPEC
- * part 9). It gives `ended`, which settles when the runs the message wakes or steers have ended and what they
- * said has gone out, or null for a message already taken.
+ * and cannot change them, and wakes the coworker. A buzz door's message keeps its place as the payload. At a
+ * door but email it is held as `reading` until duck has read what it answers of the questions it asked them
+ * (SPEC part 9). It returns when the runs the message wakes or steers have ended and what they said has gone
+ * out, or null for a message already taken.
  */
-async function taken(c: Coworker, door: string, body: Written) {
-  const read = await readReply(c, door, body.text);
-  let then = () => {};
+function taken(c: Coworker, door: string, body: Written) {
+  const reads = doorsOf(c.setup, c.name)[door]?.kind !== "email";
   const event = c.db.transaction(() => {
     const event = add(c.db, door, body.id, body.place ? JSON.stringify(body.place) : null);
     if (event === null) return null;
+    if (reads) state(c.db, [event], "reading");
     const files = (body.files ?? []).map((f) => {
       const folder = join(c.files, String(event));
       mkdirSync(folder, { recursive: true });
       return `${FILES}/${event}/${saved(folder, basename(f.name), Buffer.from(f.data, "base64"))}`;
     });
-    heard(c.db, door, event, body.text, files);
-    then = answered(c, read, event);
+    heard(c.db, door, event, body.text, files, body.at);
     return event;
   })();
   if (event === null) return null;
-  then();
-  return { ended: c.wake().then(() => c.sending) };
+  return (reads ? readIn(c, event) : Promise.resolve()).then(() => c.wake()).then(() => c.sending);
 }
 
 /** The doors of `c` an ask may go to: all its person's doors but email, since mail answers no ask. */
@@ -132,8 +131,9 @@ export function doorTo(c: Coworker, ask = false) {
 /**
  * Sends `text` from the main conversation, an `ask` or not, to the door `doorTo` names, with each file of the
  * coworker's it names, which the person sees by its name: at a buzz door, to the place of their last message
- * there. It returns the door and the archive's id of the message. A delivery the door does not take after
- * three tries is logged as not delivered, and the door is broken.
+ * there. It returns the door, the archive's id of the message, and `delivered`: when the try the door took
+ * began, or null when it took none. A delivery the door does not take after three tries is logged as not
+ * delivered, and the door is broken.
  */
 export function deliver(c: Coworker, said: string, since: number, ask = false) {
   const { door, set, last } = doorTo(c, ask);
@@ -168,14 +168,20 @@ export function deliver(c: Coworker, said: string, since: number, ask = false) {
         : set.kind === "email"
           ? () => mailOut(c, set, last, `${c.setup.firm}-${c.name}-${id}`, text, local)
           : http;
-  c.sending = c.sending.then(async () => {
-    const failed = await tried(`delivery ${c.name}-${id} at ${door}`, send);
-    if (!failed) return;
+  let began = 0;
+  const delivered = c.sending.then(async () => {
+    const failed = await tried(`delivery ${c.name}-${id} at ${door}`, () => {
+      began = Date.now();
+      return send();
+    });
+    if (!failed) return began;
     console.error(`message ${c.name}-${id} was not delivered at ${door}`);
     // Told once a door until the person writes again, so a telling that fails there too is not told again.
     broken(c, `${door}:${last?.id ?? 0}`, { door, undelivered: text, because: failed.message });
+    return null;
   });
-  return { door, id };
+  c.sending = delivered.then(() => {});
+  return { door, id, delivered };
 }
 
 /**
@@ -390,6 +396,7 @@ async function hand(door: string, text: string) {
       pubkey: string;
       content: string;
       tags: string[][];
+      created_at?: number;
     }[];
     if (!event || !name.endsWith(`hex: ${event.pubkey})`)) {
       console.error(
@@ -409,6 +416,7 @@ async function hand(door: string, text: string) {
       text: event.content,
       place,
       writer: { key: event.pubkey, name, where },
+      ...(event.created_at && { at: new Date(event.created_at * 1000).toISOString() }),
       files: await Promise.all(
         files.map(async (f) => ({
           name: f.filename ?? basename(f.url),
@@ -535,8 +543,8 @@ async function textIn(c: Coworker, door: string, set: Door) {
           });
         // Apple marks where each attachment sits in the text with an object replacement character.
         const text = (e.message.content.text ?? "").replaceAll(String.fromCodePoint(0xfffc), "").trim();
-        const ended = (await taken(c, door, { id: e.message.guid, text, files: await Promise.all(files) }))
-          ?.ended;
+        const at = e.message.dateCreated.toISOString();
+        const ended = taken(c, door, { id: e.message.guid, text, files: await Promise.all(files), at });
         if (!ended || c.signal.aborted) continue;
         best("mark a text read", () => im.chats.markRead(chat));
         hold(ended);
@@ -714,7 +722,7 @@ async function mailIn(c: Coworker, door: string, set: Door) {
       const data = Buffer.from(await got.arrayBuffer()).toString("base64");
       return { name: name(a), type: a.content_type ?? "", data };
     });
-    await taken(c, door, { id, text, files: await Promise.all(files) });
+    taken(c, door, { id, text, files: await Promise.all(files) });
   };
   // One mail at a time, in the order the service gave them.
   const next = (id: string) => {

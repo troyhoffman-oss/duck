@@ -8,6 +8,7 @@ export {
   atOnce,
   both,
   call,
+  decides,
   failure,
   held,
   lacks,

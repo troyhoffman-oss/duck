@@ -13,12 +13,17 @@ export type Reply = {
   error?: { status: number; type: string; message: string };
   hold?: string;
   midway?: string;
+  /** To a decisions request, these answers as they are, unchecked. */
+  answers?: Json;
 };
 
 let toolIds = 0;
 
 /** A reply of plain text. */
 export const say = (text: string): Reply => ({ content: [{ type: "text", text }] });
+
+/** A reply to a decisions request that answers `answers` as they are, choices it does not offer included. */
+export const decides = (answers: Json): Reply => ({ content: [], answers });
 
 /** A reply that calls tool `name` with `input`. */
 export const call = (name: string, input: Json = {}): Reply => ({
@@ -66,7 +71,7 @@ export class ModelRequest {
       ? (body.messages as ModelRequest["messages"])
       : body.state === undefined
         ? []
-        : [{ role: "user", content: body.state }];
+        : [{ role: "user", content: stated(body.state) }];
     this.tools = Array.isArray(body.tools) ? body.tools.map((t: Json) => String(t.name)) : [];
   }
 
@@ -265,7 +270,9 @@ export function scriptedModel({
     }
     if (decision) {
       asked.ended = performance.now();
-      return Response.json(decided(asked, content));
+      return Response.json(
+        reply.answers ? { model: asked.model, answers: reply.answers } : decided(asked, content),
+      );
     }
     const message = {
       id: `msg_kit_${++messageIds}`,
@@ -365,6 +372,19 @@ export function atOnce(requests: ModelRequest[]): number {
     most = Math.max(most, now);
   }
   return most;
+}
+
+/**
+ * A decisions request's state as the model is shown it: a conversation duck reads a reply in (SPEC part 9) as
+ * the question it names, then each entry's text, oldest first; any other state as it is.
+ */
+function stated(state: unknown) {
+  try {
+    const { question, conversation } = JSON.parse(String(state));
+    return [`question: ${JSON.stringify(question)}`, ...conversation.map((e: Json) => e.text)].join("\n\n");
+  } catch {
+    return state;
+  }
 }
 
 /**

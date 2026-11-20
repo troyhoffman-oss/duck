@@ -336,4 +336,76 @@ describe("the Buzz door", () => {
     },
     E2E,
   );
+
+  test(
+    "the coworker's own question, sent with buzz into the person's DM after a held call was asked, is kept as a message to her and shown to the decision model between the question and her reply, which is read at the time Buzz gives it",
+    async () => {
+      firm.model.clear();
+      const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
+      const printed = (text: string) => all(main, answered(TOOLS.buzz), said(text));
+      const [ARCHIVE, MORE, QUESTION, YES] = [
+        "Archive harbor-ops.",
+        "Anything else before you do?",
+        "Shall I also archive harbor-lease? Reply yes.",
+        "Yes!",
+      ];
+      firm.model.on(
+        all(main, said(ARCHIVE)),
+        call(TOOLS.buzz, { args: ["channels", "archive", "--channel", buzz.channel] }),
+      );
+      firm.model.on(all(main, answered(TOOLS.buzz)), say("I've asked you first."));
+      firm.model.on(
+        all(main, said(MORE)),
+        call(TOOLS.buzz, { args: ["dms", "open", "--pubkey", buzz.keys.rosa] }),
+      );
+      firm.model.on(printed("dm_id"), (r) =>
+        call(TOOLS.buzz, {
+          args: [
+            "messages",
+            "send",
+            "--channel",
+            /"dm_id":\s*"([0-9a-f-]{36})"/.exec(r.last)?.[1] ?? "",
+            "--content",
+            "-",
+          ],
+          input: QUESTION,
+        }),
+      );
+      firm.model.on(printed("event_id"), say("I've asked you something in our DM."));
+      firm.model.on(reading, say("neither"), { times: Number.POSITIVE_INFINITY });
+      firm.model.on(all(main, said(YES)), say("Noted."));
+
+      await buzz.person.send(ARCHIVE);
+      const asked = [(await buzz.person.next(60)).content, (await buzz.person.next(60)).content];
+      const question = asked.find((t) => t.includes("Your yes is needed")) ?? "";
+      expect(question).toContain("channels archive");
+      await buzz.person.send(MORE);
+      for (let seen = ""; !seen.includes("in our DM"); ) seen = (await buzz.person.next(60)).content;
+      await buzz.person.send(YES);
+      await until(
+        "her yes read and answered",
+        () => firm.model.requests.some(all(main, said(YES))),
+        60,
+        firm.trouble,
+      );
+
+      const read = firm.model.requests.find(all(reading, said(YES)));
+      const shown = JSON.parse(String(read?.body.state)).conversation as { from: string; text: string }[];
+      const entry = (text: string) => shown.findIndex((e) => e.text === text);
+      expect(shown[entry(question)]?.from).toBe("duck's question");
+      expect(shown[entry(QUESTION)]?.from).toBe("the coworker");
+      expect(entry(question)).toBeLessThan(entry(QUESTION));
+      expect(shown.at(-1)).toMatchObject({
+        from: "the person",
+        text: YES,
+        at: expect.stringMatching(/\.000Z$/),
+      });
+      const db = firm.db();
+      const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
+      db.close();
+      expect(open).toEqual([{ answer: null }]);
+      firm.trouble.check();
+    },
+    E2E,
+  );
 });

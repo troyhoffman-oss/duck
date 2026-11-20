@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { called, callStatus, cutShort, lastShown, lastTold, runEnded, runStarted, said } from "../archive";
 import { answerOthers, deliver, doorTo, listen } from "../doors";
-import { cutHeld, JOB, lapse, OTHERS, WORK } from "../gate";
+import { cutHeld, JOB, lapse, OTHERS, readIn, WORK } from "../gate";
 import {
   aboutSession,
   add,
@@ -604,7 +604,11 @@ export function startCoworker(setup: Setup, name: string) {
       const text = asks.map((r, i) => (asks.length === 1 ? r.text : `${i + 1}. ${r.text}`)).join("\n\n");
       const sent = deliver(coworker, text, performance.now(), true);
       const ids = asks.map((r) => r.id);
-      settle(db, ids, sent.door, Date.now(), sent.id);
+      // Each is sent from when the try that delivered it began, which a reply must come after (SPEC part 9).
+      settle(db, ids, sent.door, null, sent.id);
+      void sent.delivered.then(
+        (at) => at !== null && !signal.aborted && settle(db, ids, sent.door, at, sent.id),
+      );
     }
     if (telling) wake();
     if (wait > 0) later = setTimeout(dispatch, wait);
@@ -672,6 +676,11 @@ export function startCoworker(setup: Setup, name: string) {
     lapse(db, person);
     wake();
   }, ms(setup.timers.every));
+  // A message a stop caught while duck read it is read again before the coworker gets it (SPEC part 9).
+  for (const e of db
+    .query<{ id: number }, []>("select id from inbox where state = 'reading' order by id")
+    .all())
+    void readIn(coworker, e.id).then(() => wake());
   const listening = listen(coworker);
   return coworker;
 }

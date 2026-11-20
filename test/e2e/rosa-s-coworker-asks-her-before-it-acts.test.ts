@@ -5,11 +5,14 @@ import {
   call,
   clock,
   coworkerRun,
+  decides,
   E2E,
   type Firm,
   failure,
   harbor,
+  held,
   idIn,
+  type ModelRequest,
   reading,
   said,
   say,
@@ -63,6 +66,24 @@ async function heldFile(firm: Firm, ref: string) {
   expect(firm.mail.callsTo("send_file")).toEqual([]);
   return { sent: { to: DANA, file: b64(ASKED) }, text };
 }
+
+/** Dana's terms under a subject of their own, so each step's question is told apart from those still open. */
+const terms = (subject: string) => ({ ...MAIL, subject });
+const EVERY = { times: Number.POSITIVE_INFINITY };
+/** The conversation a reading of a reply was shown (SPEC part 9), and the question it reads for. */
+const stateOf = (r: ModelRequest | undefined) =>
+  JSON.parse(String(r?.body.state)) as {
+    question: { entry: number; number?: number };
+    conversation: { from: string; text: string }[];
+  };
+/** A reading of a reply for the question whose message holds `text`, and that is question `number` there. */
+const readingOf = (text: string, number?: number) => (r: ModelRequest) => {
+  if (!reading(r)) return false;
+  const { question, conversation } = stateOf(r);
+  return !!conversation[question.entry - 1]?.text.includes(text) && question.number === number;
+};
+/** Who wrote each entry of the conversation a reading was shown, and its text. */
+const shownIn = (r: ModelRequest | undefined) => stateOf(r).conversation.map((e) => [e.from, e.text]);
 
 setDefaultTimeout(E2E);
 
@@ -456,11 +477,12 @@ describe("Rosa's coworker asks her before it acts", () => {
     firm.model.on(said(ASK), call("send_mail", MAIL));
     firm.model.on(answered("send_mail"), call("send_mail", LEE));
     firm.model.on(answered("send_mail"), say("I've asked you about both."));
-    firm.model.on(all(reading, said("read for question 1 alone")), say("yes"));
-    firm.model.on(all(reading, said("read for question 2 alone")), say("no"));
+    firm.model.on(readingOf(MAIL.subject, 1), say("yes"));
+    firm.model.on(readingOf(LEE.subject, 2), say("no"));
+    firm.model.on(reading, say("neither"), EVERY);
     // Dana's mail was held in the main conversation, so its outcome comes to it with her reply or after it.
     firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has the 4B terms; Lee's stay unsent."));
-    firm.model.on(all(coworkerRun, said(BOTH)), say("Sending Dana's."), { times: Number.POSITIVE_INFINITY });
+    firm.model.on(all(coworkerRun, said(BOTH)), say("Sending Dana's."), EVERY);
 
     await firm.person.send("desk", ASK);
     await firm.person.nextWith("about both", 30);
@@ -479,20 +501,28 @@ describe("Rosa's coworker asks her before it acts", () => {
     expect(answers).toEqual([{ answer: "no" }, { answer: "yes" }]);
   });
 
-  test("when duck cannot read her reply, the question stays open, her words reach the coworker as an ordinary message, and she is told", async () => {
+  test("when duck cannot read her reply, the question stays open, her words reach the coworker as an ordinary message, and she is told; her next reply answers it", async () => {
     const ASK = "Send Dana the 4B terms once more.";
-    const REPLY = "Yes, go ahead.";
-    firm.model.on(said(ASK), call("send_mail", MAIL));
+    const ONCE_MORE = terms("4B renewal terms, once more");
+    const [REPLY, AGAIN] = ["Yes, go ahead.", "Yes, send it now."];
+    firm.model.on(said(ASK), call("send_mail", ONCE_MORE));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
-    firm.model.on(all(reading, said(REPLY)), failure(529, "overloaded_error", "the decision model is busy"));
+    firm.model.on(
+      all(readingOf(ONCE_MORE.subject), said(REPLY)),
+      failure(529, "overloaded_error", "the decision model is busy"),
+    );
+    firm.model.on(all(readingOf(ONCE_MORE.subject), said(AGAIN)), say("yes"));
+    firm.model.on(reading, say("neither"), EVERY);
     firm.model.on(
       all(coworkerRun, said(REPLY)),
       say("I could not take that as your answer; the question is still open."),
     );
+    firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has the terms once more."));
+    firm.model.on(all(coworkerRun, said(AGAIN)), say("Sending it."), EVERY);
 
     await firm.person.send("desk", ASK);
     await firm.person.nextWith("I've asked you", 30);
-    await firm.person.nextWith(MAIL.to, 30);
+    await firm.person.nextWith(ONCE_MORE.subject, 30);
     await firm.person.send("desk", REPLY);
     await firm.person.nextWith("still open", 90);
 
@@ -500,6 +530,139 @@ describe("Rosa's coworker asks her before it acts", () => {
     const run = firm.model.requests.find(all(coworkerRun, said(REPLY)));
     expect(run?.last).toContain("which stays open");
     expect(run?.last).not.toContain("'s message below answers ask");
+    const db = firm.db();
+    const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
+    db.close();
+    expect(open).toEqual([{ answer: null }]);
+
+    await firm.person.send("desk", AGAIN);
+    await firm.person.nextWith("once more", 60);
+    expect(firm.mail.callsTo("send_mail").map((c) => c.input)).toEqual([ONCE_MORE]);
+  });
+
+  test("a question is answered after a clarifying exchange: the decision model is shown the question, her question and the coworker's answer, and her reply, each marked with who wrote it, and her yes runs the call once", async () => {
+    const ASK = "Send Dana the 4B terms with the amount.";
+    const AMOUNT = terms("4B renewal amount");
+    const [WHAT, IS, OK] = ["What's the amount?", "It is $1,900 a month from January 1.", "ok yes"];
+    firm.model.on(said(ASK), call("send_mail", AMOUNT));
+    firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
+    firm.model.on(all(readingOf(AMOUNT.subject), said(OK)), say("yes"));
+    firm.model.on(reading, say("neither"), EVERY);
+    firm.model.on(all(coworkerRun, said(WHAT)), say(IS));
+    firm.model.on(all(coworkerRun, said(OUTCOME)), say("Dana has the amount."));
+    firm.model.on(all(coworkerRun, said(OK)), say("Sending it."), EVERY);
+
+    await firm.person.send("desk", ASK);
+    await firm.person.nextWith("I've asked you", 30);
+    const question = await firm.person.nextWith(AMOUNT.subject, 30);
+    await firm.person.send("desk", WHAT);
+    await firm.person.nextWith(IS, 60);
+    await firm.person.send("desk", OK);
+    await firm.person.nextWith("Dana has the amount", 60);
+
+    expect(firm.mail.callsTo("send_mail").map((c) => c.input)).toEqual([AMOUNT]);
+    expect(shownIn(firm.model.requests.find(all(readingOf(AMOUNT.subject), said(OK)))).slice(-4)).toEqual([
+      ["duck's question", question.text],
+      ["the person", WHAT],
+      ["the coworker", IS],
+      ["the person", OK],
+    ]);
+  });
+
+  test("a reply she wrote before its question reached her answers nothing: no model reads it for that question, and the call stays held", async () => {
+    const ASK = "Send Dana the 4B terms early.";
+    const EARLY = terms("4B renewal terms, early");
+    const SOON = "Sounds good, yes.";
+    firm.model.on(said(ASK), call("send_mail", EARLY));
+    firm.model.on(answered("send_mail"), held("asking", say("I've asked you before it goes.")));
+    firm.model.on(reading, say("neither"), EVERY);
+    firm.model.on(all(coworkerRun, said(SOON)), say("Glad to hear it."), EVERY);
+
+    await firm.person.send("desk", ASK);
+    await firm.model.reached("asking");
+    await firm.person.send("desk", SOON);
+    firm.model.release("asking");
+    await firm.person.nextWith(EARLY.subject, 60);
+    await until(
+      "her reply's run",
+      () => firm.model.requests.some(all(coworkerRun, said(SOON))),
+      60,
+      firm.trouble,
+    );
+
+    expect(firm.model.requests.filter(readingOf(EARLY.subject))).toEqual([]);
+    expect(firm.mail.callsTo("send_mail")).toEqual([]);
+    const db = firm.db();
+    const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
+    db.close();
+    expect(open).toEqual([{ answer: null }]);
+  });
+
+  test("her message is kept before duck reads it: while the read is held it is in the inbox and no run has it, her next message waits behind it, a stop there loses neither, and at start the first is read again and both reach the coworker in the order she wrote them", async () => {
+    const ASK = "Send Dana the 4B terms this afternoon.";
+    const LATER = terms("4B renewal terms, this afternoon");
+    const [FIRST, SECOND] = ["Hold on, I am checking with Lee.", "Lee is fine with it."];
+    firm.model.on(said(ASK), call("send_mail", LATER));
+    firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
+    firm.model.on(all(readingOf(LATER.subject), said(FIRST)), held("reading", say("neither")));
+    firm.model.on(reading, say("neither"), EVERY);
+    firm.model.on(all(coworkerRun, said(FIRST)), say("Noted; it waits for your yes."), EVERY);
+    firm.model.on(all(coworkerRun, said(SECOND)), say("Noted that too."), EVERY);
+    const states = () => {
+      using db = firm.db();
+      return db
+        .query<{ state: string }, [string, string]>(
+          "select inbox.state from inbox join messages on event = inbox.id where way = 'in' and text in (?, ?) order by inbox.id",
+        )
+        .all(FIRST, SECOND)
+        .map((e) => e.state);
+    };
+
+    await firm.person.send("desk", ASK);
+    await firm.person.nextWith("I've asked you", 30);
+    await firm.person.nextWith(LATER.subject, 30);
+    await firm.person.send("desk", FIRST);
+    await firm.model.reached("reading");
+    await firm.person.send("desk", SECOND);
+    await until("her second message read", () => states()[1] === "pending", 30, firm.trouble);
+    expect(states()).toEqual(["reading", "pending"]);
+    expect(firm.model.requests.some(all(coworkerRun, (r) => r.shows(FIRST) || r.shows(SECOND)))).toBe(false);
+    await firm.stop();
+    firm.model.release("reading");
+    await firm.start();
+
+    await firm.person.nextWith("Noted", 90);
+    const first = firm.model.requests.find(all(coworkerRun, (r) => said(FIRST)(r) || said(SECOND)(r)))?.last;
+    expect(first).toContain(FIRST);
+    expect(first?.includes(SECOND) ? first.indexOf(FIRST) < first.indexOf(SECOND) : true).toBe(true);
+    await until("both handed on", () => states().every((s) => s === "done"), 60, firm.trouble);
+    expect(firm.mail.callsTo("send_mail")).toEqual([]);
+  });
+
+  test("an answer the decision model gives that is none of its choices, such as constructor, fails the read: her message still reaches the coworker, and the question stays open", async () => {
+    const ASK = "Send Dana the 4B terms by noon.";
+    const NOON = terms("4B renewal terms by noon");
+    const REPLY = "Go for it.";
+    firm.model.on(said(ASK), call("send_mail", NOON));
+    firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
+    firm.model.on(
+      all(readingOf(NOON.subject), said(REPLY)),
+      decides({ reply: { type: "choice", choice: "constructor" } }),
+    );
+    firm.model.on(reading, say("neither"), EVERY);
+    firm.model.on(
+      all(coworkerRun, said(REPLY)),
+      say("I could not take that as your answer; the question is still open."),
+    );
+
+    await firm.person.send("desk", ASK);
+    await firm.person.nextWith("I've asked you", 30);
+    await firm.person.nextWith(NOON.subject, 30);
+    await firm.person.send("desk", REPLY);
+    await firm.person.nextWith("still open", 60);
+
+    expect(firm.mail.callsTo("send_mail")).toEqual([]);
+    expect(firm.model.requests.find(all(coworkerRun, said(REPLY)))?.last).toContain("which stays open");
     const db = firm.db();
     const open = db.query("select answer from outbox where kind = 'ask' order by id desc limit 1").all();
     db.close();
