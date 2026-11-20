@@ -119,7 +119,9 @@ test("archive reading back: stepping `to` back to the first time shown reads eve
         continue;
       }
       const id = /read it whole with message (\d+)\)$/.exec(line)?.[1];
-      expect(line).toEndWith(`: ${text.slice(0, 1000)}… (cut from ${text.length} characters; read it whole with message ${id})`);
+      expect(line).toEndWith(
+        `: ${text.slice(0, 1000)}… (cut from ${text.length} characters; read it whole with message ${id})`,
+      );
       expect(readArchive(db, "Rosa", { message: Number(id) })).toEndWith(`: ${text}`);
     }
   }
