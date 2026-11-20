@@ -610,8 +610,8 @@ export async function startFirm(
           .filter((f) => existsSync(join(storage, f, "coworker.json")) && firm.facts(f).state === "claimed")
           .join(",");
         const ready = async () =>
-          (await fetch(`${address}/ready?${new URLSearchParams({ coworkers })}`).catch(() => null))?.status ===
-          204;
+          (await fetch(`${address}/ready?${new URLSearchParams({ coworkers })}`).catch(() => null))
+            ?.status === 204;
         for (const end = Date.now() + 120_000; !(await ready()); await Bun.sleep(200))
           if (Date.now() > end) throw new Error("duck is not ready 120 s after its unit started");
       },
