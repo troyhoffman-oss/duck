@@ -20,14 +20,7 @@ import {
   settingsOf,
   zoneOf,
 } from "./setup";
-import {
-  buzzKey,
-  claim,
-  identity,
-  signs,
-  write,
-  writeFacts,
-} from "./setup/coworkers";
+import { buzzKey, claim, identity, signs, write, writeFacts } from "./setup/coworkers";
 import { rezone } from "./timers";
 
 /** duck's one answer in its DMs, in fixed words (SPEC part 11, duck's DM). */
