@@ -2,7 +2,7 @@
 import { lookup } from "node:dns/promises";
 import { join } from "node:path";
 import { importHistory, importMaterial } from "./archive/history";
-import { coworkersChanged, identityToDo, listChanged, member, personFor, publish, talk } from "./dms";
+import { coworkersChanged, listChanged, member, personFor, publish, talk } from "./dms";
 import { face, quiet, take } from "./doors";
 import { gate } from "./gate";
 import { add, openDb, type Pushed, poll, push } from "./inbox";
@@ -10,7 +10,7 @@ import { modelRelay } from "./model-relay";
 import { type Coworker, startCoworker } from "./run";
 import { check, claimed, container, factsOf, gives, made, NIGHTLY, personOf, readSetup } from "./setup";
 import { backup, restore } from "./setup/backup";
-import { claim, make } from "./setup/coworkers";
+import { claim, identityToDo, make } from "./setup/coworkers";
 import { install, LOGIN } from "./setup/install";
 import { DREAM, useTimers } from "./timers";
 

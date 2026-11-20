@@ -1,11 +1,11 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join, posix, resolve } from "node:path";
-import { identityProblems } from "../dms";
 import { KINDS } from "../list";
 import { routes } from "../model-relay";
 import { loginProblems } from "../model-relay/claude-login";
 import { questions } from "../sorter";
+import { identityProblems } from "./coworkers";
 
 /**
  * A coworker's door. At an `http` door, `key` names the secret both sides send. At a `text` door, `address`
