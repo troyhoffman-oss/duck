@@ -340,9 +340,16 @@ describe("the Buzz door", () => {
   test(
     "the coworker's own question, sent with buzz into the person's DM after a held call was asked, is kept as a message to her and shown to the decision model between the question and her reply, which is read at the time Buzz gives it",
     async () => {
-      firm.model.clear();
       const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
       const printed = (text: string) => all(main, answered(TOOLS.buzz), said(text));
+      // The delete's outcome can reach the main conversation after the step before has ended, under its rules.
+      await until(
+        "the delete's outcome told",
+        () => firm.model.requests.some(all(main, said('"answer":"yes"'))),
+        60,
+        firm.trouble,
+      );
+      firm.model.clear();
       const [ARCHIVE, MORE, QUESTION, YES] = [
         "Archive harbor-ops.",
         "Anything else before you do?",
