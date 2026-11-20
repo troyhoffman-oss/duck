@@ -376,8 +376,9 @@ describe("the Buzz door", () => {
       firm.model.on(all(main, said(YES)), say("Noted."));
 
       await buzz.person.send(ARCHIVE);
-      const asked = [(await buzz.person.next(60)).content, (await buzz.person.next(60)).content];
-      const question = asked.find((t) => t.includes("Your yes is needed")) ?? "";
+      // What the run before left on its way to her comes first.
+      let question = "";
+      while (!question.includes("Your yes is needed")) question = (await buzz.person.next(60)).content;
       expect(question).toContain("channels archive");
       await buzz.person.send(MORE);
       for (let seen = ""; !seen.includes("in our DM"); ) seen = (await buzz.person.next(60)).content;

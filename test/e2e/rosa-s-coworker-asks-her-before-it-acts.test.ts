@@ -474,7 +474,7 @@ describe("Rosa's coworker asks her before it acts", () => {
       body: "Hi Lee, 5C renews at $2,050.",
     };
     const BOTH = "Yes to the first, but hold the second.";
-    firm.model.on(said(ASK), call("send_mail", MAIL));
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", MAIL));
     firm.model.on(answered("send_mail"), call("send_mail", LEE));
     firm.model.on(answered("send_mail"), say("I've asked you about both."));
     firm.model.on(readingOf(MAIL.subject, 1), say("yes"));
@@ -505,7 +505,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const ASK = "Send Dana the 4B terms once more.";
     const ONCE_MORE = terms("4B renewal terms, once more");
     const [REPLY, AGAIN] = ["Yes, go ahead.", "Yes, send it now."];
-    firm.model.on(said(ASK), call("send_mail", ONCE_MORE));
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", ONCE_MORE));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
     firm.model.on(
       all(readingOf(ONCE_MORE.subject), said(REPLY)),
@@ -544,7 +544,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const ASK = "Send Dana the 4B terms with the amount.";
     const AMOUNT = terms("4B renewal amount");
     const [WHAT, IS, OK] = ["What's the amount?", "It is $1,900 a month from January 1.", "ok yes"];
-    firm.model.on(said(ASK), call("send_mail", AMOUNT));
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", AMOUNT));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
     firm.model.on(all(readingOf(AMOUNT.subject), said(OK)), say("yes"));
     firm.model.on(reading, say("neither"), EVERY);
@@ -573,7 +573,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const ASK = "Send Dana the 4B terms early.";
     const EARLY = terms("4B renewal terms, early");
     const SOON = "Sounds good, yes.";
-    firm.model.on(said(ASK), call("send_mail", EARLY));
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", EARLY));
     firm.model.on(answered("send_mail"), held("asking", say("I've asked you before it goes.")));
     firm.model.on(reading, say("neither"), EVERY);
     firm.model.on(all(coworkerRun, said(SOON)), say("Glad to hear it."), EVERY);
@@ -602,7 +602,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const ASK = "Send Dana the 4B terms this afternoon.";
     const LATER = terms("4B renewal terms, this afternoon");
     const [FIRST, SECOND] = ["Hold on, I am checking with Lee.", "Lee is fine with it."];
-    firm.model.on(said(ASK), call("send_mail", LATER));
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", LATER));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
     firm.model.on(all(readingOf(LATER.subject), said(FIRST)), held("reading", say("neither")));
     firm.model.on(reading, say("neither"), EVERY);
@@ -643,7 +643,7 @@ describe("Rosa's coworker asks her before it acts", () => {
     const ASK = "Send Dana the 4B terms by noon.";
     const NOON = terms("4B renewal terms by noon");
     const REPLY = "Go for it.";
-    firm.model.on(said(ASK), call("send_mail", NOON));
+    firm.model.on(all(coworkerRun, said(ASK)), call("send_mail", NOON));
     firm.model.on(answered("send_mail"), say("I've asked you before it goes."));
     firm.model.on(
       all(readingOf(NOON.subject), said(REPLY)),
