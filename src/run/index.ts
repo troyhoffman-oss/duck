@@ -150,7 +150,7 @@ export function startCoworker(setup: Setup, name: string) {
       return;
     }
     const words = answer || first ? [turn.first, text].filter(Boolean).join("\n\n") : "";
-    if (words) settle(db, turn.rows.splice(0), deliver(coworker, words, turn.started, false, turn.team).door);
+    if (words) settle(db, turn.rows.splice(0), deliver(coworker, words, turn.started, [], turn.team).door);
   }
 
   function update(id: string, u: Update) {
@@ -614,8 +614,8 @@ export function startCoworker(setup: Setup, name: string) {
     if (asks.length > 0 && !telling && !personLane.busy()) {
       // Several questions are numbered, so a reply can name one.
       const text = asks.map((r, i) => (asks.length === 1 ? r.text : `${i + 1}. ${r.text}`)).join("\n\n");
-      const sent = deliver(coworker, text, performance.now(), true);
       const ids = asks.map((r) => r.id);
+      const sent = deliver(coworker, text, performance.now(), ids);
       // Each is sent from when the try that delivered it ended, which a reply must come after (SPEC part 9).
       settle(db, ids, sent.door, null, sent.id);
       void sent.delivered.then(

@@ -56,27 +56,21 @@ export const openAsks = (db: Database) =>
     .all()
     .map((r) => `- ask ${r.id}: ${r.text}`);
 
-/**
- * Whether a question duck asked at door `door` is open: its message there kept, as in a call once said in
- * full, and not answered.
- */
-export const asking = (db: Database, door: string) =>
+/** Whether any of asks `ids` is open: sent and not answered. */
+export const asking = (db: Database, ids: number[]) =>
   db
     .query(
-      "select 1 from outbox where kind = 'ask' and state = 'sent' and answer is null and message is not null and door = ?",
+      `select 1 from outbox where state = 'sent' and answer is null and id in (${ids.map(() => "?").join(", ")})`,
     )
-    .get(door) !== null;
+    .get(...ids) !== null;
 
-/**
- * The asks sent to voice door `door` by `given`, when the speech model was given them, and not yet said in full
- * there, asked at `at`: the time the last of their words played, in the archive's message `message`, where
- * what was said for them starts (SPEC part 9).
- */
-export const asked = (db: Database, door: string, given: string, message: number, at: string) =>
-  db.run(
-    "update outbox set message = ?, sent_at = ? where kind = 'ask' and state = 'sent' and answer is null and message is null and door = ? and sent_at <= ?",
-    [message, at, door, given],
-  );
+/** Asks `ids`, said in a call, asked now, in the archive's message `message` of what was said (SPEC part 9). */
+export const asked = (db: Database, ids: number[], message: number) =>
+  db.run(`update outbox set message = ?, sent_at = ? where id in (${ids.map(() => "?").join(", ")})`, [
+    message,
+    new Date().toISOString(),
+    ...ids,
+  ]);
 
 /**
  * The asks sent to voice door `door` and not answered, pending again, as when the call or its session ends

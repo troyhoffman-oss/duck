@@ -17,7 +17,7 @@ const MARGIN = 30_000;
 const LIMIT = 3600;
 /** How long a hand-off waits for the transcript to pass it. */
 const HEARD = 3000;
-/** How long the speech model may take to begin saying what it is given, and so the quiet before a question. */
+/** How long the speech model says nothing, with all it was given acknowledged, before a question is given it. */
 const BEGIN = 3000;
 /** The longest pause between the transcript's words inside one line of the person's. */
 const PAUSE = 700;
@@ -29,13 +29,18 @@ const INSTRUCTIONS = readFileSync(join(import.meta.dir, "run", "voice.md"), "utf
  * The call each coworker is in, by its name: its voice door, and once joined, what has the coworker say words
  * and what has it ask duck's questions.
  */
-const calls = new Map<string, { door: string; say?: (text: string) => void; ask?: (text: string) => void }>();
+const calls = new Map<
+  string,
+  { door: string; say?: (text: string) => void; ask?: (ids: number[], text: string) => void }
+>();
 /** The call coworker `c` is in now, if any: its voice door, and what has the coworker say words and ask there. */
 export const inCall = (c: Coworker) => calls.get(c.name);
 
 type Words = { delta: string; start_ms: number; end_ms: number };
 /** Whether transcript words `b` follow words `a` within one line. */
 const near = (a: Words | undefined, b: Words | undefined) => !!a && !!b && b.start_ms - a.end_ms < PAUSE;
+/** What transcript words `words` say. */
+const textOf = (words: Words[]) => words.map((w) => w.delta).join("").trim();
 const tag = (e: Event | undefined, name: string) => e?.tags.find((t) => t[0] === name)?.[1];
 
 /**
@@ -43,17 +48,18 @@ const tag = (e: Event | undefined, name: string) => e?.tags.find((t) => t[0] ===
  * 48100) its own person starts in a channel whose only members are the two of them, one call at a time; it
  * leaves every other call alone. In a call the person's sound goes to the speech model `set` names, and what it
  * says comes back. At each hand-off, the line it came from, by the transcript once past the hand-off, is handed
- * to `take` as the person's message; a line with no transcript is not, and the speech model asks again. While
- * a question duck asked in the call is open, duck takes each line the person finishes from the transcript
- * itself, with when its last word was heard, and a hand-off only names what comes back (SPEC part 9). The
- * coworker leaves when the person has, when the call ends, or as the relay's limit for it nears; the questions
- * it leaves unanswered, and any a stop left, go to the person's other doors. It settles when the coworker stops.
+ * to `take` as the person's message; a line with no transcript is not, and the speech model asks again. duck's
+ * questions are asked one at a time. While one asked in the call is open, the words the person begins once it
+ * has been said, by the session's own clock, form the line duck takes itself, handed to `take` to be read as
+ * their answer (SPEC part 9), and a hand-off of them only names what comes back. The coworker leaves when the
+ * person has, when the call ends, or as the relay's limit for it nears; the questions it leaves unanswered, and
+ * any a stop left, go to the person's other doors. It settles when the coworker stops.
  */
 export function voiceIn(
   c: Coworker,
   door: string,
   set: Door,
-  take: (id: string, text: string, at?: string) => unknown,
+  take: (id: string, text: string, read?: boolean) => unknown,
 ) {
   if (unasked(c.db, door) > 0) c.dispatch();
   const buzz = doorsOf(c.setup, c.name).buzz as Door;
@@ -100,6 +106,8 @@ export function voiceIn(
       console.error(`the call at ${c.name}.${door} broke: ${(e as Error).message}`);
     } finally {
       calls.delete(c.name);
+      // Once the call is gone, what it left unanswered goes to the person's other doors.
+      if (unasked(c.db, door) > 0) c.dispatch();
     }
   }
 
@@ -118,33 +126,32 @@ export function voiceIn(
     const encoder = new Encoder({ channels: 1, sample_rate: RATE, application: "voip" });
     /** Each key in the call by its index there; the transcript not yet handed on; each hand-off waiting for it. */
     const [peers, heard, waiting] = [new Map<number, string>(), [] as Words[], new Map<string, number>()];
-    let [out, seq, spoken, lastSaid, seconds] = [Buffer.alloc(0), 0, "", 0, 0];
+    let [out, seq, lastSaid, seconds] = [Buffer.alloc(0), 0, 0, 0];
     let [delegation, leaving, joined] = [null as string | null, false, false];
-    /**
-     * When the person was last heard, the speech model was last given something to say, last said anything and
-     * began what it says now, by the clock; and the end of the last line duck took from the transcript itself,
-     * in the session's ms.
-     */
-    let [lastIn, lastGiven, lastOut, spokenFrom, ownTo] = [0, 0, 0, 0, -1];
+    /** What the speech model said that the archive has not kept; the person's words after duck's question. */
+    let [unkept, answer] = [[] as Words[], [] as Words[]];
+    /** What the door gave the speech model to say that it has not acknowledged. */
+    const unacked = new Set<string>();
+    /** When it last sent sound or words, by the clock: the one thing timed by it, to tell when it is quiet. */
+    let lastOut = 0;
     let own: Timer | undefined;
     /**
-     * duck's questions waiting to be asked, and the one being asked: when it was given, whether its words have
-     * begun, and their first message.
+     * duck's questions waiting their turn, and the one given it: its asks, its commentary, where that landed on
+     * the session's clock (`from`), and once said, where the last of its words ended there (`to`).
      */
-    const questions: string[] = [];
-    let question: { given: number; begun: boolean; first?: number } | undefined;
+    const questions: { ids: number[]; text: string }[] = [];
+    let question: { ids: number[]; event: string; from?: number; to?: number } | undefined;
     const closed = Promise.withResolvers<void>();
     const live = (event: object) =>
       speech.readyState === WebSocket.OPEN && speech.send(JSON.stringify(event));
-    /** Keeps what the speech model has said since it last paused, and returns its id in the archive. */
-    const keep = () => {
-      const text = spoken.trim();
-      spoken = "";
-      if (!text) return undefined;
-      const id = told(c.db, door, c.conversation() ?? null, text, []);
-      if (question?.begun && question.first === undefined) question.first = id;
-      return id;
+    /** Keeps, as one message, what the speech model said that began before `before` on the session's clock. */
+    const keep = (before = Number.POSITIVE_INFINITY) => {
+      const text = textOf(unkept.filter((w) => w.start_ms < before));
+      unkept = unkept.filter((w) => w.start_ms >= before);
+      return text ? told(c.db, door, c.conversation() ?? null, text, []) : undefined;
     };
+    /** Whether duck's question has been said and is open, and `ms` on the session's clock is after it. */
+    const after = (ms: number) => question?.to !== undefined && ms >= question.to && asking(c.db, question.ids);
     const end = () => {
       if (leaving) return;
       leaving = true;
@@ -168,47 +175,27 @@ export function voiceIn(
       const words = heard.splice(0, last + 1).slice(first);
       waiting.delete(id);
       delegation = id;
-      take(
-        id,
-        words
-          .map((w) => w.delta)
-          .join("")
-          .trim(),
-      );
+      take(id, textOf(words));
       return true;
     };
-    /** Has the speech model say `text` from the coworker, about the last line handed on. */
+    /** Has the speech model say `text` from the coworker, about the last line handed on; returns its event's id. */
     const say = (text: string) => {
-      lastGiven = Date.now();
-      live({
-        type: "session.commentary.append",
-        event_id: `said-${Date.now()}`,
-        delegation_id: delegation,
-        content: text,
-      });
+      const id = `said-${randomUUID()}`;
+      unacked.add(id);
+      live({ type: "session.commentary.append", event_id: id, delegation_id: delegation, content: text });
+      return id;
     };
     /**
-     * Has the speech model ask the person duck's question `text`, word for word, and then say only "One moment"
-     * until it is given what happened: once nothing has been given or said for BEGIN, so that what it says next
-     * is the question's. The question is asked once the last of that has played.
+     * Has the speech model ask the person duck's question `text`, of asks `ids`, word for word, and then say only
+     * "One moment" until it is given what happened: once the last question is answered and it has said nothing
+     * for BEGIN with all it was given acknowledged, so that its words from where the question landed are the
+     * question's. The question is asked once the last of those has gone out to the call.
      */
-    const ask = (text: string) => questions.push(text);
-    /** Takes the line the person finished, as the transcript gives it, as their message. */
+    const ask = (ids: number[], text: string) => questions.push({ ids, text });
+    /** Takes the line the person finished after duck's question as their message, to be read as their answer. */
     const ownLine = () => {
-      const words = heard.splice(0);
-      const text = words
-        .map((w) => w.delta)
-        .join("")
-        .trim();
-      if (!text) return;
-      ownTo = words.at(-1)?.end_ms ?? ownTo;
-      // A hand-off of this line waits for nothing more.
-      for (const [id, offset] of waiting)
-        if (offset <= ownTo) {
-          waiting.delete(id);
-          delegation = id;
-        }
-      take(`line-${randomUUID()}`, text, new Date(lastIn).toISOString());
+      const text = textOf(answer.splice(0));
+      if (text) take(`line-${randomUUID()}`, text, true);
     };
 
     speech.onopen = () => {
@@ -226,15 +213,14 @@ export function voiceIn(
     speech.onmessage = (m) => {
       const e = JSON.parse(String(m.data));
       if (e.usage?.seconds !== undefined) seconds = e.usage.seconds;
-      if (e.type === "session.input_transcript.delta") {
+      if (e.type === "session.input_transcript.delta" && after(e.start_ms)) {
+        answer.push(e);
+        clearTimeout(own);
+        own = setTimeout(ownLine, PAUSE);
+      } else if (e.type === "session.input_transcript.delta") {
         heard.push(e);
-        lastIn = Date.now();
-        if (asking(c.db, door)) {
-          clearTimeout(own);
-          own = setTimeout(ownLine, PAUSE);
-        } else for (const [id, offset] of waiting) hand(id, offset);
-      } else if (e.type === "session.delegation.created" && (asking(c.db, door) || e.offset_ms <= ownTo))
-        delegation = e.delegation.id;
+        for (const [id, offset] of waiting) hand(id, offset);
+      } else if (e.type === "session.delegation.created" && after(e.offset_ms)) delegation = e.delegation.id;
       else if (e.type === "session.delegation.created" && !hand(e.delegation.id, e.offset_ms)) {
         const id = e.delegation.id;
         waiting.set(id, e.offset_ms);
@@ -244,16 +230,21 @@ export function voiceIn(
           live({ type: "session.commentary.append", event_id: `again-${id}`, delegation_id: id, content });
         }, HEARD);
       } else if (e.type === "session.output_transcript.delta") {
-        if (e.start_ms - lastSaid >= BREATH) keep();
-        if (!spoken) spokenFrom = Date.now();
-        [spoken, lastSaid, lastOut] = [spoken + e.delta, e.end_ms, Date.now()];
-        if (question && spokenFrom >= question.given) question.begun = true;
+        // What it says is kept a breath at a time, but a question being said is kept whole once said.
+        if (e.start_ms - lastSaid >= BREATH) keep(question && question.to === undefined ? question.from : undefined);
+        unkept.push(e);
+        [lastSaid, lastOut] = [e.end_ms, Date.now()];
+      } else if (e.type === "session.commentary.appended") {
+        unacked.delete(e.client_event_id);
+        if (question && e.client_event_id === question.event) question.from = e.end_ms;
       } else if (e.type === "session.output_audio.delta") {
         out = Buffer.concat([out, Buffer.from(e.delta, "base64")]);
         lastOut = Date.now();
       } else if (e.type === "session.closed") speech.close();
-      else if (e.type === "error")
+      else if (e.type === "error") {
+        unacked.delete(e.error?.client_event_id);
         console.error(`the speech model at ${c.name}.${door} says: ${e.error?.message}`);
+      }
     };
     speech.onclose = () => {
       keep();
@@ -306,26 +297,35 @@ export function voiceIn(
     room.onclose = end;
     // The coworker's sound goes out a 20 ms frame at a time, as a phone sends it.
     const pace = setInterval(() => {
-      // Quiet: all it was given has begun, or never will, and the last of what it said has played.
-      const now = Date.now();
-      const quiet =
-        out.length === 0 && now - lastOut >= BREATH && (lastOut >= lastGiven || now - lastGiven >= BEGIN);
-      if (quiet && question?.begun) {
-        // The last of what was said for duck's question has played: the question is asked there.
-        const kept = keep();
-        const first = question.first ?? kept;
-        const given = new Date(question.given).toISOString();
-        if (first !== undefined) asked(c.db, door, given, first, new Date(now).toISOString());
-        question = undefined;
-      } else if (quiet && question) question = undefined;
-      // A question is given only once nothing has been given or said for BEGIN, so that nothing given before it
-      // waits to be said: what the speech model says next is the question's.
-      else if (questions.length > 0 && out.length === 0 && now - Math.max(lastOut, lastGiven) >= BEGIN) {
-        question = { given: now, begun: false };
-        say(
-          `Ask ${personOf(c.setup, c.name).name} this, word for word, then wait for their answer:\n${questions.shift()}\nWhen they answer, say only "One moment" until you are given what happened.`,
-        );
+      // How long it has been quiet: nothing said, and all it said gone out to the call.
+      const quiet = out.length === 0 ? Date.now() - lastOut : 0;
+      const from = question?.from;
+      // Once the last of the words said from where the question landed has gone out to the call, it is asked,
+      // in one message of those words, and it ended where the last of them did on the session's clock.
+      if (question && from !== undefined && question.to === undefined && quiet >= BREATH) {
+        keep(from);
+        const to = unkept.at(-1)?.end_ms;
+        const message = keep();
+        if (to !== undefined && message !== undefined) {
+          question.to = to;
+          asked(c.db, question.ids, message);
+          // Words the person began after it, heard before this, are their answer too.
+          const begun = heard.findIndex((w) => w.start_ms >= to);
+          if (begun >= 0) {
+            answer.push(...heard.splice(begun));
+            own = setTimeout(ownLine, PAUSE);
+          }
+        }
       }
+      if (question?.to !== undefined && questions.length > 0 && !asking(c.db, question.ids)) question = undefined;
+      const next = !question && unacked.size === 0 && quiet >= BEGIN ? questions.shift() : undefined;
+      if (next)
+        question = {
+          ids: next.ids,
+          event: say(
+            `Ask ${personOf(c.setup, c.name).name} this, word for word, then wait for their answer:\n${next.text}\nWhen they answer, say only "One moment" until you are given what happened.`,
+          ),
+        };
       if (room.readyState !== WebSocket.OPEN || out.length === 0) return;
       const pcm = new Uint8Array(FRAME);
       pcm.set(out.subarray(0, FRAME));
@@ -346,7 +346,6 @@ export function voiceIn(
     ended = () => {};
     // A call never joined, as when the speech model refuses the session, was no call.
     if (joined) callKept(c.db, door, "ended");
-    if (unasked(c.db, door) > 0) c.dispatch();
   }
 
   return new Promise<void>((done) =>

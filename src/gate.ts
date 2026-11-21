@@ -969,8 +969,7 @@ type Read = { answers: { id: number; answer: string }[]; failed?: { asks: number
  * the conversation at that door through theirs, from what they were sent after their own last message before
  * the oldest such question, so all they had not answered is in it, each entry marked with who wrote it: every
  * question's message, and of the rest the newest ten. Their own words leave out the lines they quoted. A
- * message with no question to answer makes no call. In a call a question reached them once the last of its
- * words played, to the ms, and its message is what was said for it there, up to their next line.
+ * message with no question to answer makes no call. In a call, a question's message is what was said for it.
  */
 async function readReply(c: Coworker, event: number): Promise<Read> {
   const reply = c.db
@@ -981,11 +980,11 @@ async function readReply(c: Coworker, event: number): Promise<Read> {
   if (!reply) return { answers: [] };
   const spoken = doorsOf(c.setup, c.name)[reply.door]?.kind === "voice";
   const sent = c.db
-    .query<{ id: number; message: number; text: string }, [string, number, string, number]>(
+    .query<{ id: number; message: number; text: string }, [string, string]>(
       `select id, message, text from outbox where kind = 'ask' and answer is null and message is not null
-        and door = ? and substr(sent_at, 1, ?) <= substr(?, 1, ?) order by id`,
+        and door = ? and substr(sent_at, 1, 19) <= substr(?, 1, 19) order by id`,
     )
-    .all(reply.door, spoken ? 24 : 19, reply.at, spoken ? 24 : 19);
+    .all(reply.door, reply.at);
   const words = reply.text
     .split("\n")
     .filter((l) => !l.trimStart().startsWith(">"))
@@ -1003,21 +1002,11 @@ async function readReply(c: Coworker, event: number): Promise<Read> {
   const asks = "select id, message from outbox where kind = 'ask' and message > ? order by id";
   for (const a of c.db.query<{ id: number; message: number }, [number]>(asks).all(since))
     asked.set(a.message, [...(asked.get(a.message) ?? []), a.id]);
-  const all = c.db
+  const rows = c.db
     .query<{ id: number; at: string; way: string; text: string }, [string, number, number]>(
       "select id, at, way, text from messages where door = ? and way in ('in', 'out') and id > ? and id < ? order by id",
     )
     .all(reply.door, since, reply.id);
-  // In a call, what the coworker said from a question's first words up to the person's next line is its
-  // message.
-  const rows = spoken
-    ? all.reduce<typeof all>((kept, m) => {
-        const last = kept.at(-1);
-        if (last && asked.has(last.id) && m.way === "out" && !asked.has(m.id)) last.text += ` ${m.text}`;
-        else kept.push(m);
-        return kept;
-      }, [])
-    : all;
   const rest = rows.filter((m) => !asked.has(m.id)).slice(-10);
   const kept = rows.filter((m) => asked.has(m.id) || rest.includes(m));
   const from = (m: { id: number; way: string }) =>
