@@ -212,15 +212,15 @@ export function useJobs(
 }
 
 /**
- * Takes the oldest waiting job for a job lane but those `held`, set aside after a round that threw, now
+ * Takes the oldest waiting job for a job lane but those in `setAside`, after a round that threw, now
  * working, if any. One job's rounds so never overlap.
  */
-export const take = (db: Database, held: number[] = []) =>
+export const take = (db: Database, setAside: number[] = []) =>
   db
     .query<Job, [string, string]>(
       "update jobs set state = 'working', since = ? where id = (select id from jobs where state = 'waiting' and id not in (select value from json_each(?)) order by id limit 1) returning *",
     )
-    .get(now(), JSON.stringify(held));
+    .get(now(), JSON.stringify(setAside));
 
 /** Moves `job` to `state` while it is still worked; false once it was stopped, or has ended. */
 export const moved = (db: Database, job: Job, state: string) =>

@@ -355,12 +355,12 @@ export function startCoworker(setup: Setup, name: string) {
    */
   const aside = new Map<string, { due: number; wait: number; since: string }>();
   /** Whether `key`'s run threw and it waits to be tried again. */
-  const held = (key: string) => (aside.get(key)?.due ?? 0) > Date.now();
+  const setAside = (key: string) => (aside.get(key)?.due ?? 0) > Date.now();
 
   /**
    * A lane: a wake while it rests runs `first` if given, then what `next` hands it, one run at a time, until it
    * hands nothing or the coworker stops, and then `rest`. A run that throws is set aside and the lane goes on:
-   * its keys are `held` for a pause that doubles from 2 s to 5 min while it keeps failing (as a door that stops
+   * its keys are `setAside` for a pause that doubles from 2 s to 5 min while it keeps failing (as a door that stops
    * waits, `longer`), and `next` hands it again once that ends, or at once with something new for it: a new
    * event in its session or thread. A run that goes through clears it. Each failure is logged, and no one is
    * told. `going` settles when the lane rests.
@@ -382,7 +382,9 @@ export function startCoworker(setup: Setup, name: string) {
             for (const key of n.keys) aside.set(key, { due, wait, since });
             const because = (error as Error).message;
             console.error(
-              `${name}'s ${what} set aside ${n.label}, failing since ${since}: ${because}; it is tried again from ${new Date(due).toISOString()}, or at once with something new for it`,
+              n.keys.length
+                ? `${name}'s ${what} set aside ${n.label}, failing since ${since}: ${because}; it is tried again from ${new Date(due).toISOString()}, or at once with something new for it`
+                : `${name}'s ${what} ${n.label} failed: ${because}`,
             );
           }
       } catch (error) {
@@ -476,7 +478,7 @@ export function startCoworker(setup: Setup, name: string) {
       if (holding() && !events.some((e) => doors.includes(e.source))) return;
       const rows = dueNow().rows.filter((r) => r.kind === "tell");
       const keys = [...events.map((e) => `event ${e.id}`), ...rows.map((r) => `tell ${r.id}`)];
-      if (keys.some((key) => !held(key)))
+      if (keys.some((key) => !setAside(key)))
         return { keys, label: `session ${session ?? "new"}`, run: () => run(events, rows) };
     },
     () => {
@@ -541,7 +543,7 @@ export function startCoworker(setup: Setup, name: string) {
       wake();
     }
     // A batch set aside waits, but goes again with what is new in it.
-    const free = events.filter((e) => !held(`event ${e.id}`));
+    const free = events.filter((e) => !setAside(`event ${e.id}`));
     const unsorted = free.find(
       (e) => mode !== "off" && outside(e) && e.item_id === null && e.answer === null,
     );
@@ -594,7 +596,7 @@ export function startCoworker(setup: Setup, name: string) {
     const key = (e: Event) => of(e) ?? e.about;
     const events = waiting(db, asked(), undefined, false, true);
     // A thread set aside waits, but goes again with what is new in it.
-    const first = events.find((e) => !held(`event ${e.id}`));
+    const first = events.find((e) => !setAside(`event ${e.id}`));
     if (!first) return;
     const [s, k] = [of(first), key(first)];
     const batch = events.filter((e) => key(e) === k);
@@ -656,7 +658,9 @@ export function startCoworker(setup: Setup, name: string) {
       if (paused()) return;
       const job = take(
         db,
-        [...aside.keys()].filter(held).flatMap((k) => (/^job (\d+)$/.exec(k) ? [Number(k.slice(4))] : [])),
+        [...aside.keys()]
+          .filter(setAside)
+          .flatMap((k) => (/^job (\d+)$/.exec(k) ? [Number(k.slice(4))] : [])),
       );
       if (!job) return;
       const run = async () => {
