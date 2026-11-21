@@ -37,6 +37,8 @@ type Turn = {
   /** At an email door, the first line, which waits to go in one mail with the answer. */
   first?: string;
   rows: number[];
+  /** Whether what it writes goes to its team's channel: a team coworker's run that its person did not start. */
+  team: boolean;
 };
 
 /** Where a session works, and the gate's address for its lane, as goose takes them. */
@@ -65,6 +67,8 @@ export function startCoworker(setup: Setup, name: string) {
     .map(([door]) => `${door}:others`);
   const atDoors = [...doors, ...asked];
   const person = personOf(setup, name);
+  /** Whether it is a team coworker (SPEC part 14). */
+  const team = isTeam(setup, name);
   // The gate is goose's one MCP server, named so goose offers its tools as duck__<tool>. goose keeps each
   // session's servers to that session, so the address a session is given lists its own lane's tools.
   const gateAt = (path: string) => [
@@ -146,7 +150,7 @@ export function startCoworker(setup: Setup, name: string) {
       return;
     }
     const words = answer || first ? [turn.first, text].filter(Boolean).join("\n\n") : "";
-    if (words) settle(db, turn.rows.splice(0), deliver(coworker, words, turn.started).door);
+    if (words) settle(db, turn.rows.splice(0), deliver(coworker, words, turn.started, false, turn.team).door);
   }
 
   function update(id: string, u: Update) {
@@ -353,7 +357,10 @@ export function startCoworker(setup: Setup, name: string) {
     const held = paused()
       ? `Note from duck: ${person.name} has paused you, so you do no work on your own, and a job you start waits until they resume you.\n\n`
       : "";
-    const begun = begin(session, events, held + tells(db, rows, person.name) + cameIn(events));
+    // A team coworker's run that no message of its person's started says its piece in its team's channel.
+    const toTeam = team && events.length === 0;
+    const to = toTeam ? "your team's channel in Buzz, which everyone who may ask reads" : person.name;
+    const begun = begin(session, events, held + tells(db, rows, to) + cameIn(events));
     const t: Turn = {
       run: begun.run,
       events: ids,
@@ -362,6 +369,7 @@ export function startCoworker(setup: Setup, name: string) {
       started: performance.now(),
       lined: false,
       rows: rows.map((r) => r.id),
+      team: toTeam,
     };
     turn = t;
     try {
@@ -391,6 +399,8 @@ export function startCoworker(setup: Setup, name: string) {
     if (!t || !runId || events.length === 0) return;
     const ids = events.map((e) => e.id);
     mark(db, ids, "running", session);
+    // Its person wrote, so the run's answer is theirs, not its team's.
+    t.team = false;
     const steered = goose.call("_goose/unstable/session/steer", {
       sessionId: session,
       expectedRunId: runId,
@@ -507,7 +517,6 @@ export function startCoworker(setup: Setup, name: string) {
    * its home with its own memory, list and tools, as the work lane does. What a run ends on is posted in its
    * thread. An event that goes on a thread, or an ask's or a job's outcome, resumes the thread's session.
    */
-  const team = isTeam(setup, name);
   const othersLane = lane("others lane", () => {
     if (paused()) return;
     const of = (e: Event) =>

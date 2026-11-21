@@ -137,13 +137,17 @@ export function doorTo(c: Coworker, ask = false) {
 /**
  * Sends `text` from the main conversation, an `ask` or not, to the door `doorTo` names, with each file of the
  * coworker's it names, which the person sees by its name: at a buzz door, to the place of their last message
- * there; in a call, to the speech model to say, which the archive keeps as it is said. It returns the door,
+ * there; in a call, to the speech model to say, which the archive keeps as it is said. With `team`, what a
+ * team coworker says on its own goes to its team's channel instead, at its buzz door (SPEC part 14). It returns the door,
  * the archive's id of the message where it is kept now, and `delivered`: when the try the door took ended, or
  * null when it took none. A delivery the door does not take after three tries is logged as not delivered,
  * and the door is broken.
  */
-export function deliver(c: Coworker, said: string, since: number, ask = false) {
-  const { door, set, last } = doorTo(c, ask);
+export function deliver(c: Coworker, said: string, since: number, ask = false, team = false) {
+  const channel = team ? factsOf(c.setup, c.name).channel : undefined;
+  const { door, set, last } = channel
+    ? { door: "buzz", set: doorsOf(c.setup, c.name).buzz as Door, last: null }
+    : doorTo(c, ask);
   const named = [...new Set(said.match(PATH) ?? [])].map((p) => p.replace(/[.,;:!?]+$/, ""));
   const files = named.filter((p) => fileOf(c.setup, c.name, p));
   const text = files.reduce((t, p) => t.replaceAll(p, basename(p)), said);
@@ -173,7 +177,7 @@ export function deliver(c: Coworker, said: string, since: number, ask = false) {
   };
   const send =
     set.kind === "buzz"
-      ? () => post(c, set, last?.payload ?? null, text, local)
+      ? () => post(c, set, channel ? JSON.stringify({ channel }) : (last?.payload ?? null), text, local)
       : set.kind === "text"
         ? () => textOut(c, set, `${c.name}-${id}`, text, local)
         : set.kind === "email"
