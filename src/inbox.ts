@@ -95,10 +95,17 @@ const among = (sources: string[], not = false) =>
   `source ${not ? "not in" : "in"} (${sources.map(() => "?").join(", ")})`;
 
 /**
+ * An event from `sources`, but someone else's words at a door with no thread: those of someone who may not ask
+ * a coworker that answers others are outside words, never a request (SPEC part 14), so no lane takes them as
+ * one of its doors' others.
+ */
+const from = (sources: string[]) => `(${among(sources)} and not (source like '%:others' and about is null))`;
+
+/**
  * The events no run has finished, with the sorter's answers, pending or running when a restart cut their
  * run: from `sources` or for session `main`, and with `theirs`, in a session an event from `sources` is in;
  * or `not` those. The person lane's are from its doors or for the main conversation, the others lane's from
- * its doors' others or in their sessions, and the work lane's are the rest. A person's message duck is still
+ * its doors' others that are requests or in their sessions, and the work lane's are the rest. A person's message duck is still
  * reading waits, with those after it at its door, so they come in the order written (SPEC part 9).
  */
 export const waiting = (
@@ -113,7 +120,7 @@ export const waiting = (
       `select inbox.*, answer, why from inbox left join sorter on event = inbox.id where state not in ('done', 'reading')
         and not exists (select 1 from inbox earlier where earlier.state = 'reading' and earlier.source = inbox.source
           and earlier.id < inbox.id)
-        and ${not ? "not " : ""}(${among(sources)} or coalesce(session = ?, 0)${theirs ? ` or coalesce(session in (select session from inbox where ${among(sources)}), 0)` : ""}) order by id`,
+        and ${not ? "not " : ""}(${from(sources)} or coalesce(session = ?, 0)${theirs ? ` or coalesce(session in (select session from inbox where ${from(sources)}), 0)` : ""}) order by id`,
     )
     .all(...sources, main ?? null, ...(theirs ? sources : []));
 

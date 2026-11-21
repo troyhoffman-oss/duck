@@ -249,6 +249,18 @@ export function answersOf(setup: Setup, coworker: string): Answers {
   }
 }
 
+/**
+ * Whether the writer of Buzz key `key`, where it is an agent the one whose signed tag names `owner`, may ask
+ * coworker `coworker` for work (SPEC part 14): where it answers anyone, anyone; under a list, a named person or
+ * an agent whose owner is named; where it answers only its person, no one but them, whose messages are theirs.
+ */
+export function mayAsk(setup: Setup, coworker: string, key?: string, owner?: string) {
+  const answers = answersOf(setup, coworker);
+  if (answers === "anyone") return true;
+  if (answers === "person") return false;
+  return answers.some((a) => a.key === key || (owner !== undefined && a.key === owner));
+}
+
 export const factsOf = (setup: Setup, coworker: string): Facts =>
   JSON.parse(readFileSync(factsFile(setup, coworker), "utf8"));
 
