@@ -474,13 +474,19 @@ export function widens(now: Answers, next: Answers) {
   return next.some((a) => !now.some((b) => b.key === a.key));
 }
 
-/** Whom `answers` names, worded for the person. */
-const whom = (answers: Answers) =>
+/**
+ * Whom `answers` names, worded for the person; with `keyed`, each named person as duck's asks name someone,
+ * by name and the start of their Buzz key.
+ */
+const whom = (answers: Answers, keyed = false) =>
   answers === "anyone"
     ? "anyone in Buzz"
     : answers === "person"
       ? "only you"
-      : `you and ${answers.map((a) => a.name).join(", ")}`;
+      : `you and ${answers.map((a) => (keyed ? `"${a.name}" (Buzz key ${a.key.slice(0, 8)})` : a.name)).join(", ")}`;
+
+/** Whom `answers` names, as a held change of it shows it to the person: each person by name and key's start. */
+export const shownAnswers = (answers: Answers) => whom(answers, true);
 
 /**
  * Changes coworker `name`'s settings as its person told it, `input` as `SETTINGS_TOOL` takes it with its

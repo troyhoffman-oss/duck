@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive, told } from "./archive";
-import { answersFrom, listChanged, SETTINGS_TOOL, tellSettings, widens } from "./dms";
+import { answersFrom, listChanged, SETTINGS_TOOL, shownAnswers, tellSettings, widens } from "./dms";
 import { act, doorTo, reopen, rootOf, saved } from "./doors";
 import { add, broken, mark, othersIn, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
@@ -848,7 +848,8 @@ const resume = (db: Database, id: number, s: string, what: Json) =>
  * was sent, which the question carries and a yes sends. The question goes once the run ends, through quiet
  * hours if the person's own message started it. In a session someone else wrote in, an others run or a team
  * coworker's request, it says someone else asked, and who (SPEC parts 11 and 14). A box's reason `why` is
- * given the person under its first line, and the coworker.
+ * given the person under its first line, and the coworker. Where the input as it is held does not read
+ * plainly, `reads` gives each entry as the question shows it; the call holds the input itself.
  */
 function hold(
   c: Coworker,
@@ -858,6 +859,7 @@ function hold(
   files: string[],
   s: string | undefined,
   why?: string,
+  reads: (input: Json) => Json = (i) => i,
 ) {
   const urgent = personAt(c, s) !== null;
   const asker = othersIn(c.db, s as string)
@@ -872,7 +874,7 @@ function hold(
     });
     input = { ...input, [key]: Array.isArray(input[key]) ? copies : copies[0] };
   }
-  const effect = Object.entries(input).map(
+  const effect = Object.entries(reads(input)).map(
     ([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`,
   );
   const lines = [...(why ? [why] : []), ...effect];
@@ -1331,7 +1333,10 @@ async function call(c: Coworker, params: Json, lane: string) {
         !setup.settings.locked?.includes("answers") &&
         widens(answersOf(setup, coworker), told.answers as Answers);
       if (wider) state = "ask first";
-      result = words(wider ? hold(c, "duck", "settings", told, [], s) : changeSettings(c, told));
+      const reads = (i: Json) => ({ ...i, answers: shownAnswers(i.answers as Answers) });
+      result = words(
+        wider ? hold(c, "duck", "settings", told, [], s, undefined, reads) : changeSettings(c, told),
+      );
     } else if (mine === BUZZ) {
       // Arguments it may not run, and files that are not the coworker's, are refused before the call is held.
       outcome = "refused";
