@@ -259,7 +259,7 @@ async function writeSetup(
  * in a run that answers someone other than the person. With `wrapped`, the
  * calendar answers its list inside a wrapper and its box takes the rows out. The firm's storage bucket is the kit's, and with `backup`,
  * the nightly backup runs on that cron expression in the firm's zone; otherwise it never comes due while a
- * test runs.
+ * test runs. With `empty`, the firm is installed with its coworker made and not yet claimed, as a new firm's first install is.
  */
 export async function startFirm(
   given: Partial<Times> & {
@@ -276,6 +276,7 @@ export async function startFirm(
     others?: Record<string, string>;
     wrapped?: boolean;
     backup?: string;
+    empty?: boolean;
   } = {},
 ) {
   const times = { ...DEFAULTS, ...given };
@@ -468,7 +469,8 @@ export async function startFirm(
     await run("check");
     const someone = (agent: string) => authTag(randomBytes(32), agent);
     if (given.second) await run("claim", second.coworker, someone(finch), second.name);
-    await run("claim", harbor.coworker, (given.buzz?.tagFor ?? someone)(wren), harbor.name);
+    if (given.empty) await run("install");
+    else await run("claim", harbor.coworker, (given.buzz?.tagFor ?? someone)(wren), harbor.name);
     person.meet(address, harbor.coworker);
     theirs.meet(address, second.coworker);
 
@@ -477,6 +479,8 @@ export async function startFirm(
       folder,
       /** duck's own Buzz key, where the firm has Buzz and duck check named it. */
       duckKey,
+      /** The Buzz key of the person's coworker. */
+      coworkerKey: wren,
       /** Runs `duck <command>` in the firm's folder as its admin's agent does, and returns what it printed. */
       duck: run,
       /** The key `person`'s coworker calls harbor's mail plug with. */
