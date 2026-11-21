@@ -320,7 +320,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
       const { id: ana } = await buzz.write("ana", "harbor-ops", ANA, { to: key });
       await buzz.inThread(ana, LEDGER, 90, key);
       expect(await buzz.thread(theo, key)).toEqual([]);
-      expect(await buzz.reactions(theo, key)).toEqual([]);
+      expect(await buzz.reactionsOf(theo, key)).toEqual([]);
       expect(firm.model.requests.filter(said(THEO))).toEqual([]);
     },
   );

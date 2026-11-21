@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UNITS, unit } from "../../src/setup/install";
 import { type Bucket, startBucket } from "./bucket";
-import { authTag, type BuzzForFirm } from "./buzz";
+import { authTag, type BuzzForFirm, type Writer } from "./buzz";
 import { HARBOR, harbor } from "./duck";
 import type { EmailService } from "./email";
 import { scriptedModel } from "./model";
@@ -479,9 +479,9 @@ export async function startFirm(
     await run("check");
     const someone = (agent: string) => authTag(randomBytes(32), agent);
     if (given.second) {
-      const tag = given.buzz ? given.buzz.proof(second.person, finch) : someone(finch);
+      const tag = given.buzz ? given.buzz.proof(second.person as Writer, finch) : someone(finch);
       await run("claim", second.coworker, tag, second.name);
-      await given.buzz?.join(finch);
+      await given.buzz?.joinHarborOps(finch);
     }
     if (given.empty) await run("install");
     else await run("claim", harbor.coworker, (given.buzz?.tagFor ?? someone)(wren), harbor.name);
@@ -498,7 +498,7 @@ export async function startFirm(
         ) as string[]
       )[1] as string;
       await run("claim", team.coworker, given.buzz.tagFor(tally), harbor.name);
-      await given.buzz.join(tally);
+      await given.buzz.joinHarborOps(tally);
     }
 
     const firm = {

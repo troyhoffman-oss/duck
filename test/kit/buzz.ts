@@ -89,7 +89,7 @@ export type BuzzForFirm = {
   proof: (who: Writer, agent: string) => string;
   makeAdmin: (key: string) => Promise<void>;
   meet: (agent: string) => Promise<void>;
-  join: (agent: string) => Promise<void>;
+  joinHarborOps: (agent: string) => Promise<void>;
   keys: { rosa: string };
   channel: string;
 };
@@ -255,8 +255,13 @@ export async function startBuzz({
       dm = String(JSON.parse((await cli(["dms", "open", "--pubkey", agent])).toString()).dm_id);
       dms.set(`rosa ${agent}`, dm);
     }
+    /** The emoji key `from` has on message `event` now. */
+    const reactionsOf = async (event: string, from: string): Promise<string[]> =>
+      JSON.parse((await cli(["reactions", "get", "--event", event])).toString())
+        .reactions.filter((r: { pubkeys: string[] }) => r.pubkeys.includes(from))
+        .map((r: { emoji: string }) => r.emoji);
     /** The person adds agent `agent` to harbor-ops, as she adds any agent to a channel in Buzz. */
-    async function join(agent: string) {
+    async function joinHarborOps(agent: string) {
       await cli(["channels", "add-member", "--channel", channel, "--pubkey", agent]);
     }
 
@@ -657,14 +662,12 @@ export async function startBuzz({
       },
       /** `who`'s DM with key `to` (see `dmWith`). */
       dmWith,
-      /** The emoji the coworker, or key `from`, has on message `event` now. */
-      reactions: async (event: string, from = keys.wren): Promise<string[]> =>
-        JSON.parse((await cli(["reactions", "get", "--event", event])).toString())
-          .reactions.filter((r: { pubkeys: string[] }) => r.pubkeys.includes(from))
-          .map((r: { emoji: string }) => r.emoji),
+      /** The emoji the coworker has on message `event` now. */
+      reactions: (event: string) => reactionsOf(event, keys.wren),
+      reactionsOf,
       /** harbor-ops's channel id. */
       channel,
-      join,
+      joinHarborOps,
       /** `who` starts a call in `parent` (see `startCall`). */
       call: startCall,
       privateChannel,
