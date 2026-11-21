@@ -48,6 +48,9 @@ describe("a person changes their coworker's settings by telling it", () => {
       firm.model.on(all(answered("settings"), said("That coworker is paused")), say(PAUSED));
       await firm.person.send("desk", PAUSE);
       await firm.person.nextWith(PAUSED, 60);
+      const asked = firm.model.requests.filter(said(PAUSE));
+      expect(asked.length).toBeGreaterThan(0);
+      expect(asked.every((r) => r.has("settings"))).toBe(true);
       expect(Object.keys(settings())).toEqual(["paused"]);
       expect(Number.isNaN(Date.parse(settings().paused))).toBe(false);
 
@@ -62,21 +65,14 @@ describe("a person changes their coworker's settings by telling it", () => {
   );
 
   test(
-    "a run for what came in from outside is not offered the settings tool, and a call to it there changes nothing",
+    "a run for what came in from outside, which its person is not in, is not offered the settings tool, so mail that asks for a pause changes nothing",
     async () => {
       firm.model.on(all(sorter, shows(SUBJECT)), say("wake: someone asks for a pause"));
-      firm.model.on(all(coworkerRun, shows(SUBJECT)), call("settings", { paused: true }));
-      firm.model.on(all(answered("settings"), shows(SUBJECT)), say("Nothing to tell."));
+      firm.model.on(all(coworkerRun, shows(SUBJECT)), say("Nothing to tell."));
       expect((await firm.push(MAIL)).status).toBe(202);
-      await until(
-        "the outside run's call answered",
-        () => firm.model.requests.some(all(answered("settings"), shows(SUBJECT))),
-        120,
-        firm.trouble,
-      );
-      const runs = firm.model.requests.filter(all(coworkerRun, shows(SUBJECT)));
-      expect(runs.length).toBeGreaterThan(0);
-      expect(runs.some((r) => r.has("settings"))).toBe(false);
+      const runs = () => firm.model.requests.filter(all(coworkerRun, shows(SUBJECT)));
+      await until("the outside run", () => runs().length > 0, 120, firm.trouble);
+      expect(runs().some((r) => r.has("settings"))).toBe(false);
       expect(settings()).toEqual({ paused: false });
       await firm.step();
     },
