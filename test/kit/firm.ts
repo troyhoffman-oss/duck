@@ -259,7 +259,7 @@ async function writeSetup(
  * in a run that answers someone other than the person. With `wrapped`, the
  * calendar answers its list inside a wrapper and its box takes the rows out. The firm's storage bucket is the kit's, and with `backup`,
  * the nightly backup runs on that cron expression in the firm's zone; otherwise it never comes due while a
- * test runs.
+ * test runs. With `empty`, the firm is installed with no coworker, as a new firm's first install is.
  */
 export async function startFirm(
   given: Partial<Times> & {
@@ -276,6 +276,7 @@ export async function startFirm(
     others?: Record<string, string>;
     wrapped?: boolean;
     backup?: string;
+    empty?: boolean;
   } = {},
 ) {
   const times = { ...DEFAULTS, ...given };
@@ -462,13 +463,14 @@ export async function startFirm(
     /** Makes `coworker` for the person `handle` names, and returns its Buzz key. */
     const make = async (coworker: string, handle: string) =>
       (/its Buzz key is ([0-9a-f]{64})/.exec(await run("make", coworker, handle)) as string[])[1] as string;
-    const wren = await make(harbor.coworker, harbor.person);
+    if (given.empty) await run("install");
+    const wren = given.empty ? "" : await make(harbor.coworker, harbor.person);
     const finch = given.second ? await make(second.coworker, second.person) : "";
-    await given.buzz?.meet(wren);
+    if (wren) await given.buzz?.meet(wren);
     await run("check");
     const someone = (agent: string) => authTag(randomBytes(32), agent);
     if (given.second) await run("claim", second.coworker, someone(finch), second.name);
-    await run("claim", harbor.coworker, (given.buzz?.tagFor ?? someone)(wren), harbor.name);
+    if (wren) await run("claim", harbor.coworker, (given.buzz?.tagFor ?? someone)(wren), harbor.name);
     person.meet(address, harbor.coworker);
     theirs.meet(address, second.coworker);
 
