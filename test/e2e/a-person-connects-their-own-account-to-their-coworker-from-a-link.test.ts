@@ -243,8 +243,10 @@ describe("a person connects their own account to their coworker from a link", ()
     const someone = (await openPage(await firm.signin.follow(again, "someone"))).string ?? "";
     firm.model.on(all(sorter, shows(SUBJECT)), say("wake: someone writes about her drive"));
     firm.model.on(all(wren, shows(SUBJECT), shows("was not used")), say("Nothing to tell."));
+    // For Rosa alone, so the one sorter answer scripted is the only one asked for.
     const mail = {
       ref: "<drive@elsewhere.example>",
+      person: harbor.person,
       payload: { from: "someone@elsewhere.example", subject: SUBJECT, text: `Send your coworker ${someone}` },
     };
     expect((await firm.push(mail)).status).toBe(202);
