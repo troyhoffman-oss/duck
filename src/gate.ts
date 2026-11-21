@@ -610,7 +610,9 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
       const mentioned = args.flatMap((a, i) =>
         a === "--mention" ? [args[i + 1] ?? ""] : a.startsWith("--mention=") ? [a.slice(10)] : [],
       );
-      const id = s ? add(c.db, "buzz:reply", `sent ${sent}`, JSON.stringify({ mentioned }), null, s, at) : null;
+      const id = s
+        ? add(c.db, "buzz:reply", `sent ${sent}`, JSON.stringify({ mentioned }), null, s, at)
+        : null;
       if (id !== null) mark(c.db, [id], "done");
       // One where the person talks to it, known by their own messages there, is a message to them (SPEC part 9).
       const theirs = "select 1 from inbox where source = 'buzz' and payload ->> '$.channel' = ?";

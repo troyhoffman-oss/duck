@@ -5,8 +5,8 @@ import { answerOthers, deliver, doorTo, listen } from "../doors";
 import { AGENT, cutHeld, JOB, lapse, OTHERS, readIn, WORK } from "../gate";
 import {
   aboutSession,
-  asking,
   add,
+  asking,
   attach,
   type Event,
   itemSession,
@@ -101,7 +101,8 @@ export function startCoworker(setup: Setup, name: string) {
    */
   const teamAt = (events: (Event | null)[]) =>
     events.some(
-      (e) => asking(db, e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
+      (e) =>
+        asking(db, e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
     )
       ? agentAt
       : workAt;
