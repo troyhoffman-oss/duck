@@ -32,7 +32,8 @@ type Code = { account: string; challenge: string; redirect: string; used: boolea
  * link's state; a token address that trades a code for an access token and a refresh token only with the
  * code's own verifier and the client's secret, and renews an access token with a refresh token; and, at
  * /page/, duck's page as a firm hosts it. A code is good once, until the service spoils it. Its codes hold
- * characters an address must carry encoded, as real services' do.
+ * characters an address must carry encoded, as real services' do. Each sign-in it issues carries an OpenID
+ * id_token naming the account by its email, unsigned, as a stand-in has no keys to sign with.
  */
 export function startSignin({
   reach,
@@ -50,6 +51,9 @@ export function startSignin({
   const tokens: TokenRequest[] = [];
   /** Every link followed to the authorize address, as the service saw it. */
   const authorized: URL[] = [];
+  /** How many token requests to come the service fails, and the requests it holds until a test lets them go. */
+  let down = 0;
+  let held: { opened: Promise<void>; open: () => void } | undefined;
   const random = (bytes: number) => randomBytes(bytes).toString("base64url");
   const refuse = (error: string, description: string) =>
     Response.json({ error, error_description: description }, { status: 400 });
@@ -84,7 +88,9 @@ export function startSignin({
       revoked: false,
     };
     grants.push(grant);
+    const part = (json: object) => Buffer.from(JSON.stringify(json)).toString("base64url");
     return Response.json({
+      id_token: [part({ alg: "none" }), part({ email: `${account}@files.example` }), ""].join("."),
       access_token: grant.access,
       token_type: "Bearer",
       expires_in: 3600,
@@ -103,6 +109,15 @@ export function startSignin({
       redirect: form.get("redirect_uri") ?? undefined,
     };
     tokens.push(seen);
+    await held?.opened;
+    if (down > 0) {
+      down--;
+      seen.refused = "HTTP 503";
+      return new Response("<html><body>Service Unavailable</body></html>", {
+        status: 503,
+        headers: { "content-type": "text/html" },
+      });
+    }
     const answer = (() => {
       if (field("client_id") !== client || !seen.secret)
         return refuse("invalid_client", "The client is not known, or its secret is wrong.");
@@ -192,10 +207,29 @@ export function startSignin({
     spoil() {
       for (const c of codes.values()) c.spoiled = true;
     },
-    /** Forgets the requests seen, for the next step; what it issued stays good. */
+    /** Makes the token address answer the next `times` requests with a 503 and an HTML page, as a service that is down does. */
+    fail(times = 1) {
+      down = times;
+    },
+    /** Holds every token request until the function returned is called, as a slow service does. */
+    hold() {
+      let open = () => {};
+      const opened = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      held = { opened, open };
+      return () => {
+        held = undefined;
+        open();
+      };
+    },
+    /** Forgets the requests seen and lets any held go, for the next step; what it issued stays good. */
     clear() {
       tokens.length = 0;
       authorized.length = 0;
+      down = 0;
+      held?.open();
+      held = undefined;
     },
     stop: () => http.stop(true),
   };

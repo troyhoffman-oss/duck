@@ -134,9 +134,9 @@ describe("a person connects their own account to their coworker from a link", ()
     expect(page.shows).toMatch(/coworker/i);
   });
 
-  test("she sends the string at her desk: duck trades it at once with the link's verifier and the app's secret, keeps the sign-in where only duck reads it, her coworker reads that she connected the plug and is told how to see its tools, and the plug gets her token", async () => {
+  test("she sends the string at her desk: duck trades it at once with the link's verifier and the app's secret, keeps the sign-in where only duck reads it, her coworker reads that she connected the plug as her account and is told how to see its tools, and the plug gets her token", async () => {
     firm.model.on(
-      all(wren, said("Rosa Alvarez connected files"), said("files__connect")),
+      all(wren, said("Rosa Alvarez connected files as rosa@files.example"), said("files__connect")),
       call("files__connect"),
     );
     firm.model.on(all(wren, answered("files__connect")), call("files__list_files"));
@@ -302,5 +302,69 @@ describe("a person connects their own account to their coworker from a link", ()
       (setup.plugs.files as { signin?: Record<string, unknown> }).signin = whole;
     });
     expect(printed).toContain("plug files's signin names no token or page");
+  });
+
+  test("a renewal the service does not answer leaves her sign-in good: that call fails with what the service said, and the next one renews it", async () => {
+    const [ASK, NEXT] = ["Anything in my drive today?", "Try my drive again."];
+    const before = firm.signin.grantOf("rosa");
+    firm.signin.expire("rosa");
+    firm.signin.fail();
+    firm.model.on(all(wren, said(ASK)), call("files__list_files"));
+    firm.model.on(
+      all(wren, answered("list_files"), said("HTTP 503")),
+      say("The drive's service did not answer; I'll try again."),
+    );
+    await firm.person.send("desk", ASK);
+    await firm.person.nextWith("did not answer", 60);
+    expect(renewals().map((t) => t.ok)).toEqual([false]);
+    expect(firm.files.calls).toEqual([]);
+    expect(holding(before?.refresh as string)).toEqual([`${harbor.coworker}/keys.env`]);
+
+    firm.model.on(all(wren, said(NEXT)), call("files__list_files"));
+    firm.model.on(all(wren, answered("list_files"), said("4B lease.pdf")), say("Back: 4B lease.pdf."));
+    await firm.person.send("desk", NEXT);
+    await firm.person.nextWith("Back: 4B lease.pdf.", 60);
+    expect(renewals().map((t) => t.ok)).toEqual([false, true]);
+    const now = firm.signin.grantOf("rosa");
+    expect(firm.files.callsTo("list_files").map((c) => c.headers.get("authorization"))).toEqual([
+      `Bearer ${now?.access}`,
+    ]);
+    await keptOnlyAsSignIns([string]);
+  });
+
+  test("a message she sends right after the string is read by her coworker after the line that says she connected", async () => {
+    const [ASK, NEXT] = ["Is my drive still there?", "Now list my files."];
+    firm.signin.revoke("rosa");
+    firm.model.on(all(wren, said(ASK)), call("files__list_files"));
+    firm.model.on(all(wren, answered("list_files"), said("has not connected files")), (r) =>
+      say(`Sign in here: ${linkIn(r.last)}`),
+    );
+    await firm.person.send("desk", ASK);
+    const fresh = linkIn((await firm.person.nextWith("Sign in here", 60)).text);
+    // Another account than her earlier ones, so its line is this step's alone in her long conversation.
+    const signed = (await openPage(await firm.signin.follow(fresh, "rosa.alvarez"))).string ?? "";
+    const CONNECTED = "connected files as rosa.alvarez@files.example";
+    firm.model.on(
+      all(wren, (r) => said(CONNECTED)(r) || said(NEXT)(r)),
+      (r) => say(r.shows(NEXT) ? "Here they are." : "Connected."),
+      { times: Number.POSITIVE_INFINITY },
+    );
+    // The service answers the trade only once her next message has reached duck.
+    const release = firm.signin.hold();
+    const sent = [firm.person.send("desk", signed)];
+    await until("the trade at the service", () => trades().length === 1, 30, firm.trouble);
+    sent.push(firm.person.send("desk", NEXT));
+    await Bun.sleep(2000);
+    release();
+    await Promise.all(sent);
+    await firm.person.nextWith("Here they are.", 60);
+
+    const read = firm.model.requests.filter(all(wren, shows(NEXT)));
+    expect(read.length).toBeGreaterThan(0);
+    for (const r of read) {
+      expect(r.shown.indexOf(CONNECTED)).toBeGreaterThan(-1);
+      expect(r.shown.indexOf(CONNECTED)).toBeLessThan(r.shown.indexOf(NEXT));
+    }
+    await keptOnlyAsSignIns([string, signed]);
   });
 });
