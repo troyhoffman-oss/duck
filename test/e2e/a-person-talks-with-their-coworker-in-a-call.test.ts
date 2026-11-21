@@ -270,7 +270,13 @@ describe("a person talks with their coworker in a call", () => {
     const { call: inCall, session } = await open(dm);
     await inCall.say(LATE);
     await firm.model.reached("report");
-    await speaks(session, "I'll check the 3D report.");
+    // The archive keeps what was said, so she hangs up once its first line has been said.
+    await until(
+      "its first line said in the call",
+      () => session.spoken.includes("I'll check the 3D report."),
+      60,
+      speech.trouble,
+    );
     await hangUp(inCall, session);
     // The relay ends a call (kind 48103) once nobody is left in it.
     const over = async () =>
@@ -308,15 +314,15 @@ describe("a person talks with their coworker in a call", () => {
   test.failing("a call her coworker's person did not start, one with a third member, and one while another is open are not joined", async () => {
     const open1 = await open(dm);
     const others = [
-      await buzz.call("theo", await buzz.dmWith("theo", wren)),
-      await buzz.call("rosa", buzz.channel),
-      await buzz.call("rosa", await buzz.privateChannel("rosa", [buzz.keys.theo, wren])),
-      await buzz.call("rosa", await buzz.privateChannel("rosa", [wren])),
-    ];
+      ["theo", await buzz.call("theo", await buzz.dmWith("theo", wren))],
+      ["rosa", await buzz.call("rosa", buzz.channel)],
+      ["rosa", await buzz.call("rosa", await buzz.privateChannel("rosa", [buzz.keys.theo, wren]))],
+      ["rosa", await buzz.call("rosa", await buzz.privateChannel("rosa", [wren]))],
+    ] as const;
     await Bun.sleep(15_000);
-    for (const other of others) {
+    for (const [who, other] of others) {
       expect(other.inCall()).not.toContain(wren);
-      const joined = await buzz.query("rosa", [{ kinds: [48101], "#h": [other.parent] }]);
+      const joined = await buzz.query(who, [{ kinds: [48101], "#h": [other.parent] }]);
       expect(joined.some((e) => e.tags.some(([t, key]) => t === "p" && key === wren))).toBe(false);
       other.hangUp();
     }
