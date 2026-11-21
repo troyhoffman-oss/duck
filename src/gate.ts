@@ -942,8 +942,10 @@ function record(db: Database, item: number, made: Made) {
 function wrote(c: Coworker, s: string | undefined, item: number, fresh: boolean) {
   listChanged(c.name, c.db);
   if (!s) return;
-  if (fresh && othersIn(c.db, s))
-    logged(c.db, item, `Asked for by someone other than ${personOf(c.setup, c.name).name}${othersWho(c.db, s)}.`);
+  if (fresh && othersIn(c.db, s)) {
+    const person = personOf(c.setup, c.name).name;
+    logged(c.db, item, `Asked for by someone other than ${person}${othersWho(c.db, s)}.`);
+  }
   const kept = runOf(c, s);
   kept.item = item;
   for (const made of kept.made.splice(0)) record(c.db, item, made);
