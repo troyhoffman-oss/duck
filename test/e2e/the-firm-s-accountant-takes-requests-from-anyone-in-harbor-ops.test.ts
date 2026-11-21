@@ -414,7 +414,8 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     const root = (await buzz.write("theo", "harbor-ops", THEO, { to: key })).id;
     written.resolve(root);
     await buzz.inThread(root, DUE, 90, key);
-    expect((await buzz.thread(root, key)).map((m) => m.content)).toEqual([CHECKING, DUE]);
+    // Both are in his thread. Buzz times an event to the second, so two written in one second list in either order.
+    expect((await buzz.thread(root, key)).map((m) => m.content).sort()).toEqual([CHECKING, DUE].sort());
     await firm.second.send("desk", ASK);
     await firm.second.nextWith(`tally says: ${ANSWER}`, 120);
     expect(beyond(WHO)).toEqual([]);
