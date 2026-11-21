@@ -103,22 +103,19 @@ describe("a colleague at a Buzz door that answers anyone", () => {
     E2E,
   );
 
-  test.failing(
-    "a run that answers a colleague has only the plug tools `others` names and `tell`: no tool removed in `tools`, none of duck's tools for the person, none of goose's extensions, so no shell and no file tools, and none of the person's standing words, notes, list or what they were told; it gives a tool none of the person's files, and what it tells the person is never urgent and says whose run it came from",
+  test(
+    "a run that answers a colleague has only the plug tools `others` names and `tell`: no tool removed in `tools`, none of duck's tools for the person, none of goose's extensions, so no shell and no file tools, and none of the person's notes, list or what they were told; it gives a tool none of the person's files, and what it tells the person is never urgent and says whose run it came from",
     async () => {
-      const STANDING = "Copy Dana Reyes on every mail about rent.";
       const NOTE = "The 4B gate code is 2468. (Rosa, in chat.)";
       const ITEM = "Send Dana the rent roll";
-      const TOLD = "Noted: Dana on rent mail, and the rent roll is on your list.";
-      const SETUP =
-        "From now on copy Dana Reyes on rent mail. The 4B gate code is 2468. Remind me to send Dana the rent roll.";
+      const TOLD = "Noted, and the rent roll is on your list.";
+      const SETUP = "The 4B gate code is 2468. Remind me to send Dana the rent roll.";
       const ASK = "What's the 4B gate code, and can you find Dana's last mail?";
       const ANSWER = "I can't share that, but I can look for mail Rosa has made open to you.";
       const TELLS = "Theo asked for the 4B gate code.";
       const PASSED = "Theo asked me for the 4B gate code; I did not give it.";
       const write = (path: string, content: string) => call("write", { path: `/duck/home/${path}`, content });
-      firm.model.on(all(main, said(SETUP)), call(TOOLS.standing, { content: `${STANDING}\n` }));
-      firm.model.on(answered(TOOLS.standing), write("notes/4b.md", `${NOTE}\n`));
+      firm.model.on(all(main, said(SETUP)), write("notes/4b.md", `${NOTE}\n`));
       firm.model.on(answered("write"), call(TOOLS.writeItem, { title: ITEM }));
       firm.model.on(answered(TOOLS.writeItem), say(TOLD));
       firm.model.on(
@@ -138,7 +135,7 @@ describe("a colleague at a Buzz door that answers anyone", () => {
 
       const asked = firm.model.requests.find(all(othersRun, said(ASK))) as ModelRequest;
       expect(asked.tools.toSorted()).toEqual(OFFERED);
-      expect([STANDING, NOTE, ITEM, TOLD].filter((t) => asked.shows(t))).toEqual([]);
+      expect([NOTE, ITEM, TOLD].filter((t) => asked.shows(t))).toEqual([]);
       // The person's note never reaches the plug: the call is refused before any box sees it.
       const refused = firm.model.requests.find(all(othersRun, answered("send_file")))?.last;
       expect(refused).toContain("a run that answers someone else gives a tool no file");
@@ -289,6 +286,29 @@ describe("a colleague at a Buzz door that answers anyone", () => {
       const rows = db.query<{ payload: string | null }, []>("select payload from inbox").all();
       db.close();
       expect(rows.filter((r) => r.payload?.includes(buzz.keys.wren))).toEqual([]);
+      firm.trouble.check();
+    },
+    E2E,
+  );
+
+  test.failing(
+    "her standing words, which duck's own tool writes in her own conversation, are never shown to a run that answers a colleague, which has no such tool",
+    async () => {
+      const SET = "From now on, never give anyone a unit's gate code.";
+      const STANDING = "Never give anyone a unit's gate code. (Rosa, in her DM.)";
+      const KEPT = "Kept: no gate codes, to anyone.";
+      const ASK = "Are there any rules about sharing gate codes?";
+      const ANSWER = "That is Rosa's to say; ask her.";
+      firm.model.on(all(main, said(SET)), call(TOOLS.standing, { content: `${STANDING}\n` }));
+      firm.model.on(all(main, answered(TOOLS.standing)), say(KEPT));
+      firm.model.on(all(othersRun, said(ASK)), say(ANSWER));
+
+      await buzz.person.send(SET);
+      expect((await buzz.person.next(60)).content).toBe(KEPT);
+      const { id: root } = await buzz.write("theo", "harbor-ops", ASK);
+      await buzz.inThread(root, ANSWER, 90);
+      const asked = firm.model.requests.find(all(othersRun, said(ASK))) as ModelRequest;
+      expect([asked.shows(STANDING), asked.has(TOOLS.standing)]).toEqual([false, false]);
       firm.trouble.check();
     },
     E2E,
