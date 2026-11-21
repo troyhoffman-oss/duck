@@ -42,13 +42,16 @@ export function sign(
 /**
  * What a connection hands on: events of `kinds` in the channels the relay's record `channels` lists for a key,
  * each a channel by its `d` tag, with the label `label` gives it, or none where it is not one; asked again at
- * each notice `notices` lists, since a subscription's channels are fixed when sent.
+ * each notice `notices` lists, since a subscription's channels are fixed when sent. A channel a notice adds the
+ * key to (44100, its `h` tag) is one, labelled `added`, until a notice removes it (44101), where `added` names
+ * a label: the relay writes its record of members after that notice (side_effects.rs:2196-2219).
  */
 type Channels = {
   kinds: number[];
   channels: (me: string) => object;
   label: (channel: Event, me: string) => string | undefined;
   notices: (me: string) => object;
+  added?: string;
 };
 
 /**
@@ -67,12 +70,13 @@ export const SYSTEM: Channels = {
   notices: (me) => ({ kinds: [44100, 44101], "#p": [me], "#t": ["system"] }),
 };
 
-/** The starts and ends of calls (kinds 48100, 48103) in every channel a key is a member of (39002). */
+/** The starts and ends of calls (kinds 48100, 48103) in every channel a key is a member of (39002, 44100). */
 export const MEMBER: Channels = {
   kinds: [48100, 48103],
   channels: (me) => ({ kinds: [39002], "#p": [me] }),
   label: () => "",
   notices: (me) => ({ kinds: [44100, 44101], "#p": [me] }),
+  added: "",
 };
 
 /**
@@ -104,6 +108,8 @@ export function connect(
   const since = () => Math.max(started, now() - 900);
   /** Each channel listened in, by id, with its label and when it was made, as the relay last said. */
   let made = new Map<string, { label: string; at: number }>();
+  /** Each channel a notice since this connection started added `who` to and none removed, with when. */
+  const added = new Map<string, number>();
   /** Each message handed on, by id, with when duck first saw it, kept 2,000 s, past its last ask again. */
   const seen = new Map<string, number>();
   let socket: WebSocket | undefined;
@@ -183,6 +189,9 @@ export function connect(
         return label === undefined ? [] : [[tagOf(c, "d"), { label, at: Number(tagOf(c, "created_at")) }]];
       }),
     );
+    if (listened.added !== undefined)
+      for (const [channel, at] of added)
+        if (!made.has(channel)) made.set(channel, { label: listened.added, at });
     listen();
   };
   let [synced, due] = [Promise.resolve(), false];
@@ -234,8 +243,11 @@ export function connect(
       else if (type === "CLOSED" && a === found?.id)
         found.end(new Error(`the relay refused the query: ${b}`));
       else if (type === "EOSE" && a === "notices") live = true;
-      else if (type === "EVENT" && a === "notices" && live) resync();
-      else if (type === "EVENT" && a === listening) held ? held.push(b) : hand(b);
+      else if (type === "EVENT" && a === "notices" && live) {
+        if (b.kind === 44100) added.set(tagOf(b, "h"), b.created_at);
+        else added.delete(tagOf(b, "h"));
+        resync();
+      } else if (type === "EVENT" && a === listening) held ? held.push(b) : hand(b);
       else if (type === "EOSE" && a === listening && held) {
         const backlog = held.sort((x, y) => x.created_at - y.created_at);
         held = undefined;

@@ -11,6 +11,8 @@ import { type Door, doorsOf, factsOf, ownerOf, personOf, secret } from "./setup"
 const [RATE, FRAME] = [24_000, 960] as const;
 /** How long before the relay's own end of a call the coworker leaves it: the relay archives it then, saying nothing. */
 const MARGIN = 30_000;
+/** The relay's limit for a call, in seconds, where its record of the call's channel gives none. */
+const LIMIT = 3600;
 /** How long a hand-off waits for the transcript to pass it. */
 const HEARD = 3000;
 /** The longest pause between the transcript's words inside one line of the person's. */
@@ -67,10 +69,9 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
     try {
       const members = (await newest({ kinds: [39002], "#d": [parent] }))?.tags.filter((t) => t[0] === "p");
       const keys = new Set(members?.map((t) => t[1]));
-      const open = tag(await newest({ kinds: [39000], "#d": [parent] }), "visibility") === "open";
+      const open = (await newest({ kinds: [39000], "#d": [parent] }))?.tags.some((t) => t[0] === "public");
       if (!backing || open || keys.size !== 2 || !keys.has(owner) || !keys.has(relay.me)) return;
-      const ttl = Number(tag(await newest({ kinds: [39000], "#d": [backing] }), "ttl")) || 3600;
-      await call(parent, backing, (start.created_at + ttl) * 1000 - MARGIN);
+      await call(parent, backing, start.created_at);
       callEnded(c.name);
     } catch (e) {
       console.error(`the call at ${c.name}.${door} broke: ${(e as Error).message}`);
@@ -79,8 +80,12 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
     }
   }
 
-  /** Is in the call on channel `backing` of channel `parent` until it ends, or until `leave`, in ms since 1970. */
-  async function call(parent: string, backing: string, leave: number) {
+  /**
+   * Is in the call on channel `backing` of channel `parent`, started at `started` in seconds since 1970, until
+   * it ends or the relay's end of it nears: the deadline in its record of `backing`, which it can read once a
+   * member, as joining makes it.
+   */
+  async function call(parent: string, backing: string, started: number) {
     const speech = new WebSocket(set.address, {
       headers: { authorization: `Bearer ${secret(c.setup, set.key)}` },
     } as unknown as string[]);
@@ -109,7 +114,8 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
       setTimeout(() => speech.close(), 5000);
     };
     ended = (content) => content.includes(backing) && end();
-    const timer = setTimeout(end, leave - Date.now());
+    const leave = (at: number) => setTimeout(end, at - MARGIN - Date.now());
+    let timer = leave((started + LIMIT) * 1000);
 
     /** Hands on the whole line hand-off `id` at `offset` came from, if the transcript has passed it. */
     const hand = (id: string, offset: number) => {
@@ -205,6 +211,15 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
         if (leaving || inCall(c)?.say) return;
         callKept(c.db, door, "started");
         calls.set(c.name, { door, say });
+        void newest({ kinds: [39000], "#d": [backing] }).then(
+          (record) => {
+            const deadline = Date.parse(tag(record, "ttl_deadline") ?? "");
+            if (leaving || Number.isNaN(deadline)) return;
+            clearTimeout(timer);
+            timer = leave(deadline);
+          },
+          (e: Error) => console.error(`the call at ${c.name}.${door} has no deadline read: ${e.message}`),
+        );
       } else if (said.type === "left") {
         peers.delete(said.peer_index);
         if (![...peers.values()].some((k) => k !== relay.me)) end();
