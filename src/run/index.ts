@@ -90,8 +90,7 @@ export function startCoworker(setup: Setup, name: string) {
    */
   const teamAt = (events: (Event | null)[]) =>
     events.some(
-      (e) =>
-        written(e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
+      (e) => written(e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
     )
       ? agentAt
       : workAt;
