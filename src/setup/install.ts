@@ -106,7 +106,7 @@ function writeGoose(setup: Setup, name: string) {
   const account = setup.model.route === "claude-login" ? `\n${text("account.md").trim()}` : "";
   const person = personOf(setup, name);
   const doors = Object.entries(doorsOf(setup, name)).map(
-    ([door, d]) => ({ buzz: "Buzz", text: "text", email: "email" })[d.kind] ?? door,
+    ([door, d]) => ({ buzz: "Buzz", text: "text", email: "email", telegram: "Telegram" })[d.kind] ?? door,
   );
   const harness = text("harness.md")
     .replace("{account}", account)

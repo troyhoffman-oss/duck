@@ -281,43 +281,43 @@ describe("Rosa talks with her coworker at her desk, on her phone and by text", (
     expect([answer.door, answer.text]).toEqual(["phone", "It's 2468."]);
   });
 
-  test("her standing words and the coworker's notes are shown to later runs once, again when they change, and kept in a version history it can read and not change", async () => {
-    const STANDING = "Copy Dana Reyes on every mail about rent. (Rosa said so in chat.)";
-    const CHANGED = "Copy Dana Reyes and Sam Okafor on every mail about rent. (Rosa said so in chat.)";
+  test("the coworker's notes are shown to later runs once, again when they change, and kept in a version history it can read and not change", async () => {
+    const RENT = "Rent mail goes to Dana Reyes. (Rosa, in chat.)";
+    const CHANGED = "Rent mail goes to Dana Reyes and Sam Okafor. (Rosa, in chat.)";
     const NOTE = "Dana Reyes rents 4B; her lease is in the Leases folder of the drive. (Rosa, in chat.)";
     const ITEM = "Send Dana the rent roll";
     const SAY = {
-      standing:
-        "From now on, copy Dana Reyes on every mail about rent. And remind me to send her the rent roll.",
+      first: "Rent mail goes to Dana Reyes. And remind me to send her the rent roll.",
       second: "Unit 2A is vacant from December.",
-      correction: "Copy Sam Okafor on those too.",
+      correction: "Sam Okafor gets rent mail too.",
       fourth: "Unit 3C is vacant from December too.",
-      before: "What did my standing words say before?",
+      before: "What did your note on rent mail say before?",
     };
     const HISTORY = [
-      "git --git-dir=/duck/history log --format=%s -- standing.md",
-      "git --git-dir=/duck/history show $(git --git-dir=/duck/history rev-list HEAD -- standing.md | tail -1):standing.md",
+      "git --git-dir=/duck/history log --format=%s -- notes/rent.md",
+      "git --git-dir=/duck/history show $(git --git-dir=/duck/history rev-list HEAD -- notes/rent.md | tail -1):notes/rent.md",
       "touch /duck/history/x 2>&1",
     ].join("; ");
     const write = (path: string, content: string) => call("write", { path: `/duck/home/${path}`, content });
-    firm.model.on(said(SAY.standing), write("standing.md", `${STANDING}\n`));
+    firm.model.on(said(SAY.first), write("notes/rent.md", `${RENT}\n`));
     firm.model.on(answered("write"), write("notes/dana.md", `${NOTE}\n`));
     firm.model.on(answered("write"), call(TOOLS.writeItem, { title: ITEM }));
-    firm.model.on(answered(TOOLS.writeItem), say("Added to your standing words."));
+    firm.model.on(answered(TOOLS.writeItem), say("Noted, and it's on your list."));
     firm.model.on(
-      all(said(SAY.second), said(STANDING), said(`notes/dana.md: ${NOTE}`), said(ITEM)),
+      all(said(SAY.second), said(`notes/rent.md: ${RENT}`), said(`notes/dana.md: ${NOTE}`), said(ITEM)),
       say("Noted, 2A."),
     );
     firm.model.on(
-      all(said(SAY.correction), unsaid("Copy Dana", "Dana Reyes rents", ITEM)),
+      all(said(SAY.correction), unsaid("Rent mail goes", "Dana Reyes rents", ITEM)),
       call("edit", {
-        path: "/duck/home/standing.md",
-        before: "Dana Reyes on",
-        after: "Dana Reyes and Sam Okafor on",
+        path: "/duck/home/notes/rent.md",
+        before: "Dana Reyes.",
+        after: "Dana Reyes and Sam Okafor.",
       }),
     );
-    firm.model.on(answered("edit"), say("Changed your standing words."));
-    firm.model.on(all(said(SAY.fourth), said(CHANGED), unsaid("Dana Reyes rents", ITEM)), say("Noted, 3C."));
+    firm.model.on(answered("edit"), say("Changed: Sam gets rent mail too."));
+    // The notes' lines are shown together, so the changed one comes with the rest; the list has not changed.
+    firm.model.on(all(said(SAY.fourth), said(CHANGED), unsaid(ITEM)), say("Noted, 3C."));
     firm.model.on(sorter, say("wake: a tenant writes about rent"), { times: Number.POSITIVE_INFINITY });
     firm.model.on(
       all(coworkerRun, said("December rent"), said(CHANGED), said(`notes/dana.md: ${NOTE}`), said(ITEM)),
@@ -327,9 +327,9 @@ describe("Rosa talks with her coworker at her desk, on her phone and by text", (
     firm.model.on(answered("shell"), (r) => say(r.last));
 
     for (const [text, reply] of [
-      [SAY.standing, "Added to your standing words."],
+      [SAY.first, "Noted, and it's on your list."],
       [SAY.second, "Noted, 2A."],
-      [SAY.correction, "Changed your standing words."],
+      [SAY.correction, "Changed: Sam gets rent mail too."],
       [SAY.fourth, "Noted, 3C."],
     ] as const) {
       await firm.person.send("desk", text);
@@ -357,8 +357,8 @@ describe("Rosa talks with her coworker at her desk, on her phone and by text", (
           "select r.id from runs r, json_each(r.events) e join messages m on m.event = e.value where m.text = ?",
         )
         .get(text)?.id;
-    expect(history).toContain(`run ${runOf(SAY.correction)}\nrun ${runOf(SAY.standing)}`);
-    expect(history).toContain(STANDING);
+    expect(history).toContain(`run ${runOf(SAY.correction)}\nrun ${runOf(SAY.first)}`);
+    expect(history).toContain(RENT);
     expect(history).toContain("Read-only file system");
   });
 
@@ -668,5 +668,54 @@ describe("Rosa talks with her coworker at her desk, on her phone and by text", (
     await firm.start();
     expect((await firm.person.next(120)).text).toStartWith("The draft for Dana may already be saved");
     expect(firm.mail.callsTo("save_draft")).toHaveLength(1);
+  });
+
+  test.failing("her standing words are written whole by duck's own tool in her conversation, shown to later runs once and again when they change, and kept in the version history; goose's own file tools cannot change them", async () => {
+    const STANDING = "Copy Dana Reyes on every mail about rent. (Rosa said so in chat.)";
+    const CHANGED = "Copy Dana Reyes and Sam Okafor on every mail about rent. (Rosa said so in chat.)";
+    const SAY = {
+      standing: "From now on, copy Dana Reyes on every mail about rent.",
+      second: "Unit 5D is vacant from January.",
+      correction: "Copy Sam Okafor on those too.",
+      fourth: "Unit 6E is vacant from January too.",
+      before: "What did my standing words say before?",
+    };
+    const HISTORY = [
+      "git --git-dir=/duck/history log --format=%s -- standing.md",
+      "git --git-dir=/duck/history log --format= --patch -- standing.md",
+      "echo x > /duck/home/standing.md 2>&1",
+    ].join("; ");
+    const standing = (content: string) => call(TOOLS.standing, { content: `${content}\n` });
+    firm.model.on(said(SAY.standing), standing(STANDING));
+    firm.model.on(answered(TOOLS.standing), say("Added to your standing words."));
+    firm.model.on(all(said(SAY.second), said(STANDING)), say("Noted, 5D."));
+    firm.model.on(all(said(SAY.correction), unsaid("Copy Dana")), standing(CHANGED));
+    firm.model.on(answered(TOOLS.standing), say("Changed your standing words."));
+    firm.model.on(all(said(SAY.fourth), said(CHANGED)), say("Noted, 6E."));
+    firm.model.on(said(SAY.before), call("shell", { command: HISTORY }));
+    firm.model.on(answered("shell"), (r) => say(r.last));
+
+    for (const [text, reply] of [
+      [SAY.standing, "Added to your standing words."],
+      [SAY.second, "Noted, 5D."],
+      [SAY.correction, "Changed your standing words."],
+      [SAY.fourth, "Noted, 6E."],
+    ] as const) {
+      await firm.person.send("desk", text);
+      expect((await firm.person.next(30)).text).toBe(reply);
+    }
+    await firm.person.send("desk", SAY.before);
+    const history = (await firm.person.next(30)).text;
+    using db = firm.db();
+    const runOf = (text: string) =>
+      db
+        .query<{ id: number }, [string]>(
+          "select r.id from runs r, json_each(r.events) e join messages m on m.event = e.value where m.text = ?",
+        )
+        .get(text)?.id;
+    expect(history).toContain(`run ${runOf(SAY.correction)}\nrun ${runOf(SAY.standing)}`);
+    expect(history).toContain(STANDING);
+    expect(history).toContain("Read-only file system");
+    expect(firm.home(harbor.coworker, "standing.md")).toBe(`${CHANGED}\n`);
   });
 });

@@ -13,8 +13,10 @@ import { questions } from "../sorter";
  * `address` is the mail service's API, `mailbox` the coworker's own address there, `key` names the secret of
  * a key to that mailbox and `auth` the person's own mail address. At a `voice` door, a call in Buzz, `address`
  * is the speech model's live API, `model` and `voice` what it speaks with and `key` names the secret of its key.
- * Every claimed coworker has a `buzz` door, which duck makes, at the setup's relay; it answers anyone who
- * mentions the coworker where its `answers` is `anyone`, as a team coworker's does, and otherwise only its owner.
+ * At a `telegram` door, `address` is the Bot API's, `key` names the secret of the bot's token and `auth` the
+ * person's own Telegram user id. Every claimed coworker has a `buzz` door, which duck makes, at the setup's
+ * relay; it answers anyone who mentions the coworker where its `answers` is `anyone`, as a team coworker's
+ * does, and otherwise only its owner.
  */
 export type Door = {
   kind: string;
@@ -446,10 +448,19 @@ export function check(folder: string): string[] {
   for (const [name, own] of doors) {
     unmade("doors", name);
     for (const [door, d] of Object.entries(own)) {
-      const lacks = (["model", "voice", "key"] as const).filter((part) => !d[part]);
-      if (d.kind === "voice" && lacks.length > 0)
+      const parts =
+        d.kind === "telegram" ? (["address", "key", "auth"] as const) : (["model", "voice", "key"] as const);
+      const lacks = parts
+        .filter((part) => !d[part])
+        .join(", ")
+        .replace(/, (?=[^,]*$)/, " or ");
+      if (d.kind === "voice" && lacks)
         problems.push(
-          `door ${name}.${door} names no ${lacks.join(", ").replace(/, (?=[^,]*$)/, " or ")}: a voice door names its speech model's address, its model and voice, and the secret of its key`,
+          `door ${name}.${door} names no ${lacks}: a voice door names its speech model's address, its model and voice, and the secret of its key`,
+        );
+      else if (d.kind === "telegram" && lacks)
+        problems.push(
+          `door ${name}.${door} names no ${lacks}: a telegram door names the Bot API's address, the secret of its bot's token and the secret of its person's Telegram user id`,
         );
       else if (d.kind === "voice" && !setup.buzz)
         problems.push(`door ${name}.${door} is a call in Buzz, and the setup has no Buzz relay`);
@@ -457,12 +468,13 @@ export function check(folder: string): string[] {
         !(
           d.kind === "http" ||
           d.kind === "voice" ||
+          d.kind === "telegram" ||
           (d.kind === "text" && !!d.auth && !!d.line) ||
           (d.kind === "email" && !!d.auth && !!d.mailbox)
         )
       )
         problems.push(
-          `door ${name}.${door} is of kind "${d.kind}"; the setup gives http, text with a line and an auth, email with a mailbox and an auth, and voice with a model, a voice and a key, and duck makes each coworker's buzz door`,
+          `door ${name}.${door} is of kind "${d.kind}"; the setup gives http, text with a line and an auth, email with a mailbox and an auth, voice with a model, a voice and a key, and telegram with a key and an auth, and duck makes each coworker's buzz door`,
         );
     }
   }

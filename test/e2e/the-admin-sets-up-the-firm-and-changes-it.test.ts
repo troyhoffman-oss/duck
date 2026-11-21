@@ -233,11 +233,10 @@ describe("The admin sets up the firm and changes it", () => {
     expect(losses[0]).toContain(`-${harbor.coworker}:`);
   });
 
-  test("history loaded with duck import is dreamed over at once, and what the dream wrote is shown in the main conversation", async () => {
+  test("history loaded with duck import is dreamed over at once, and the notes the dream wrote are shown in the main conversation", async () => {
     const ARCHIVE = "read_archive";
     const LOADED = "Can you draft a note to the dock crew about Friday's inspection?";
     const NOTE = "The dock crew's inspection is Fridays at 9. (Rosa, in a Claude chat, 2026-03-02.)";
-    const STANDING = "Keep notes to the dock crew short and friendly. (Rosa, in a Claude chat, 2026-03-02.)";
     const ASK = "What do you know about the dock crew?";
     const write = (path: string, content: string) => call("write", { path: `/duck/home/${path}`, content });
     firm.model.on(all(workLane, said("dreaming.md")), (r) =>
@@ -252,18 +251,12 @@ describe("The admin sets up the firm and changes it", () => {
       ),
       write("notes/dock.md", `${NOTE}\n`),
     );
-    firm.model.on(answered("write"), write("standing.md", `${STANDING}\n`));
     firm.model.on(answered("write"), say("Dreamed over the loaded history."));
-    firm.model.on(all(main, said(ASK), said(STANDING), said(`notes/dock.md: ${NOTE}`)), say("Fridays at 9."));
+    firm.model.on(all(main, said(ASK), said(`notes/dock.md: ${NOTE}`)), say("Fridays at 9."));
 
     const printed = await firm.import("claude", join(EXPORTS, "claude-conversations.json"));
     expect(printed).toContain("loaded 6 messages in 2 sessions");
-    await until(
-      "the dream's end",
-      () => firm.model.requests.filter(answered("write")).length === 2,
-      60,
-      firm.trouble,
-    );
+    await until("the dream's end", () => firm.model.requests.some(answered("write")), 60, firm.trouble);
     await firm.person.send("desk", ASK);
     expect((await firm.person.next(60)).text).toBe("Fridays at 9.");
 
@@ -380,5 +373,32 @@ describe("The admin sets up the firm and changes it", () => {
     await fresh.person.send("desk", HELLO);
     await fresh.person.nextWith(BACK, 120);
     expect(await fresh.duckId()).toBe(before);
+  });
+
+  test.failing("a dream proposes the standing words it finds in history loaded from before with tell, and only her yes, in her conversation, writes them with duck's own tool", async () => {
+    const STANDING = "Keep notes to the dock crew short and friendly. (Rosa, in a ChatGPT chat.)";
+    const PROPOSED = `From her ChatGPT chats, a standing instruction to keep: "${STANDING}"`;
+    const OFFER =
+      "In your ChatGPT chats you asked me to keep notes to the dock crew short and friendly. Shall I keep that as a standing instruction?";
+    const YES = "Yes, keep it.";
+    const KEPT = "Kept: notes to the dock crew stay short and friendly.";
+    const ASK = "How should notes to the dock crew read?";
+    firm.model.on(all(workLane, said("dreaming.md")), call(TOOLS.tell, { text: PROPOSED }));
+    firm.model.on(answered(TOOLS.tell), say("Dreamed."));
+    firm.model.on(all(main, said(PROPOSED)), say(OFFER));
+    firm.model.on(all(main, said(YES)), call(TOOLS.standing, { content: `${STANDING}\n` }));
+    firm.model.on(answered(TOOLS.standing), say(KEPT));
+    firm.model.on(all(main, said(ASK), said(STANDING)), say("Short and friendly."));
+
+    await firm.import("chatgpt", join(EXPORTS, "chatgpt-conversations.json"));
+    expect((await firm.person.next(60)).text).toBe(OFFER);
+    // A dream has no tool that writes standing words (SPEC part 8).
+    expect(firm.model.requests.find(all(workLane, said("dreaming.md")))?.has(TOOLS.standing)).toBe(false);
+    expect(firm.home(harbor.coworker, "standing.md")).not.toContain(STANDING);
+    await firm.person.send("desk", YES);
+    expect((await firm.person.next(60)).text).toBe(KEPT);
+    expect(firm.home(harbor.coworker, "standing.md")).toBe(`${STANDING}\n`);
+    await firm.person.send("desk", ASK);
+    expect((await firm.person.next(60)).text).toBe("Short and friendly.");
   });
 });

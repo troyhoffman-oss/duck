@@ -85,7 +85,7 @@ function parsed(html: string): { text: string; entities: Entity[] } | string {
  * A stand-in for Telegram's Bot API for one test, at `/bot<token>/<method>` and its files at
  * `/file/bot<token>/<file_path>`, answering the calls a door makes as core.telegram.org/bots/api says:
  * getUpdates by long polling, each update kept until a call's offset passes it, and a newer call ending one
- * still open with a 409; getFile and the file it names; sendMessage and sendDocument, their words in no parse
+ * still open with a 409; getFile and the file it names, refusing one over the 20 MB a bot may download; sendMessage and sendDocument, their words in no parse
  * mode or HTML's, refused past 4096 characters, or a caption past 1024, once parsed; sendChatAction; getMe
  * and deleteWebhook. Parameters come as a query string, JSON, a form or multipart. The person writes to the
  * bot in her private chat with it or in a group it is in, and a stranger in theirs.
@@ -93,7 +93,7 @@ function parsed(html: string): { text: string; entities: Entity[] } | string {
 export function startTelegram() {
   const token = `${randomInt(1_000_000_000)}:${randomBytes(26).toString("base64url")}`;
   const updates: { update_id: number; message: Record<string, unknown> }[] = [];
-  const stored = new Map<string, { path: string; bytes: Buffer }>();
+  const stored = new Map<string, { path: string; bytes: Buffer; size: number }>();
   const sent: BotMessage[] = [];
   /** Every chat action the bot sent, such as typing, and when. */
   const actions: { action: string; chat: number; at: number }[] = [];
@@ -107,11 +107,14 @@ export function startTelegram() {
   const refuse = (error_code: number, description: string) =>
     Response.json({ ok: false, error_code, description }, { status: error_code });
 
-  /** Keeps `bytes` as a file under `folder`, as getFile's file_path names it, and returns its file_id. */
-  const keep = (bytes: Buffer, folder: string, extension: string) => {
+  /**
+   * Keeps `bytes` as a file under `folder`, as getFile's file_path names it, said to be `size` bytes, and
+   * returns its file_id and size.
+   */
+  const keep = (bytes: Buffer, folder: string, extension: string, size = bytes.length) => {
     const file_id = randomBytes(12).toString("base64url");
-    stored.set(file_id, { path: `${folder}/file_${nextFile++}${extension}`, bytes });
-    return { file_id, file_unique_id: file_id, file_size: bytes.length };
+    stored.set(file_id, { path: `${folder}/file_${nextFile++}${extension}`, bytes, size });
+    return { file_id, file_unique_id: file_id, file_size: size };
   };
 
   async function params(request: Request) {
@@ -167,7 +170,8 @@ export function startTelegram() {
       case "getfile": {
         const file = stored.get(String(p.file_id));
         if (!file) return refuse(400, "Bad Request: invalid file_id");
-        return answer({ file_id: p.file_id, file_size: file.bytes.length, file_path: file.path });
+        if (file.size > 20_000_000) return refuse(400, "Bad Request: file is too big");
+        return answer({ file_id: p.file_id, file_size: file.size, file_path: file.path });
       }
       case "sendchataction":
         actions.push({ action: String(p.action), chat, at: performance.now() });
@@ -217,27 +221,32 @@ export function startTelegram() {
   });
 
   /**
-   * User `from` writes `words` in `chat`, with a document or a photo, whose caption the words then are. A photo
-   * is given as its sizes' bytes, smallest first, as the Bot API lists them. Returns when.
+   * User `from` writes `words` in `chat`, with a document, a photo or a voice note, whose caption the words then
+   * are, if any. A document may say it is `size` bytes, past what its bytes are. A photo is given as its sizes'
+   * bytes, smallest first, as the Bot API lists them. Returns when.
    */
   function wrote(
     from: { id: number; first_name: string },
     chat: { id: number; type: string },
     words: string,
-    given: { document?: { name: string; bytes: string; type?: string }; photo?: string[] } = {},
+    given: {
+      document?: { name: string; bytes: string; type?: string; size?: number };
+      photo?: string[];
+      voice?: string;
+    } = {},
   ) {
     chats.add(chat.id);
-    const { document, photo } = given;
+    const { document, photo, voice } = given;
     const message: Record<string, unknown> = {
       message_id: nextMessage++,
       from: { ...from, is_bot: false },
       chat,
       date: Math.floor(Date.now() / 1000),
-      ...(document || photo ? { caption: words } : { text: words }),
+      ...(words && (document || photo || voice ? { caption: words } : { text: words })),
     };
     if (document)
       message.document = {
-        ...keep(Buffer.from(document.bytes), "documents", extname(document.name)),
+        ...keep(Buffer.from(document.bytes), "documents", extname(document.name), document.size),
         file_name: document.name,
         mime_type: document.type ?? "text/plain",
       };
@@ -247,6 +256,8 @@ export function startTelegram() {
         width: 90 * 4 ** i,
         height: 90 * 4 ** i,
       }));
+    if (voice)
+      message.voice = { ...keep(Buffer.from(voice), "voice", ".oga"), duration: 3, mime_type: "audio/ogg" };
     updates.push({ update_id: nextUpdate++, message });
     waiting?.give();
     return performance.now();
@@ -272,7 +283,7 @@ export function startTelegram() {
     /** How many getUpdates calls the bot has made. */
     polls: () => polls,
     person: {
-      /** She writes `words` to the bot in her private chat with it, with a document or a photo if given. */
+      /** She writes `words` to the bot in her private chat with it, with a document, a photo or a voice note if given. */
       send: (words: string, given?: Parameters<typeof wrote>[3]) =>
         wrote(rosa, { id: ROSA, type: "private" }, words, given),
       /** She writes `words` in a group the bot is in. */

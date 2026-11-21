@@ -8,6 +8,7 @@ import { aboutSession, add, broken, type Event, lastEvent, mark as state, waitin
 import type { Coworker } from "./run";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
 import { buzzKey } from "./setup/coworkers";
+import { telegramIn, telegramOut } from "./telegram";
 import { inCall, voiceIn } from "./voice";
 
 /** A file as it crosses a door: its name, media type and bytes in base64. */
@@ -96,7 +97,7 @@ export function saved(folder: string, name: string, bytes: Buffer) {
  * the questions it asked them (SPEC part 9). It returns when the runs the message wakes or steers have ended
  * and what they said has gone out, or null for a message already taken.
  */
-function taken(c: Coworker, door: string, body: Written) {
+export function taken(c: Coworker, door: string, body: Written) {
   const reads = askDoors(c).includes(door);
   const event = c.db.transaction(() => {
     const event = add(c.db, door, body.id, body.place ? JSON.stringify(body.place) : null);
@@ -177,7 +178,9 @@ export function deliver(c: Coworker, said: string, since: number, ask = false) {
         ? () => textOut(c, set, `${c.name}-${id}`, text, local)
         : set.kind === "email"
           ? () => mailOut(c, set, last, `${c.setup.firm}-${c.name}-${id}`, text, local)
-          : http;
+          : set.kind === "telegram"
+            ? telegramOut(c, set, text, local)
+            : http;
   const delivered = c.sending.then(async () => {
     const failed = await tried(`delivery ${c.name}-${id} at ${door}`, send);
     if (!failed) return Date.now();
@@ -196,7 +199,7 @@ export function deliver(c: Coworker, said: string, since: number, ask = false) {
  * from 2 s to 5 min. A part started again that stops within that minute has not come back, and the door is
  * broken: told once for each time it is down.
  */
-async function keep(c: Coworker, door: string, what: string, part: () => Promise<unknown>) {
+export async function keep(c: Coworker, door: string, what: string, part: () => Promise<unknown>) {
   for (
     let [wait, down] = [1000, 0];
     !c.signal.aborted;
@@ -303,7 +306,8 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
  * ACP prompt: in a DM, from the owner or an agent the owner also owns, and where it is mentioned, from them or
  * at a door that answers anyone from anyone, as buzz-acp's gate admits in its owner-only and anyone modes.
  * When it needs a mention stays at Buzz's default. At each text door it opens Photon's stream, at each email
- * door the mail service's, and at a voice door it joins the person's calls with the coworker. buzz-acp stops
+ * door the mail service's, at each Telegram door it polls the bot's updates, and at a voice door it joins the
+ * person's calls with the coworker. buzz-acp stops
  * when it cannot reach its relay after a few tries, and a stream can end, so each is kept going until the
  * coworker stops, which ends buzz-acp and the stream. It settles when every door has stopped.
  */
@@ -312,6 +316,7 @@ export function listen(c: Coworker) {
   const doors = Object.entries(doorsOf(c.setup, c.name)).map(([door, set]) => {
     if (set.kind === "text") return textIn(c, door, set);
     if (set.kind === "email") return mailIn(c, door, set);
+    if (set.kind === "telegram") return telegramIn(c, door, set);
     if (set.kind === "voice") return voiceIn(c, door, set, (id, text) => taken(c, door, { id, text }));
     if (set.kind !== "buzz") return undefined;
     return keep(c, door, `buzz-acp at ${c.name}.${door}`, async () => {
@@ -567,33 +572,39 @@ async function textIn(c: Coworker, door: string, set: Door) {
   im.close();
 }
 
-const STYLES = ["bold", "italic", "strikethrough"] as const;
 const [CELL, ROW] = ["\u001f", "\u001e"];
-/** `c` between the private-use characters that stand for where style `s` starts and ends. */
-const mark = (s: number) => (c: string) =>
-  `${String.fromCharCode(0xe000 + 2 * s)}${c}${String.fromCharCode(0xe001 + 2 * s)}`;
-const [bold, block] = [mark(0), (c: string) => `${c.trimEnd()}\n\n`];
+const block = (c: string) => `${c.trimEnd()}\n\n`;
 
 /**
- * The coworker's markdown as iMessage's own styled text: its words and the ranges iMessage shows bold, italic
- * or struck through. A heading is bold, a link reads "label (url)", a list item starts with a bullet or its
- * number and code is left as written. iMessage has no tables, so each row of one is its first cell in bold,
- * then "header: value" for each other cell that has a value.
+ * How a chat shows what markdown styles: each wraps the words it is given, a link with its address, and
+ * `text`, if given, writes plain words as the chat reads them.
  */
-function styled(markdown: string) {
-  const marked = Bun.markdown
+type Look = Record<"bold" | "italic" | "struck", (c: string) => string> & {
+  link: (c: string, href: string) => string;
+  text?: (t: string) => string;
+};
+
+/**
+ * The coworker's markdown as a chat's own text, styled as `look` shows it, in blocks a blank line apart. A
+ * heading is bold, a list item starts with a bullet or its number and code is left as written. A chat has no
+ * tables, so each row of one is its first cell in bold, then "header: value" for each other cell that has a
+ * value.
+ */
+export function chatText(markdown: string, look: Look) {
+  return Bun.markdown
     .render(markdown, {
-      heading: (c) => block(bold(c)),
+      heading: (c) => block(look.bold(c)),
       paragraph: block,
       code: block,
       hr: () => block("———"),
       list: (c, { depth }) => (depth > 0 ? `\n${c.trimEnd()}` : block(c)),
       listItem: (c, { index, depth, ordered, start }) =>
         `${"  ".repeat(depth)}${ordered ? `${(start ?? 1) + index}.` : "•"} ${c.trim()}\n`,
-      strong: bold,
-      emphasis: mark(1),
-      strikethrough: mark(2),
-      link: (c, { href }) => (c === href ? c : `${c} (${href})`),
+      strong: look.bold,
+      emphasis: look.italic,
+      strikethrough: look.struck,
+      link: (c, { href }) => look.link(c, href),
+      text: look.text,
       th: (c) => c + CELL,
       td: (c) => c + CELL,
       tr: (c) => c + ROW,
@@ -603,13 +614,31 @@ function styled(markdown: string) {
           .slice(0, -1)
           .map((r) => r.split(CELL));
         const stack = ([first, ...cells]: string[]) =>
-          [first && bold(first), ...cells.map((v, i) => (v && head[i + 1] ? `${head[i + 1]}: ${v}` : v))]
+          [first && look.bold(first), ...cells.map((v, i) => (v && head[i + 1] ? `${head[i + 1]}: ${v}` : v))]
             .filter(Boolean)
             .join("\n");
         return block(rows.map(stack).join("\n\n"));
       },
     })
     .trim();
+}
+
+const STYLES = ["bold", "italic", "strikethrough"] as const;
+/** `c` between the private-use characters that stand for where style `s` starts and ends. */
+const mark = (s: number) => (c: string) =>
+  `${String.fromCharCode(0xe000 + 2 * s)}${c}${String.fromCharCode(0xe001 + 2 * s)}`;
+
+/**
+ * The coworker's markdown as iMessage's own styled text: its words and the ranges iMessage shows bold, italic
+ * or struck through, with a link as "label (url)".
+ */
+function styled(markdown: string) {
+  const marked = chatText(markdown, {
+    bold: mark(0),
+    italic: mark(1),
+    struck: mark(2),
+    link: (c, href) => (c === href ? c : `${c} (${href})`),
+  });
   let text = "";
   const open = STYLES.map((type) => ({ type, depth: 0, start: 0 }));
   const formatting: { type: (typeof STYLES)[number]; start: number; length: number }[] = [];
