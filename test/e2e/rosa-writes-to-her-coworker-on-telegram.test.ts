@@ -247,4 +247,30 @@ describe("Rosa writes to her coworker on Telegram", () => {
     await telegram.quiet(5);
     expect(firm.model.requests.filter(said(LATE))).toHaveLength(1);
   });
+
+  test.failing("a voice note she sends reaches the coworker as a file", async () => {
+    /** A run shown the path of the voice note she sent. */
+    const voiced: When = (r) => coworkerRun(r) && /\/duck\/files\/\S+\.oga/.test(r.last);
+    firm.model.on(voiced, (r) =>
+      call("shell", { command: `cat ${/\/duck\/files\/\S+\.oga/.exec(r.last)?.[0]}` }),
+    );
+    firm.model.on(answered("shell"), say("Got your note about the 4B boiler."));
+
+    telegram.person.send("", { voice: "the boiler in 4B is making noise again" });
+    expect((await telegram.person.next(30)).text).toBe("Got your note about the 4B boiler.");
+    expect(firm.model.requests.findLast(answered("shell"))?.shows("the boiler in 4B")).toBe(true);
+  });
+
+  test.failing("a file Telegram will not hand over still brings her words, the coworker is told it did not come and why, and her next message is answered", async () => {
+    const [VIDEO, NEXT] = ["Here's the walkthrough of 4B.", "Is the 4B lease signed?"];
+    const TOLD = "The video didn't come through: Telegram says it is too big. Can you send a link?";
+    firm.model.on(all(said(VIDEO), shows("walkthrough-4B.mp4"), shows("file is too big")), say(TOLD));
+    firm.model.on(said(NEXT), say("Yes, signed on the 3rd."));
+
+    const video = { name: "walkthrough-4B.mp4", bytes: "a long video", type: "video/mp4", size: 30_000_000 };
+    telegram.person.send(VIDEO, { document: video });
+    expect((await telegram.person.next(30)).text).toBe(TOLD);
+    telegram.person.send(NEXT);
+    expect((await telegram.person.next(30)).text).toBe("Yes, signed on the 3rd.");
+  });
 });
