@@ -364,4 +364,21 @@ describe("The admin sets up the firm and changes it", () => {
     expect(read).not.toContain("old-roster");
     expect(await firm.import("hermes", profile)).not.toContain("copied");
   });
+
+  test("a firm installed with no coworker claimed yet starts its first one: claimed, it answers its person, and duck's container is kept through the claim", async () => {
+    await using fresh = await startFirm({ empty: true });
+    const before = await fresh.duckId();
+    const installed = await fresh.duck(
+      "claim",
+      harbor.coworker,
+      authTag(randomBytes(32), fresh.coworkerKey),
+      harbor.name,
+    );
+    expect(installed).toBe(`${harbor.coworker}: started\nduck: kept\n`);
+    const [HELLO, BACK] = ["Are you there?", "Here, and ready."];
+    fresh.model.on(said(HELLO), say(BACK));
+    await fresh.person.send("desk", HELLO);
+    await fresh.person.nextWith(BACK, 120);
+    expect(await fresh.duckId()).toBe(before);
+  });
 });
