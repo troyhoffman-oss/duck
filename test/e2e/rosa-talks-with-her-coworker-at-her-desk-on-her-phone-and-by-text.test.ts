@@ -316,7 +316,8 @@ describe("Rosa talks with her coworker at her desk, on her phone and by text", (
       }),
     );
     firm.model.on(answered("edit"), say("Changed: Sam gets rent mail too."));
-    firm.model.on(all(said(SAY.fourth), said(CHANGED), unsaid("Dana Reyes rents", ITEM)), say("Noted, 3C."));
+    // The notes' lines are shown together, so the changed one comes with the rest; the list has not changed.
+    firm.model.on(all(said(SAY.fourth), said(CHANGED), unsaid(ITEM)), say("Noted, 3C."));
     firm.model.on(sorter, say("wake: a tenant writes about rent"), { times: Number.POSITIVE_INFINITY });
     firm.model.on(
       all(coworkerRun, said("December rent"), said(CHANGED), said(`notes/dana.md: ${NOTE}`), said(ITEM)),
