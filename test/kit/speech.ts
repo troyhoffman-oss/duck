@@ -104,6 +104,8 @@ export type SpeechSession = {
 export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } = {}) {
   const key = randomBytes(24).toString("base64url");
   const sessions: SpeechSession[] = [];
+  /** Each session's socket, so a test can have the stand-in end it (`ends`). */
+  const sockets = new Map<SpeechSession, ServerWebSocket<unknown>>();
   const told = new Map<string, Line>();
   /** Where it stops saying what it is given: after the first word holding one of these. */
   const cut: string[] = [];
@@ -259,6 +261,7 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
             );
           session = { start: asked, delegations: [], given: [], spoken: [], closed: false };
           sessions.push(session);
+          sockets.set(session, ws);
           return send({ type: "session.started", session: { id: `sess_${randomUUID()}`, ...asked } });
         }
         if (type === "session.input_audio.append") {
@@ -340,6 +343,13 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
     cuts(word: string) {
       cut.push(word);
     },
+    /**
+     * Ends `session` from the stand-in's side: it closes the socket with no word first, as a real model's
+     * session can end. `closed` stays false, as the door did not ask for it.
+     */
+    ends(session: SpeechSession) {
+      sockets.get(session)?.close();
+    },
     /** Waits until the door has opened `count` sessions in all, and returns the last. */
     async opened(count: number, seconds = 30) {
       await until(
@@ -358,6 +368,7 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
       } finally {
         trouble.clear();
         sessions.length = 0;
+        sockets.clear();
         told.clear();
         cut.length = 0;
       }
