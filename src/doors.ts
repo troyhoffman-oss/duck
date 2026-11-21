@@ -315,7 +315,7 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
 }
 
 /** Each coworker's next restart of its buzz-acp, which `reopen` settles. */
-const reopening = new WeakMap<Coworker, PromiseWithResolvers<null>>();
+const reopening = new WeakMap<Coworker, ReturnType<typeof Promise.withResolvers<null>>>();
 
 /** Settles when `reopen` is next called for `c`. */
 function reopened(c: Coworker) {
