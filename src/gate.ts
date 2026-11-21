@@ -1082,15 +1082,18 @@ export async function readIn(c: Coworker, event: number) {
  * Writes what the person's message, inbox event `event`, answered, in the transaction that lets it go on, and
  * returns what follows once it is kept: each yes runs its call once, and a read that failed is told to the
  * person once. A no tells the session that made the call. An ask quiet hours made a no meanwhile stays a no.
+ * An answer lands only on an ask still sent at the door the message came in at, so a read that ends after its
+ * ask was moved, as when a call ends, answers nothing.
  */
 export function answered(c: Coworker, read: Read, event: number) {
   const yes: number[] = [];
   for (const a of read.answers) {
     const row = c.db
-      .query<{ held: string }, [string, number, number]>(
-        "update outbox set answer = ?, answered_by = ? where id = ? and answer is null returning held",
+      .query<{ held: string }, [string, number, number, number]>(
+        `update outbox set answer = ?, answered_by = ? where id = ? and answer is null and state = 'sent'
+          and door = (select source from inbox where id = ?) returning held`,
       )
-      .get(a.answer, event, a.id);
+      .get(a.answer, event, a.id, event);
     if (row && a.answer === "yes") yes.push(a.id);
     else if (row) resume(c.db, a.id, JSON.parse(row.held).session, { answer: "no" });
   }

@@ -58,17 +58,20 @@ const tag = (e: Event | undefined, name: string) => e?.tags.find((t) => t[0] ===
  * to `take` as the person's message; a line with no transcript is not, and the speech model asks again. duck's
  * questions are asked one at a time. While one asked in the call is open, the words the person begins once it
  * has been said, by the session's own clock, form the line duck takes itself, handed to `take` to be read as
- * their answer (SPEC part 9), and a hand-off of them only names what comes back. The coworker leaves when the
- * person has, when the call ends, or as the relay's limit for it nears; the questions it leaves unanswered, and
- * any a stop left, go to the person's other doors. It settles when the coworker stops.
+ * their answer (SPEC part 9), and a hand-off of them only names what comes back; `take` settles once that is
+ * read. The coworker leaves when the person has, when the call ends, or as the relay's limit for it nears; the
+ * questions it leaves unanswered, once what they last said is read, and any a stop left, go to the person's
+ * other doors. It settles when the coworker stops.
  */
 export function voiceIn(
   c: Coworker,
   door: string,
   set: Door,
-  take: (id: string, text: string, read?: boolean) => unknown,
+  take: (id: string, text: string, read?: boolean) => Promise<unknown>,
 ) {
   if (unasked(c.db, door) > 0) c.dispatch();
+  /** The reads of the lines the door took itself as the person's answer, not yet done. */
+  const reading = new Set<Promise<unknown>>();
   const buzz = doorsOf(c.setup, c.name).buzz as Door;
   const who = {
     key: secret(c.setup, buzz.key, c.name),
@@ -113,8 +116,10 @@ export function voiceIn(
       console.error(`the call at ${c.name}.${door} broke: ${(e as Error).message}`);
     } finally {
       calls.delete(c.name);
-      // Once the call is gone, what it left unanswered goes to the person's other doors.
-      if (unasked(c.db, door) > 0) c.dispatch();
+      // Once the call is gone and what the person last said in it is read, what it left unanswered goes to their
+      // other doors; if they are in a call again by then, it goes when that one ends.
+      await Promise.all(reading);
+      if (!calls.has(c.name) && unasked(c.db, door) > 0) c.dispatch();
     }
   }
 
@@ -186,7 +191,7 @@ export function voiceIn(
       const words = heard.splice(0, last + 1).slice(first);
       waiting.delete(id);
       delegation = id;
-      take(id, textOf(words));
+      void take(id, textOf(words));
       return true;
     };
     /** Has the speech model say `text` from the coworker, about the last line handed on; returns its event's id. */
@@ -206,7 +211,10 @@ export function voiceIn(
     /** Takes the line the person finished after duck's question as their message, to be read as their answer. */
     const ownLine = () => {
       const text = textOf(answer.splice(0));
-      if (text) take(`line-${randomUUID()}`, text, true);
+      if (!text) return;
+      const read = take(`line-${randomUUID()}`, text, true);
+      reading.add(read);
+      void read.then(() => reading.delete(read));
     };
 
     speech.onopen = () => {
@@ -261,7 +269,9 @@ export function voiceIn(
     };
     speech.onclose = () => {
       keep();
+      // What the person began to answer is their answer, though they hung up before a pause ended it.
       clearTimeout(own);
+      ownLine();
       clearInterval(pace);
       clearTimeout(timer);
       if (room.readyState === WebSocket.OPEN) room.send(JSON.stringify({ type: "leave" }));

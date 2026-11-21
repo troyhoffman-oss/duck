@@ -149,8 +149,9 @@ export function taken(c: Coworker, door: string, body: Written) {
  * Writes what the person wrote at `door` as an inbox event, with their files where the coworker reads them
  * and cannot change them, and wakes the coworker. A buzz door's message keeps its place as the payload. At a
  * door an ask waits at, and where the door says it is read, it is held as `reading` until duck has read what it
- * answers of the questions it asked them (SPEC part 9). It returns `ended`, which settles when the runs the
- * message wakes or steers have ended and what they said has gone out, or null for a message already taken.
+ * answers of the questions it asked them (SPEC part 9). It returns `read`, which settles once that is read, and
+ * `ended`, which settles when the runs the message wakes or steers have ended and what they said has gone out,
+ * or null for a message already taken.
  */
 function written(c: Coworker, door: string, body: Written) {
   const reads = askDoors(c).includes(door) || body.read === true;
@@ -167,7 +168,8 @@ function written(c: Coworker, door: string, body: Written) {
     return event;
   })();
   if (event === null) return null;
-  return { ended: (reads ? readIn(c, event) : Promise.resolve()).then(() => c.wake()).then(() => c.sending) };
+  const read = reads ? readIn(c, event) : Promise.resolve();
+  return { read, ended: read.then(() => c.wake()).then(() => c.sending) };
 }
 
 /**
@@ -456,7 +458,7 @@ export function listen(c: Coworker) {
     if (set.kind === "telegram") return telegramIn(c, door, set);
     if (set.kind === "voice")
       return voiceIn(c, door, set, (id, text, read) =>
-        (async () => taken(c, door, { id, text, read }))().catch((e: Error) =>
+        (async () => (await taken(c, door, { id, text, read }))?.read)().catch((e: Error) =>
           console.error(`the voice door ${c.name}.${door} did not keep line ${id}: ${e.message}`),
         ),
       );
