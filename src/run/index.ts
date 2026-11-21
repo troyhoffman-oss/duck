@@ -1,13 +1,14 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { called, callStatus, cutShort, lastShown, lastTold, runEnded, runStarted, said } from "../archive";
-import { answerOthers, deliver, doorTo, listen } from "../doors";
+import { answerOthers, deliver, doorTo, listen, longer } from "../doors";
 import { AGENT, cutHeld, JOB, lapse, OTHERS, readIn, WORK } from "../gate";
 import {
   aboutSession,
   add,
   asking,
   attach,
+  broken,
   type Event,
   itemSession,
   lastSession,
@@ -345,19 +346,51 @@ export function startCoworker(setup: Setup, name: string) {
   }
 
   /**
-   * A lane: a wake while it rests runs `first` if given, then what `next` hands it, one run at a time, until it
-   * hands nothing or the coworker stops, and then `rest`. A run that throws is logged, and its events wait for
-   * the next wake, as a run a restart cut does. `going` settles when the lane rests.
+   * What a lane runs next: `run`, of the events, tell rows or job `keys` (`event 3`, `tell 4`, `job 5`), which
+   * the log names as `label`.
    */
-  function lane(what: string, next: () => (() => Promise<unknown>) | undefined, rest = () => {}) {
+  type Next = { keys: string[]; label: string; run: () => Promise<unknown> };
+  /**
+   * The events, tell rows and jobs whose run threw, each with when it may be tried again, the pause before
+   * that and since when it fails. Kept in memory only: a restart tries each again at once.
+   */
+  const aside = new Map<string, { due: number; wait: number; since: string }>();
+  /** Whether `key`'s run threw and it waits to be tried again. */
+  const held = (key: string) => (aside.get(key)?.due ?? 0) > Date.now();
+
+  /**
+   * A lane: a wake while it rests runs `first` if given, then what `next` hands it, one run at a time, until it
+   * hands nothing or the coworker stops, and then `rest`. A run that throws is set aside and the lane goes on:
+   * its keys are `held` for a pause that doubles from 2 s to 5 min while it keeps failing (as a door that stops
+   * waits, `longer`), and `next` hands it again once that ends, or at once with something new for it: a new
+   * event in its session or thread. A run that goes through clears it. One that fails twice in a row is told
+   * once, as a door that does not come back is, but in the person lane, whose own run would tell it. `going`
+   * settles when the lane rests.
+   */
+  function lane(what: string, next: () => Next | undefined, rest = () => {}) {
     let busy: ReturnType<typeof Promise.withResolvers<void>> | undefined;
-    const go = async (first?: () => Promise<unknown>) => {
+    const go = async (first?: Next) => {
       if (busy || signal.aborted) return;
       busy = Promise.withResolvers();
       try {
-        for (let run = first ?? next(); run && !signal.aborted; run = next()) await run();
+        for (let n = first ?? next(); n && !signal.aborted; n = next())
+          try {
+            await n.run();
+            for (const key of n.keys) aside.delete(key);
+          } catch (error) {
+            const before = n.keys.map((key) => aside.get(key)).find((a) => a !== undefined);
+            const wait = longer(before?.wait ?? 1000);
+            const [due, since] = [Date.now() + wait, before?.since ?? new Date().toISOString()];
+            for (const key of n.keys) aside.set(key, { due, wait, since });
+            const because = (error as Error).message;
+            console.error(
+              `${name}'s ${what} set aside ${n.label}: ${because}; it is tried again from ${new Date(due).toISOString()}, or at once with something new for it`,
+            );
+            if (before && what !== "person lane")
+              broken(coworker, `${what} ${n.label} failing since ${since}`, { lane: what, failing: n.label, because });
+          }
       } catch (error) {
-        console.error(`${name}'s ${what} stopped a run: ${(error as Error).message}`);
+        console.error(`${name}'s ${what} stopped: ${(error as Error).message}`);
       } finally {
         busy?.resolve();
         busy = undefined;
@@ -446,12 +479,14 @@ export function startCoworker(setup: Setup, name: string) {
       const events = waiting(db, doors, session);
       if (holding() && !events.some((e) => doors.includes(e.source))) return;
       const rows = dueNow().rows.filter((r) => r.kind === "tell");
-      if (events.length + rows.length > 0) return () => run(events, rows);
+      const keys = [...events.map((e) => `event ${e.id}`), ...rows.map((r) => `tell ${r.id}`)];
+      if (keys.some((key) => !held(key)))
+        return { keys, label: `session ${session ?? "new"}`, run: () => run(events, rows) };
     },
     () => {
       rested.resolve();
       rested = Promise.withResolvers();
-      if (ran) timer = setTimeout(() => personLane(compact), idle);
+      if (ran) timer = setTimeout(() => personLane({ keys: [], label: "compaction", run: compact }), idle);
       ran = false;
       dispatch();
     },
@@ -509,18 +544,24 @@ export function startCoworker(setup: Setup, name: string) {
       pause = undefined;
       wake();
     }
-    const unsorted = events.find(
+    // A batch set aside waits, but goes again with what is new in it.
+    const free = events.filter((e) => !held(`event ${e.id}`));
+    const unsorted = free.find(
       (e) => mode !== "off" && outside(e) && e.item_id === null && e.answer === null,
     );
     if (unsorted)
-      return async () => {
-        if ((await screen(setup, db, unsorted)) === "noise" && mode === "on") mark(db, [unsorted.id], "done");
+      return {
+        keys: [`event ${unsorted.id}`],
+        label: `the screening of event ${unsorted.id}`,
+        run: async () => {
+          if ((await screen(setup, db, unsorted)) === "noise" && mode === "on") mark(db, [unsorted.id], "done");
+        },
       };
     const at = (e: Event) =>
       outside(e) && !(mode === "on" && e.answer === "urgent") ? Date.parse(e.received_at) + gap : 0;
-    const first = events.find((e) => at(e) <= Date.now());
+    const first = free.find((e) => at(e) <= Date.now());
     if (!first) {
-      if (events.length > 0) gapping = setTimeout(workLane, Math.min(...events.map(at)) - Date.now());
+      if (free.length > 0) gapping = setTimeout(workLane, Math.min(...free.map(at)) - Date.now());
       return;
     }
     // Never the main conversation: loading it would replay it into the person's open run and swap its gate.
@@ -530,11 +571,15 @@ export function startCoworker(setup: Setup, name: string) {
     const caught = pause?.to
       ? `Note from duck: ${person.name} paused you from ${pause.from} until ${pause.to}, so some of what came in meanwhile is stale; do what still matters. ${person.name} hears about this catch-up once, in one message for all of it.\n\n`
       : "";
-    return () =>
-      runIn(s, batch, team ? teamAt(batch) : workAt, caught + cameIn(batch), true, (_, run) => {
-        attach(db, atDoors());
-        keep(run);
-      });
+    return {
+      keys: batch.map((e) => `event ${e.id}`),
+      label: s ? `session ${s}` : `events ${batch.map((e) => e.id).join(", ")}`,
+      run: () =>
+        runIn(s, batch, team ? teamAt(batch) : workAt, caught + cameIn(batch), true, (_, run) => {
+          attach(db, atDoors());
+          keep(run);
+        }),
+    };
   });
 
   /**
@@ -551,7 +596,8 @@ export function startCoworker(setup: Setup, name: string) {
       e.session ?? (e.about === null ? undefined : aboutSession(db, e.source, e.about));
     const key = (e: Event) => of(e) ?? e.about;
     const events = waiting(db, asked(), undefined, false, true);
-    const first = events[0];
+    // A thread set aside waits, but goes again with what is new in it.
+    const first = events.find((e) => !held(`event ${e.id}`));
     if (!first) return;
     const [s, k] = [of(first), key(first)];
     const batch = events.filter((e) => key(e) === k);
@@ -561,12 +607,16 @@ export function startCoworker(setup: Setup, name: string) {
     // part 14).
     const writers = batch.filter((e) => asking(db, e));
     const askers = writers.length > 0 ? writers : s ? [othersIn(db, s)] : [];
-    return () =>
-      runIn(s, batch, team ? teamAt(askers) : othersAt, note + cameIn(batch), team, async (s, run) => {
-        keep(run);
-        const [answer, where] = [await lastSaid(s), othersIn(db, s)];
-        if (answer && where) void answerOthers(coworker, where, answer);
-      });
+    return {
+      keys: batch.map((e) => `event ${e.id}`),
+      label: s ? `session ${s}` : `thread ${k}`,
+      run: () =>
+        runIn(s, batch, team ? teamAt(askers) : othersAt, note + cameIn(batch), team, async (s, run) => {
+          keep(run);
+          const [answer, where] = [await lastSaid(s), othersIn(db, s)];
+          if (answer && where) void answerOthers(coworker, where, answer);
+        }),
+    };
   });
 
   /** What the coworker last wrote in session `sessionId`. */
@@ -601,14 +651,15 @@ export function startCoworker(setup: Setup, name: string) {
   /**
    * The job lanes (SPEC part 6): up to AT_ONCE jobs at once, oldest first, each round a fresh worker in the
    * job's own folder and, when the job is checked, a fresh checker. A round's end is an inbox event for the
-   * session that started the job, unless the job was stopped. A job whose round throws waits to be taken again.
+   * session that started the job, unless the job was stopped. A job whose round throws is set aside, and the
+   * lanes take the next.
    */
   const jobLanes = Array.from({ length: AT_ONCE }, () =>
     lane("job lane", () => {
       if (paused()) return;
-      const job = take(db);
+      const job = take(db, [...aside.keys()].filter(held).flatMap((k) => (/^job (\d+)$/.exec(k) ? [Number(k.slice(4))] : [])));
       if (!job) return;
-      return async () => {
+      const run = async () => {
         try {
           const folder = `${HOME}/jobs/${job.id}`;
           mkdirSync(join(home, "jobs", String(job.id)), { recursive: true });
@@ -630,6 +681,7 @@ export function startCoworker(setup: Setup, name: string) {
         }
         wake();
       };
+      return { keys: [`job ${job.id}`], label: `job ${job.id}`, run };
     }),
   );
 

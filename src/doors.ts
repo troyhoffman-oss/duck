@@ -256,10 +256,13 @@ export function deliver(c: Coworker, said: string, since: number, ask = false, t
   return { door, id, delivered };
 }
 
+/** The pause after `wait` before trying again what keeps failing: double it, up to 5 min. */
+export const longer = (wait: number) => Math.min(wait * 2, 300_000);
+
 /**
  * Keeps `part` of door `door` going until the coworker stops. Each time it stops it is logged with why and
  * started again, after 1 s, or while it keeps stopping within a minute of starting, after a wait that doubles
- * from 2 s to 5 min. A part started again that stops within that minute has not come back, and the door is
+ * from 2 s to 5 min (`longer`). A part started again that stops within that minute has not come back, and the door is
  * broken: told once for each time it is down.
  */
 export async function keep(c: Coworker, door: string, what: string, part: () => Promise<unknown>) {
@@ -275,7 +278,7 @@ export async function keep(c: Coworker, door: string, what: string, part: () => 
     );
     if (c.signal.aborted) return;
     const brief = Date.now() - began < 60_000;
-    wait = brief ? Math.min(wait * 2, 300_000) : 1000;
+    wait = brief ? longer(wait) : 1000;
     console.error(`${what} stopped: ${because}; it starts again in ${wait / 1000} s`);
     if (!brief || !down) down = Date.now();
     else broken(c, `${door} down since ${new Date(down).toISOString()}`, { door, stopped: what, because });

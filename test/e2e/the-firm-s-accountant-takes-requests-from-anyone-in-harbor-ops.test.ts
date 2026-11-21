@@ -532,7 +532,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
   // A run that fails waits, and its lane goes on meanwhile: one rule for every lane, shown here for the others
   // lane and the work lane. Each step lets the failing run through at its end, whatever came before, so what
   // it left waiting never reaches the next step.
-  test.failing("a request whose run fails does not hold up another thread's: Ana's is answered while Theo's keeps failing, and Theo's is answered once its run goes through", async () => {
+  test("a request whose run fails does not hold up another thread's: Ana's is answered while Theo's keeps failing, and Theo's is answered once its run goes through", async () => {
     const [THEO, LATE] = ["What is the 4B roof warranty?", "The 4B roof warranty runs to 2031."];
     const [ANA, GUTTERS] = ["What is the 4B gutter warranty?", "The 4B gutters carry no warranty."];
     // Each run of Theo's request fails with a 400 from the model until the step lets it through.
@@ -556,7 +556,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     }
   });
 
-  test.failing("a work-lane run that fails does not hold up the next: a bill that comes in after one whose run keeps failing is worked meanwhile, and the first is worked once its run goes through", async () => {
+  test("a work-lane run that fails does not hold up the next: a bill that comes in after one whose run keeps failing is worked meanwhile, and the first is worked once its run goes through", async () => {
     const bill = (unit: string, amount: string) => ({
       ref: `<electric-${unit}@harbor.example>`,
       payload: {

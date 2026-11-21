@@ -130,6 +130,7 @@ One word per thing, in code, setup, messages and docs.
 - Each inbox has three lanes. The person lane carries the main conversation. The others lane carries the others runs (part 11) and a team coworker's requests (part 14). The work lane carries everything else. The lane follows the session an event belongs to. Each lane runs one run at a time.
 - Pending events for the same session are handed to one run together.
 - A message from the person during their own run steers that run or waits its turn. It never starts a second run.
+- A run that fails is set aside and its lane goes on with the next session, thread or job. It is tried again after a pause that doubles from 2 s to 5 min while it keeps failing, or at once when a new event comes in its own session or thread. A second failure in a row is told to the person once, except in the person lane, whose own run would tell it. A restart tries it again at once.
 - A run cut short by a crash or a restart is started again from the same events in the same session. The coworker is told the run was cut and which tool calls have no known result, and checks before repeating one.
 - Checks for planted instructions happen inside the run, not in the handler.
 
