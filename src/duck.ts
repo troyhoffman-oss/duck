@@ -8,7 +8,18 @@ import { gate } from "./gate";
 import { add, openDb, type Pushed, poll, push } from "./inbox";
 import { modelRelay } from "./model-relay";
 import { type Coworker, startCoworker } from "./run";
-import { check, claimed, container, factsOf, gives, isTeam, made, NIGHTLY, personOf, readSetup } from "./setup";
+import {
+  check,
+  claimed,
+  container,
+  factsOf,
+  gives,
+  isTeam,
+  made,
+  NIGHTLY,
+  personOf,
+  readSetup,
+} from "./setup";
 import { backup, restore } from "./setup/backup";
 import { adminToDo, claim, make } from "./setup/coworkers";
 import { install, LOGIN } from "./setup/install";

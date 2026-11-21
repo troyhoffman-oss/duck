@@ -251,7 +251,8 @@ export async function answerOthers(c: Coworker, e: Event, text: string) {
   const { channel, key } = JSON.parse(e.payload ?? "{}") as { channel?: string; key?: string };
   if (!channel) return console.error(`${what} has no place in Buzz to go`);
   console.log(JSON.stringify({ answer: c.name, door, about: e.about }));
-  if (await tried(what, () => post(c, set, e.payload, text, [], key))) console.error(`${what} was not posted`);
+  if (await tried(what, () => post(c, set, e.payload, text, [], key)))
+    console.error(`${what} was not posted`);
 }
 
 /** The key door `set` of `c` is sent with: at a buzz door, the coworker's own Buzz key, which duck made. */
@@ -296,7 +297,14 @@ async function buzz(env: Record<string, string | undefined>, args: string[], inp
  * Posts `text`, with `files`, at the place in `payload`, or with none, in the DM with the coworker's owner,
  * mentioning the Buzz key `to` where given.
  */
-async function post(c: Coworker, set: Door, payload: string | null, text: string, files: string[], to?: string) {
+async function post(
+  c: Coworker,
+  set: Door,
+  payload: string | null,
+  text: string,
+  files: string[],
+  to?: string,
+) {
   const env = { ...process.env, ...identity(c, set) };
   const owner = JSON.parse(env.BUZZ_AUTH_TAG)[1];
   const place: Place = payload

@@ -207,7 +207,8 @@ export const plugsOf = (setup: Setup, coworker: string) =>
 function stateOf(plug: Plug, tool: string, lane: string) {
   if (tool === plug.events?.poll?.tool) return "removed";
   const state = plug.tools?.[tool] ?? plug.tools?.["*"] ?? "free";
-  if ((lane === OTHERS || lane === AGENT) && state !== "removed") return plug.others?.[tool] ?? plug.others?.["*"] ?? "removed";
+  if ((lane === OTHERS || lane === AGENT) && state !== "removed")
+    return plug.others?.[tool] ?? plug.others?.["*"] ?? "removed";
   return lane === JOB && state === "ask first" ? "removed" : state;
 }
 

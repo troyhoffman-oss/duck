@@ -189,7 +189,11 @@ export function othersWho(db: Database, s: string) {
     )
     .all(s)
     .map((e) => {
-      const { from = "", key = "", owner } = JSON.parse(e.payload) as { from?: string; key?: string; owner?: string };
+      const {
+        from = "",
+        key = "",
+        owner,
+      } = JSON.parse(e.payload) as { from?: string; key?: string; owner?: string };
       // buzz-acp gives a writer as "<name> (npub: <npub>, hex: <key>)", or with no name "<npub> (hex: <key>)".
       const name = /^(.*) \(npub: /.exec(from)?.[1];
       const whose = owner ? `, the agent of Buzz key ${owner.slice(0, 8)}` : "";
