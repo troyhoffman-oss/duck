@@ -208,23 +208,6 @@ describe("The admin sets up the firm and changes it", () => {
     expect(await ids()).toEqual(before);
   });
 
-  test("a firm installed with no coworker claimed yet starts its first one: claimed, it answers its person, and duck's container is kept through the claim", async () => {
-    await using fresh = await startFirm({ empty: true });
-    const before = await fresh.duckId();
-    const installed = await fresh.duck(
-      "claim",
-      harbor.coworker,
-      authTag(randomBytes(32), fresh.coworkerKey),
-      harbor.name,
-    );
-    expect(installed).toBe(`${harbor.coworker}: started\nduck: kept\n`);
-    const [HELLO, BACK] = ["Are you there?", "Here, and ready."];
-    fresh.model.on(said(HELLO), say(BACK));
-    await fresh.person.send("desk", HELLO);
-    await fresh.person.nextWith(BACK, 120);
-    expect(await fresh.duckId()).toBe(before);
-  });
-
   test("a coworker whose goose is lost holds up no other: the second coworker answers meanwhile, and the first comes back to the run it was cut from", async () => {
     const [ASK, THEIRS] = ["What's the gate code for 4B?", "Which unit is vacant?"];
     firm.model.on(said(ASK), held("lost", say("It's 2468.")));
@@ -380,5 +363,22 @@ describe("The admin sets up the firm and changes it", () => {
     expect(read).not.toContain("tide-tables");
     expect(read).not.toContain("old-roster");
     expect(await firm.import("hermes", profile)).not.toContain("copied");
+  });
+
+  test("a firm installed with no coworker claimed yet starts its first one: claimed, it answers its person, and duck's container is kept through the claim", async () => {
+    await using fresh = await startFirm({ empty: true });
+    const before = await fresh.duckId();
+    const installed = await fresh.duck(
+      "claim",
+      harbor.coworker,
+      authTag(randomBytes(32), fresh.coworkerKey),
+      harbor.name,
+    );
+    expect(installed).toBe(`${harbor.coworker}: started\nduck: kept\n`);
+    const [HELLO, BACK] = ["Are you there?", "Here, and ready."];
+    fresh.model.on(said(HELLO), say(BACK));
+    await fresh.person.send("desk", HELLO);
+    await fresh.person.nextWith(BACK, 120);
+    expect(await fresh.duckId()).toBe(before);
   });
 });
