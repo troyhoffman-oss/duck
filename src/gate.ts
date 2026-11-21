@@ -16,7 +16,7 @@ import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive, told } from "./archive";
 import { listChanged, SETTINGS_TOOL, tellSettings } from "./dms";
-import { act, doorTo, saved } from "./doors";
+import { act, doorTo, rootOf, saved } from "./doors";
 import { add, broken, mark, othersIn, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
 import { LIST_TOOLS, type Link, link, linkedTo, logged, useList } from "./list";
@@ -591,8 +591,17 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
         const i = args.indexOf(flag);
         return i < 0 ? args.find((a) => a.startsWith(`${flag}=`))?.slice(flag.length + 1) : args[i + 1];
       };
-      const at = `${option("--channel")}/${option("--reply-to") ?? sent}`;
-      const id = s ? add(c.db, "buzz:reply", `sent ${sent}`, null, null, s, at) : null;
+      // A reply to it is known by its thread's root, as buzz-acp names a thread, so what it wrote under a
+      // message that is itself a reply is kept at that message's root. The message has gone either way, so a
+      // root that cannot be read is logged and the record is not kept.
+      const root = option("--reply-to")
+        ? await rootOf(c, sent).catch((e: Error) => {
+            console.error(`${c.name}'s Buzz message ${sent} is not kept for its replies: ${e.message}`);
+            return undefined;
+          })
+        : sent;
+      const id =
+        s && root ? add(c.db, "buzz:reply", `sent ${sent}`, null, null, s, `${option("--channel")}/${root}`) : null;
       if (id !== null) mark(c.db, [id], "done");
       // One where the person talks to it, known by their own messages there, is a message to them (SPEC part 9).
       const theirs = "select 1 from inbox where source = 'buzz' and payload ->> '$.channel' = ?";

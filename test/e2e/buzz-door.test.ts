@@ -478,7 +478,7 @@ describe("the Buzz door", () => {
     E2E,
   );
 
-  test.failing(
+  test(
     "a DM the person writes while duck is stopped is answered once it starts again, and the one answered before it stopped is not answered again",
     async () => {
       firm.model.clear();

@@ -315,6 +315,21 @@ const identity = (c: Coworker, set: Door) => ({
 });
 
 /**
+ * The root of the thread Buzz event `id` is in, read from the relay as coworker `c`: the event its NIP-10 tags
+ * mark `root`, or where none is, the one it replies to, which Buzz's CLI then marks as its only `e` tag; or
+ * `id` itself, where it replies to none. buzz-acp names a thread by that root.
+ */
+export async function rootOf(c: Coworker, id: string) {
+  const env = { ...process.env, ...identity(c, doorsOf(c.setup, c.name).buzz as Door) };
+  const [event] = JSON.parse((await buzz(env, ["social", "event", "--event", id])).toString()) as {
+    tags: string[][];
+  }[];
+  if (!event) throw new Error(`the relay holds no Buzz event ${id}`);
+  const marked = (marker: string) => event.tags.find((t) => t[0] === "e" && t[3] === marker)?.[1];
+  return marked("root") ?? marked("reply") ?? id;
+}
+
+/**
  * Runs Buzz's CLI with `args` and `input` as coworker `c`, at its buzz door, in the folder `cwd`, which is
  * also its home, with nothing in its environment but its path, who it acts as and where, and the output Buzz
  * gives the agents it hosts, and returns what it printed (SPEC part 9).
