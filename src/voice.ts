@@ -194,6 +194,37 @@ export function voiceIn(
       void take(id, textOf(words));
       return true;
     };
+    /**
+     * Whether duck's question is being said: its words have begun and it is not yet asked, so where it ends is
+     * not yet known.
+     */
+    const saying = () => {
+      const from = question?.from;
+      return from !== undefined && question?.to === undefined && unkept.some((w) => w.start_ms >= from);
+    };
+    /**
+     * Settles hand-off `id` at `offset`, unless duck's question is being said: once it is asked, one at or after
+     * where it ended only names what the speech model's next words answer, and one before hands on its line.
+     * Returns whether it is settled.
+     */
+    const settle = (id: string, offset: number) => {
+      if (saying()) return false;
+      if (!after(offset)) return hand(id, offset);
+      waiting.delete(id);
+      delegation = id;
+      return true;
+    };
+    /**
+     * Has the speech model ask again for the line of hand-off `id`, still unsettled HEARD after it was made; while
+     * duck's question is being said, it looks again HEARD later.
+     */
+    const lost = (id: string) => {
+      if (!waiting.has(id)) return;
+      if (saying()) return void setTimeout(lost, HEARD, id);
+      waiting.delete(id);
+      const content = "That line was not caught: nothing goes to the coworker. Ask them to say it again.";
+      live({ type: "session.commentary.append", event_id: `again-${id}`, delegation_id: id, content });
+    };
     /** Has the speech model say `text` from the coworker, about the last line handed on; returns its event's id. */
     const say = (text: string) => {
       const id = `said-${randomUUID()}`;
@@ -238,16 +269,10 @@ export function voiceIn(
         own = setTimeout(ownLine, PAUSE);
       } else if (e.type === "session.input_transcript.delta") {
         heard.push(e);
-        for (const [id, offset] of waiting) hand(id, offset);
-      } else if (e.type === "session.delegation.created" && after(e.offset_ms)) delegation = e.delegation.id;
-      else if (e.type === "session.delegation.created" && !hand(e.delegation.id, e.offset_ms)) {
-        const id = e.delegation.id;
-        waiting.set(id, e.offset_ms);
-        setTimeout(() => {
-          if (!waiting.delete(id)) return;
-          const content = "That line was not caught: nothing goes to the coworker. Ask them to say it again.";
-          live({ type: "session.commentary.append", event_id: `again-${id}`, delegation_id: id, content });
-        }, HEARD);
+        for (const [id, offset] of waiting) settle(id, offset);
+      } else if (e.type === "session.delegation.created" && !settle(e.delegation.id, e.offset_ms)) {
+        waiting.set(e.delegation.id, e.offset_ms);
+        setTimeout(lost, HEARD, e.delegation.id);
       } else if (e.type === "session.output_transcript.delta") {
         // What it says is kept a breath at a time, but a question being said is kept whole once said.
         if (e.start_ms - lastSaid >= BREATH)
@@ -323,9 +348,9 @@ export function voiceIn(
       // How long it has been quiet: nothing said, and all it said gone out to the call.
       const quiet = out.length === 0 ? Date.now() - lastOut : 0;
       const from = question?.from;
-      // Once the last of the words said from where the question landed has gone out to the call, it is asked,
-      // in one message of those words, and it ended where the last of them did on the session's clock.
-      if (question && from !== undefined && question.to === undefined && quiet >= BREATH) {
+      // Once the last of the words said from where the question landed has gone out to a call not being left, it
+      // is asked, in one message of those words, and it ended where the last of them did on the session's clock.
+      if (question && !leaving && from !== undefined && question.to === undefined && quiet >= BREATH) {
         keep(from);
         const to = unkept.at(-1)?.end_ms;
         const message = keep();
@@ -338,11 +363,14 @@ export function voiceIn(
             answer.push(...heard.splice(begun));
             own = setTimeout(ownLine, PAUSE);
           }
+          // Hand-offs held while it was said are settled now that where it ended is known.
+          for (const [id, offset] of waiting) settle(id, offset);
         }
       }
       if (question?.to !== undefined && questions.length > 0 && !asking(c.db, question.ids))
         question = undefined;
-      const next = !question && unacked.size === 0 && quiet >= BEGIN ? questions.shift() : undefined;
+      const next =
+        !question && !leaving && unacked.size === 0 && quiet >= BEGIN ? questions.shift() : undefined;
       if (next)
         question = {
           ids: next.ids,
