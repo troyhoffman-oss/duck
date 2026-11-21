@@ -592,16 +592,18 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
         return i < 0 ? args.find((a) => a.startsWith(`${flag}=`))?.slice(flag.length + 1) : args[i + 1];
       };
       // A reply to it is known by its thread's root, as buzz-acp names a thread, so what it wrote under a
-      // message that is itself a reply is kept at that message's root. The message has gone either way, so a
-      // root that cannot be read is logged and the record is not kept.
-      const root = option("--reply-to")
+      // message that is itself a reply is kept at that message's root. Where the root cannot be read it is kept
+      // at the message it replied to, which is the root when that is the thread's first message; under any
+      // other, replies to it then do not find its session.
+      const under = option("--reply-to");
+      const root = under
         ? await rootOf(c, sent).catch((e: Error) => {
-            console.error(`${c.name}'s Buzz message ${sent} is not kept for its replies: ${e.message}`);
-            return undefined;
+            console.error(`the root of ${c.name}'s Buzz message ${sent} was not read: ${e.message}`);
+            return under;
           })
         : sent;
       const at = `${option("--channel")}/${root}`;
-      const id = s && root ? add(c.db, "buzz:reply", `sent ${sent}`, null, null, s, at) : null;
+      const id = s ? add(c.db, "buzz:reply", `sent ${sent}`, null, null, s, at) : null;
       if (id !== null) mark(c.db, [id], "done");
       // One where the person talks to it, known by their own messages there, is a message to them (SPEC part 9).
       const theirs = "select 1 from inbox where source = 'buzz' and payload ->> '$.channel' = ?";
