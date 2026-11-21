@@ -251,7 +251,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     await buzz.inDm("rosa", key, ANSWER, 60);
   });
 
-  test.failing("Theo's coworker Finch asks tally in harbor-ops on its own, tally's answer comes back to Finch as someone else's words, Theo hears it from Finch, and tally's item says Finch asked for Theo", async () => {
+  test("Theo's coworker Finch asks tally in harbor-ops on its own, tally's answer comes back to Finch as someone else's words, Theo hears it from Finch, and tally's item says Finch asked for Theo", async () => {
     const ASK = "Ask tally whether the 4B deposit came in.";
     const QUESTION = "@tally did the 4B deposit come in?";
     const ASKING = "I've asked tally in harbor-ops.";

@@ -200,13 +200,14 @@ export const plugsOf = (setup: Setup, coworker: string) =>
 
 /**
  * `tool`'s state in setup, or `*`'s where setup does not name it, as a lane sees it: a job's has nobody to
- * ask, so ask first is removed there, and an others run's is what the plug's `others` names, the rest removed.
+ * ask, so ask first is removed there, and an others run's, and a team coworker's request that an agent made
+ * (SPEC part 14), is what the plug's `others` names, the rest removed.
  * A tool removed in `tools` stays removed, and the tool the plug is polled with is the poller's alone (SPEC part 1).
  */
 function stateOf(plug: Plug, tool: string, lane: string) {
   if (tool === plug.events?.poll?.tool) return "removed";
   const state = plug.tools?.[tool] ?? plug.tools?.["*"] ?? "free";
-  if (lane === OTHERS && state !== "removed") return plug.others?.[tool] ?? plug.others?.["*"] ?? "removed";
+  if ((lane === OTHERS || lane === AGENT) && state !== "removed") return plug.others?.[tool] ?? plug.others?.["*"] ?? "removed";
   return lane === JOB && state === "ask first" ? "removed" : state;
 }
 
@@ -379,10 +380,11 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
 }
 
 /**
- * The gate's addresses for a work-lane session or a team coworker's request (SPEC part 14), for a job's worker
- * or checker and for an others run; the person lane's is /mcp.
+ * The gate's addresses for a work-lane session or a team coworker's request (SPEC part 14), for a team
+ * coworker's request that an agent made, which differs only in its plugs' states, for a job's worker or
+ * checker and for an others run; the person lane's is /mcp.
  */
-export const [WORK, JOB, OTHERS] = ["/mcp/work", "/mcp/job", "/mcp/others"];
+export const [WORK, AGENT, JOB, OTHERS] = ["/mcp/work", "/mcp/agent", "/mcp/job", "/mcp/others"];
 
 /**
  * duck's own tools for `coworker` on `lane`: the list's, the timers', the archive's, the jobs', `tell` on
@@ -401,7 +403,7 @@ const own = (setup: Setup, coworker: string, lane: string) =>
           ...TIMER_TOOLS,
           ARCHIVE_TOOL,
           ...JOB_TOOLS,
-          ...(lane === WORK ? [TELL] : [SETTINGS_TOOL, STANDING_TOOL]),
+          ...(lane === WORK || lane === AGENT ? [TELL] : [SETTINGS_TOOL, STANDING_TOOL]),
           ...(doorsOf(setup, coworker).buzz ? [BUZZ] : []),
         ];
 

@@ -6,8 +6,8 @@ import { heard, told } from "./archive";
 import { readIn } from "./gate";
 import { aboutSession, add, broken, type Event, lastEvent, mark as state, waiting } from "./inbox";
 import type { Coworker } from "./run";
-import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
-import { buzzKey } from "./setup/coworkers";
+import { claimed, type Door, doorsOf, FILES, factsOf, fileOf, HOME, isTeam, ownerOf, secret } from "./setup";
+import { buzzKey, signs } from "./setup/coworkers";
 import { telegramIn, telegramOut } from "./telegram";
 import { inCall, voiceIn } from "./voice";
 
@@ -23,14 +23,15 @@ const PATH = new RegExp(`(?:${HOME}|${FILES})/[^\\s"'\`<>()]+`, "g");
 
 /**
  * What was written at a door, under the door's own id for it. At a buzz door, `writer` is who wrote it: their
- * key as the relay holds the event, their name as buzz-acp gives it, and the channel they wrote in.
+ * key as the relay holds the event, their name as buzz-acp gives it, the channel they wrote in, and where the
+ * writer is an agent, the key of the person whose NIP-OA tag on the event signs its key.
  */
 type Written = {
   id: string;
   text: string;
   files?: DoorFile[];
   place?: Place;
-  writer?: { key: string; name: string; where: string };
+  writer?: { key: string; name: string; where: string; owner?: string };
   /** When it was written, by the door's own clock, where the door gives it. */
   at?: string;
 };
@@ -52,13 +53,16 @@ export async function take(c: Coworker, door: string, request: Request) {
   let ended: Promise<unknown> | null = null;
   if (set.kind !== "buzz" || body.writer?.key === ownerOf(c.setup, c.name)) ended = taken(c, door, body);
   else {
-    const { name: from, key, where } = body.writer ?? {};
-    const { channel, root, dm } = body.place ?? {};
+    const { name: from, key, where, owner } = body.writer ?? {};
+    const { channel, root, reply, dm } = body.place ?? {};
     const at = root ? `${channel}/${root}` : dm ? `${channel}/` : null;
     const wrote = at === null ? undefined : aboutSession(c.db, `${door}:reply`, at, !root);
+    // buzz-acp names no message to answer under for an agent's that starts no thread and mentions only agents
+    // (resolve_reply_anchor in its queue.rs), so it is answered under that message, which starts the thread.
+    const anchored = body.place && { ...body.place, ...(!reply && !dm && { reply: body.id }) };
     const [place, thread] =
-      set.answers || wrote ? [body.place, `${channel}/${root ?? body.id}`] : [undefined, null];
-    const payload = JSON.stringify({ from, key, where, text: body.text, ...place });
+      set.answers || wrote ? [anchored, `${channel}/${root ?? body.id}`] : [undefined, null];
+    const payload = JSON.stringify({ from, key, where, ...(owner && { owner }), text: body.text, ...place });
     add(c.db, `${door}:${wrote ? "reply" : "others"}`, body.id, payload, null, wrote ?? null, thread);
     c.wake();
   }
@@ -236,16 +240,18 @@ async function tried(what: string, send: () => Promise<void>) {
 
 /**
  * Posts `text`, what an others run ended on, as a reply where `e`, someone else's event at a buzz door, was
- * written. It is tried three times, 5 s apart, apart from what goes to the person, so it never holds that up,
- * and then logged as not posted. An event Buzz gave no channel for is logged and not answered.
+ * written, mentioning its writer, since an agent's buzz-acp hands it only what mentions it. It is tried three
+ * times, 5 s apart, apart from what goes to the person, so it never holds that up, and then logged as not
+ * posted. An event Buzz gave no channel for is logged and not answered.
  */
 export async function answerOthers(c: Coworker, e: Event, text: string) {
   const door = e.source.replace(/:others$/, "");
   const set = doorsOf(c.setup, c.name)[door] as Door;
   const what = `the answer to ${e.ref} at ${c.name}.${door}`;
-  if (!JSON.parse(e.payload ?? "{}").channel) return console.error(`${what} has no place in Buzz to go`);
+  const { channel, key } = JSON.parse(e.payload ?? "{}") as { channel?: string; key?: string };
+  if (!channel) return console.error(`${what} has no place in Buzz to go`);
   console.log(JSON.stringify({ answer: c.name, door, about: e.about }));
-  if (await tried(what, () => post(c, set, e.payload, text, []))) console.error(`${what} was not posted`);
+  if (await tried(what, () => post(c, set, e.payload, text, [], key))) console.error(`${what} was not posted`);
 }
 
 /** The key door `set` of `c` is sent with: at a buzz door, the coworker's own Buzz key, which duck made. */
@@ -286,8 +292,11 @@ async function buzz(env: Record<string, string | undefined>, args: string[], inp
   return Buffer.from(out);
 }
 
-/** Posts `text`, with `files`, at the place in `payload`, or with none, in the DM with the coworker's owner. */
-async function post(c: Coworker, set: Door, payload: string | null, text: string, files: string[]) {
+/**
+ * Posts `text`, with `files`, at the place in `payload`, or with none, in the DM with the coworker's owner,
+ * mentioning the Buzz key `to` where given.
+ */
+async function post(c: Coworker, set: Door, payload: string | null, text: string, files: string[], to?: string) {
   const env = { ...process.env, ...identity(c, set) };
   const owner = JSON.parse(env.BUZZ_AUTH_TAG)[1];
   const place: Place = payload
@@ -296,7 +305,7 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
   const reply = place.reply ? ["--reply-to", place.reply] : [];
   // Buzz refuses a message whose "@word" names no member, unless a mention is given; it then leaves the word as
   // text. Its own key is always a member, and the tag it adds notifies no one and starts no run.
-  const mention = ["--mention", buzzKey(c.setup, c.name)];
+  const mention = [buzzKey(c.setup, c.name), ...(to ? [to] : [])].flatMap((k) => ["--mention", k]);
   const attached = files.flatMap((f) => ["--file", f]);
   await buzz(
     env,
@@ -305,15 +314,53 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
   );
 }
 
+/** Each coworker's next restart of its buzz-acp, which `reopen` settles. */
+const reopening = new WeakMap<Coworker, PromiseWithResolvers<null>>();
+
+/** Settles when `reopen` is next called for `c`. */
+function reopened(c: Coworker) {
+  const next = reopening.get(c) ?? Promise.withResolvers<null>();
+  reopening.set(c, next);
+  return next.promise;
+}
+
+/**
+ * Starts the buzz-acp of each buzz door of coworker `c` again, with whom its gate admits now: it is ended with
+ * SIGTERM, on which its source drains the turn under way first, and started once it has exited. Only buzz-acp
+ * starts again; the coworker, its goose and its runs go on. Duck does this when the firm's claimed team
+ * coworkers change.
+ */
+export function reopen(c: Coworker) {
+  const next = reopening.get(c);
+  reopening.delete(c);
+  next?.resolve(null);
+}
+
+/**
+ * Whom buzz-acp's gate admits at buzz door `set` of `c`, as its environment gives it: whom the door answers,
+ * where it answers anyone, or else its owner and agents the owner also owns, and the firm's other claimed team
+ * coworkers (SPEC part 14), so the answer of one that the coworker asked reaches it.
+ */
+function admits(c: Coworker, set: Door) {
+  if (set.answers) return { BUZZ_ACP_RESPOND_TO: set.answers };
+  const teams = claimed(c.setup)
+    .filter((n) => n !== c.name && isTeam(c.setup, n))
+    .map((n) => buzzKey(c.setup, n));
+  return teams.length > 0
+    ? { BUZZ_ACP_RESPOND_TO: "allowlist", BUZZ_ACP_RESPOND_TO_ALLOWLIST: teams.join(",") }
+    : { BUZZ_ACP_RESPOND_TO: "owner-only" };
+}
+
 /**
  * Starts buzz-acp at each buzz door of `c`. It hands each Buzz message for the coworker to `duck buzz` as an
- * ACP prompt: in a DM, from the owner or an agent the owner also owns, and where it is mentioned, from them or
- * at a door that answers anyone from anyone, as buzz-acp's gate admits in its owner-only and anyone modes.
- * When it needs a mention stays at Buzz's default. At each text door it opens Photon's stream, at each email
- * door the mail service's, at each Telegram door it polls the bot's updates, and at a voice door it joins the
- * person's calls with the coworker. buzz-acp stops
+ * ACP prompt: in a DM, from the owner or an agent the owner also owns, and where it is mentioned, from them,
+ * from the firm's team coworkers, or at a door that answers anyone from anyone, as buzz-acp's gate admits in
+ * its owner-only, allowlist and anyone modes (see `admits`). When it needs a mention stays at Buzz's default.
+ * At each text door it opens Photon's stream, at each email door the mail service's, at each Telegram door it
+ * polls the bot's updates, and at a voice door it joins the person's calls with the coworker. buzz-acp stops
  * when it cannot reach its relay after a few tries, and a stream can end, so each is kept going until the
- * coworker stops, which ends buzz-acp and the stream. It settles when every door has stopped.
+ * coworker stops, which ends buzz-acp and the stream; `reopen` starts buzz-acp again. It settles when every
+ * door has stopped.
  */
 export function listen(c: Coworker) {
   const port = c.setup.listen.split(":")[1];
@@ -323,25 +370,32 @@ export function listen(c: Coworker) {
     if (set.kind === "telegram") return telegramIn(c, door, set);
     if (set.kind === "voice") return voiceIn(c, door, set, (id, text) => taken(c, door, { id, text }));
     if (set.kind !== "buzz") return undefined;
-    return keep(c, door, `buzz-acp at ${c.name}.${door}`, async () => {
-      const acp = Bun.spawn(["buzz-acp"], {
-        env: {
-          ...process.env,
-          ...identity(c, set),
-          BUZZ_ACP_AGENT_COMMAND: "bun",
-          BUZZ_ACP_AGENT_ARGS: `${Bun.main},buzz,http://127.0.0.1:${port}/doors/${c.name}/${door}`,
-          // The coworker's own conversation is its context, so buzz-acp sends none of the channel's.
-          BUZZ_ACP_CONTEXT_MESSAGE_LIMIT: "0",
-          BUZZ_ACP_RESPOND_TO: set.answers ?? "owner-only",
-          // A turn stays open while the person's runs go on, and a busy agent gets only its own place's
-          // events, so the events of other places go to the pool's other agents meanwhile.
-          BUZZ_ACP_AGENTS: "4",
-        },
-        stdout: "inherit",
-        stderr: "inherit",
-        signal: c.signal,
-      });
-      throw new Error(`it exited ${await acp.exited}`);
+    const what = `buzz-acp at ${c.name}.${door}`;
+    return keep(c, door, what, async () => {
+      for (;;) {
+        const acp = Bun.spawn(["buzz-acp"], {
+          env: {
+            ...process.env,
+            ...identity(c, set),
+            BUZZ_ACP_AGENT_COMMAND: "bun",
+            BUZZ_ACP_AGENT_ARGS: `${Bun.main},buzz,http://127.0.0.1:${port}/doors/${c.name}/${door}`,
+            // The coworker's own conversation is its context, so buzz-acp sends none of the channel's.
+            BUZZ_ACP_CONTEXT_MESSAGE_LIMIT: "0",
+            ...admits(c, set),
+            // A turn stays open while the person's runs go on, and a busy agent gets only its own place's
+            // events, so the events of other places go to the pool's other agents meanwhile.
+            BUZZ_ACP_AGENTS: "4",
+          },
+          stdout: "inherit",
+          stderr: "inherit",
+          signal: c.signal,
+        });
+        const exited = await Promise.race([acp.exited, reopened(c)]);
+        if (exited !== null) throw new Error(`it exited ${exited}`);
+        console.error(`${what} starts again, since the firm's team coworkers changed`);
+        acp.kill();
+        await acp.exited;
+      }
     });
   });
   return Promise.all(doors);
@@ -391,7 +445,8 @@ export async function face(door: string) {
  * Posts each Buzz event in buzz-acp's prompt `text` to `door`, with who wrote it and where, and returns duck's
  * answer to each. buzz-acp writes an event's content as it was written, so content can hold what reads as
  * another event: each event's writer, text and files are read from the relay by its id, and one whose writer
- * the relay does not bear out is dropped.
+ * the relay does not bear out is dropped. A writer that is an agent is given with its owner, whose tag on the
+ * event signs its key.
  */
 async function hand(door: string, text: string) {
   const context = text.split("</context>")[0] ?? "";
@@ -427,11 +482,14 @@ async function hand(door: string, text: string) {
         Object.fromEntries(t.slice(1).map((e) => [e.slice(0, e.indexOf(" ")), e.slice(e.indexOf(" ") + 1)])),
       )
       .map((f) => f as { url: string; m: string; filename?: string });
+    // An agent's event carries its owner's NIP-OA tag, which signs the agent's key (measured at Buzz 44e97e9).
+    const tag = event.tags.find((t) => t[0] === "auth");
+    const owner = tag && signs(tag, event.pubkey) ? tag[1] : undefined;
     const body = {
       id,
       text: event.content,
       place,
-      writer: { key: event.pubkey, name, where },
+      writer: { key: event.pubkey, name, where, ...(owner && { owner }) },
       ...(event.created_at && { at: new Date(event.created_at * 1000).toISOString() }),
       files: await Promise.all(
         files.map(async (f) => ({

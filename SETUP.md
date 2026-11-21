@@ -126,7 +126,7 @@ and have them send you the proof they copy. First make sure the secret store hol
 
 Check: the install ends with the lines `<coworker>: started` and `duck: kept` (after a claim from the plugin, read them with `journalctl --user -u duck-firm-<firm>-install.service`), and `podman ps --filter label=duck.firm=<firm>` shows `duck-<firm>-<coworker>` up.
 
-**A team coworker.** A coworker that does one function's work for many people, such as an accountant, is made like any other, for the person who answers for it, with its own handle and its team's channel by its Buzz id after the member: `duck make <coworker> <handle> "<their name in Buzz>" <channel id>`. Its handle is its own, so the secret store holds a key of its own for each plug it gets. Once claimed, its person adds it to that channel in Buzz. Anyone in the community may then ask it by mentioning it, and it answers in their thread; what it says on its own goes to that channel, and a held call is asked of its person, in their DM with it. Buzz hands a coworker no one's DM but its own person's, so a colleague asks it in a channel.
+**A team coworker.** A coworker that does one function's work for many people, such as an accountant, is made like any other, for the person who answers for it, with its own handle and its team's channel by its Buzz id after the member: `duck make <coworker> <handle> "<their name in Buzz>" <channel id>`. Its handle is its own, so the secret store holds a key of its own for each plug it gets. Once claimed, its person adds it to that channel in Buzz. Anyone in the community may then ask it by mentioning it, and it answers in their thread; what it says on its own goes to that channel, and a held call is asked of its person, in their DM with it. Buzz hands a coworker no one's DM but its own person's, so a colleague asks it in a channel. Another person's coworker may ask it there too, and gets its answer in its thread: each personal coworker's Buzz door admits the firm's claimed team coworkers as well as its own person. Claiming or removing a team coworker restarts every coworker's Buzz door once; their runs go on.
 
 **Optional, before the claim: history from before.** If the person used Claude, ChatGPT or a Hermes agent, `duck import <coworker> <kind> <path>` loads it, with kind `claude` (a claude.ai export's `conversations.json`), `chatgpt` (a ChatGPT export's `conversations.json` or one of its parts) or `hermes` (a Hermes `state.db` or profile folder). It prints what it loaded, and the coworker dreams over it.
 
@@ -184,5 +184,5 @@ In `<duck>`, check out the newer commit of `main` and run `bun install --product
 - The first conversation's set questions: how they want to work, their voice, history and their mail link.
 - A request the plugin sends while duck is down gets no answer; the plugin says duck did not answer.
 - A person leaving and the handover.
-- Of team coworkers: another coworker asking one, and its person naming who may ask.
+- Of team coworkers: its person naming who may ask.
 - A real reboot of a firm's server has not been run; the boot unit is proven by starting it as a boot does.
