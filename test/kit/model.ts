@@ -186,7 +186,9 @@ export const all =
   (r) =>
     whens.every((w) => w(r));
 
-type Rule = { when: When; reply: Reply | ((r: ModelRequest) => Reply); times: number; used: number };
+/** A rule's reply: fixed, or made from the request, at once or once what it needs is known. */
+type Replies = Reply | ((r: ModelRequest) => Reply | Promise<Reply>);
+type Rule = { when: When; reply: Replies; times: number; used: number };
 
 /**
  * An HTTP server that speaks the Messages API as goose calls it, answering from the test's script: an
@@ -257,7 +259,7 @@ export function scriptedModel({
       return apiError(400, "invalid_request_error", problem.message);
     }
     rule.used++;
-    const reply = typeof rule.reply === "function" ? rule.reply(asked) : rule.reply;
+    const reply = typeof rule.reply === "function" ? await rule.reply(asked) : rule.reply;
     if (reply.hold !== undefined) {
       holdOf(reached, reply.hold).open();
       await holdOf(holds, reply.hold).opened;
@@ -335,8 +337,11 @@ export function scriptedModel({
     url: `http://${reach.host}:${server.port}`,
     requests,
     trouble,
-    /** Adds a rule after those already given. It answers `times` requests, once by default. */
-    on(when: When, reply: Reply | ((r: ModelRequest) => Reply), { times = 1 }: { times?: number } = {}) {
+    /**
+     * Adds a rule after those already given. It answers `times` requests, once by default. A reply made from the
+     * request may wait for what it needs, such as an event's id the test learns only after the model is asked.
+     */
+    on(when: When, reply: Replies, { times = 1 }: { times?: number } = {}) {
       rules.push({ when, reply, times, used: 0 });
     },
     /** Lets every request held at `name` be answered. */
