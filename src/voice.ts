@@ -96,7 +96,7 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
     /** Each key in the call by its index there; the transcript not yet handed on; each hand-off waiting for it. */
     const [peers, heard, waiting] = [new Map<number, string>(), [] as Words[], new Map<string, number>()];
     let [out, seq, spoken, lastSaid, seconds] = [Buffer.alloc(0), 0, "", 0, 0];
-    let [delegation, leaving] = [null as string | null, false];
+    let [delegation, leaving, joined] = [null as string | null, false, false];
     const closed = Promise.withResolvers<void>();
     const live = (event: object) =>
       speech.readyState === WebSocket.OPEN && speech.send(JSON.stringify(event));
@@ -210,6 +210,7 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
         for (const p of [...(said.peers ?? []), said]) peers.set(p.peer_index, p.pubkey);
         if (leaving || inCall(c)?.say) return;
         callKept(c.db, door, "started");
+        joined = true;
         calls.set(c.name, { door, say });
         void newest({ kinds: [39000], "#d": [backing] }).then(
           (record) => {
@@ -245,7 +246,8 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
 
     await closed.promise;
     ended = () => {};
-    callKept(c.db, door, "ended");
+    // A call never joined, as when the speech model refuses the session, was no call.
+    if (joined) callKept(c.db, door, "ended");
   }
 
   return new Promise<void>((done) =>
