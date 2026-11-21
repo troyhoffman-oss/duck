@@ -44,6 +44,8 @@ export const TOOLS = {
   removeTimer: "remove_timer",
   /** Part 9: Buzz's own CLI as the coworker, `{args, input, files}`, where it has a buzz door. */
   buzz: "buzz",
+  /** Part 8: the person's standing words, `{content}` the whole of `standing.md`, in the main conversation alone. */
+  standing: "standing",
 };
 
 /**
