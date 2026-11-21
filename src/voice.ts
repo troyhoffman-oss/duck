@@ -40,7 +40,11 @@ type Words = { delta: string; start_ms: number; end_ms: number };
 /** Whether transcript words `b` follow words `a` within one line. */
 const near = (a: Words | undefined, b: Words | undefined) => !!a && !!b && b.start_ms - a.end_ms < PAUSE;
 /** What transcript words `words` say. */
-const textOf = (words: Words[]) => words.map((w) => w.delta).join("").trim();
+const textOf = (words: Words[]) =>
+  words
+    .map((w) => w.delta)
+    .join("")
+    .trim();
 const tag = (e: Event | undefined, name: string) => e?.tags.find((t) => t[0] === name)?.[1];
 
 /**
@@ -151,7 +155,8 @@ export function voiceIn(
       return text ? told(c.db, door, c.conversation() ?? null, text, []) : undefined;
     };
     /** Whether duck's question has been said and is open, and `ms` on the session's clock is after it. */
-    const after = (ms: number) => question?.to !== undefined && ms >= question.to && asking(c.db, question.ids);
+    const after = (ms: number) =>
+      question?.to !== undefined && ms >= question.to && asking(c.db, question.ids);
     const end = () => {
       if (leaving) return;
       leaving = true;
@@ -231,7 +236,8 @@ export function voiceIn(
         }, HEARD);
       } else if (e.type === "session.output_transcript.delta") {
         // What it says is kept a breath at a time, but a question being said is kept whole once said.
-        if (e.start_ms - lastSaid >= BREATH) keep(question && question.to === undefined ? question.from : undefined);
+        if (e.start_ms - lastSaid >= BREATH)
+          keep(question && question.to === undefined ? question.from : undefined);
         unkept.push(e);
         [lastSaid, lastOut] = [e.end_ms, Date.now()];
       } else if (e.type === "session.commentary.appended") {
@@ -317,7 +323,8 @@ export function voiceIn(
           }
         }
       }
-      if (question?.to !== undefined && questions.length > 0 && !asking(c.db, question.ids)) question = undefined;
+      if (question?.to !== undefined && questions.length > 0 && !asking(c.db, question.ids))
+        question = undefined;
       const next = !question && unacked.size === 0 && quiet >= BEGIN ? questions.shift() : undefined;
       if (next)
         question = {
