@@ -53,8 +53,9 @@
 </main>
 <script>
   // A service sends the code in the query, or in the fragment where the link asks for response_mode=fragment,
-  // which no host's log holds.
-  const given = new URLSearchParams(location.hash.length > 1 ? location.hash.slice(1) : location.search);
+  // which no host's log holds. A fragment of the service's own that carries neither leaves the query to read.
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const given = fragment.has("code") || fragment.has("error") ? fragment : new URLSearchParams(location.search);
   const [code, state] = [given.get("code"), given.get("state")];
   // The code stays out of the browser's history and of any page this one could lead to.
   history.replaceState(null, "", location.pathname);
