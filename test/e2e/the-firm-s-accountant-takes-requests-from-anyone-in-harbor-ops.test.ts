@@ -6,6 +6,7 @@ import {
   call,
   E2E,
   type Firm,
+  failure,
   held,
   idIn,
   jobRun,
@@ -526,5 +527,27 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     const history = `${firm.folder}/storage/${team.coworker}/history`;
     const kept = Bun.spawnSync(["git", `--git-dir=${history}`, "show", "HEAD:notes/4b-boiler.md"]);
     expect(kept.stdout.toString()).toBe(`${NOTE}\n`);
+  });
+
+  test.failing("a request whose run fails does not hold up another thread's: Ana's is answered while Theo's keeps failing, and Theo's is answered once its run goes through", async () => {
+    const [THEO, LATE] = ["What is the 4B roof warranty?", "The 4B roof warranty runs to 2031."];
+    const [ANA, GUTTERS] = ["What is the 4B gutter warranty?", "The 4B gutters carry no warranty."];
+    // Each run of Theo's request fails, with an error goose does not try again, until the step lets it through.
+    let failing = true;
+    firm.model.on(
+      all(tally, said(THEO)),
+      () => (failing ? failure(400, "invalid_request_error", "The request was refused.") : say(LATE)),
+      { times: Number.POSITIVE_INFINITY },
+    );
+    firm.model.on(all(tally, said(ANA)), say(GUTTERS));
+
+    const { id: theo } = await buzz.write("theo", "harbor-ops", THEO, { to: key });
+    await until(`a run of "${THEO}"`, async () => firm.model.requests.some(all(tally, said(THEO))), 60);
+    const { id: ana } = await buzz.write("ana", "harbor-ops", ANA, { to: key });
+    await buzz.inThread(ana, GUTTERS, 60, key);
+    expect(await buzz.thread(theo, key)).toEqual([]);
+
+    failing = false;
+    await buzz.inThread(theo, LATE, 60, key);
   });
 });
