@@ -529,6 +529,9 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect(kept.stdout.toString()).toBe(`${NOTE}\n`);
   });
 
+  // A run that fails waits, and its lane goes on meanwhile: one rule for every lane, shown here for the others
+  // lane and the work lane. Each step lets the failing run through at its end, whatever came before, so what
+  // it left waiting never reaches the next step.
   test.failing("a request whose run fails does not hold up another thread's: Ana's is answered while Theo's keeps failing, and Theo's is answered once its run goes through", async () => {
     const [THEO, LATE] = ["What is the 4B roof warranty?", "The 4B roof warranty runs to 2031."];
     const [ANA, GUTTERS] = ["What is the 4B gutter warranty?", "The 4B gutters carry no warranty."];
@@ -542,12 +545,68 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     firm.model.on(all(tally, said(ANA)), say(GUTTERS));
 
     const { id: theo } = await buzz.write("theo", "harbor-ops", THEO, { to: key });
-    await until(`a run of "${THEO}"`, async () => firm.model.requests.some(all(tally, said(THEO))), 60);
-    const { id: ana } = await buzz.write("ana", "harbor-ops", ANA, { to: key });
-    await buzz.inThread(ana, GUTTERS, 60, key);
-    expect(await buzz.thread(theo, key)).toEqual([]);
+    try {
+      await until(`a run of "${THEO}"`, async () => firm.model.requests.some(all(tally, said(THEO))), 60);
+      const { id: ana } = await buzz.write("ana", "harbor-ops", ANA, { to: key });
+      await buzz.inThread(ana, GUTTERS, 60, key);
+      expect(await buzz.thread(theo, key)).toEqual([]);
+    } finally {
+      failing = false;
+      await buzz.inThread(theo, LATE, 60, key);
+    }
+  });
 
-    failing = false;
-    await buzz.inThread(theo, LATE, 60, key);
+  test.failing("a work-lane run that fails does not hold up the next: a bill that comes in after one whose run keeps failing is worked meanwhile, and the first is worked once its run goes through", async () => {
+    const bill = (unit: string, amount: string) => ({
+      ref: `<electric-${unit}@harbor.example>`,
+      payload: {
+        from: "Harbor Electric <billing@electric.harbor.example>",
+        subject: `${unit} electric bill`,
+        text: `The ${unit} electric bill of ${amount} is due December 1.`,
+      },
+      person: team.coworker,
+    });
+    const [FIRST, NEXT] = [bill("4B", "$96"), bill("3C", "$71")];
+    const EVERY = { times: Number.POSITIVE_INFINITY };
+    const work = (r: { has: (tool: string) => boolean }) => r.has(TOOLS.tell);
+    /** Whether the event `ref` names is done, as tally's inbox keeps it. */
+    const done = async (ref: string) => {
+      using db = firm.db(team.coworker);
+      return (
+        db.query<{ state: string }, [string]>("select state from inbox where ref = ?").get(ref)?.state ===
+        "done"
+      );
+    };
+    // Each run that shows the first bill fails with a 400 from the model until the step lets it through.
+    let failing = true;
+    firm.model.on(all(sorter, shows(FIRST.payload.subject)), say("wake: a bill due"));
+    firm.model.on(all(sorter, shows(NEXT.payload.subject)), say("wake: a bill due"));
+    firm.model.on(
+      all(tally, shows(FIRST.payload.text), work),
+      () =>
+        failing
+          ? failure(400, "invalid_request_error", "The request was refused.")
+          : say("Noted the 4B bill."),
+      EVERY,
+    );
+    firm.model.on(all(tally, shows(NEXT.payload.text), work), say("Noted the 3C bill."), EVERY);
+
+    let pushed = false;
+    await firm.push(FIRST);
+    try {
+      const tried = async () => firm.model.requests.some(all(tally, shows(FIRST.payload.text), work));
+      await until("a run of the 4B bill", tried, 60);
+      await firm.push(NEXT);
+      pushed = true;
+      await until("the 3C bill worked", () => done(NEXT.ref), 60);
+      // It was worked in a run of its own, not with the bill whose run fails.
+      const runs = firm.model.requests.filter(all(tally, shows(NEXT.payload.text), work));
+      expect(runs.some((r) => !r.shows(FIRST.payload.text))).toBe(true);
+      expect(await done(FIRST.ref)).toBe(false);
+    } finally {
+      failing = false;
+      await until("the 4B bill worked", () => done(FIRST.ref), 60);
+      if (pushed) await until("the 3C bill worked", () => done(NEXT.ref), 60);
+    }
   });
 });
