@@ -208,12 +208,15 @@ describe("The admin sets up the firm and changes it", () => {
     expect(await ids()).toEqual(before);
   });
 
-  test("a firm installed with no coworker yet starts its first one: made and claimed, it answers its person, and duck's container is kept through the claim", async () => {
+  test("a firm installed with no coworker claimed yet starts its first one: claimed, it answers its person, and duck's container is kept through the claim", async () => {
     await using fresh = await startFirm({ empty: true });
     const before = await fresh.duckId();
-    const made = await fresh.duck("make", harbor.coworker, harbor.person);
-    const key = (/its Buzz key is ([0-9a-f]{64})/.exec(made) as string[])[1] as string;
-    const installed = await fresh.duck("claim", harbor.coworker, authTag(randomBytes(32), key), harbor.name);
+    const installed = await fresh.duck(
+      "claim",
+      harbor.coworker,
+      authTag(randomBytes(32), fresh.coworkerKey),
+      harbor.name,
+    );
     expect(installed).toBe(`${harbor.coworker}: started\nduck: kept\n`);
     const [HELLO, BACK] = ["Are you there?", "Here, and ready."];
     fresh.model.on(said(HELLO), say(BACK));
