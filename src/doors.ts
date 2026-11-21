@@ -275,18 +275,20 @@ async function tried(what: string, send: () => Promise<void>) {
 
 /**
  * Posts `text`, what an others run ended on, as a reply where `e`, someone else's event at a buzz door, was
- * written, mentioning its writer, since an agent's buzz-acp hands it only what mentions it. It is tried three
- * times, 5 s apart, apart from what goes to the person, so it never holds that up, and then logged as not
- * posted. An event Buzz gave no channel for is logged and not answered.
+ * written. Where its writer is an agent it mentions them, since an agent's buzz-acp hands it only what mentions
+ * it. A person is not: Buzz's CLI refuses to mention anyone not in the channel (`missing_members` in its
+ * messages.rs), and a person may write in an open channel without joining it. It is tried three times, 5 s
+ * apart, apart from what goes to the person, so it never holds that up, and then logged as not posted. An event
+ * Buzz gave no channel for is logged and not answered.
  */
 export async function answerOthers(c: Coworker, e: Event, text: string) {
   const door = e.source.replace(/:others$/, "");
   const set = doorsOf(c.setup, c.name)[door] as Door;
   const what = `the answer to ${e.ref} at ${c.name}.${door}`;
-  const { channel, key } = JSON.parse(e.payload ?? "{}") as { channel?: string; key?: string };
+  const { channel, key, owner } = JSON.parse(e.payload ?? "{}") as Record<string, string | undefined>;
   if (!channel) return console.error(`${what} has no place in Buzz to go`);
   console.log(JSON.stringify({ answer: c.name, door, about: e.about }));
-  if (await tried(what, () => post(c, set, e.payload, text, [], key)))
+  if (await tried(what, () => post(c, set, e.payload, text, [], owner && key)))
     console.error(`${what} was not posted`);
 }
 
