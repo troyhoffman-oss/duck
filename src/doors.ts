@@ -485,14 +485,18 @@ export function listen(c: Coworker) {
           stderr: "inherit",
           signal: c.signal,
         });
-        for (;;) {
-          const exited = await Promise.race([acp.exited, reopened(c)]);
-          if (exited !== null) throw new Error(`it exited ${exited}`);
-          if (JSON.stringify(admits(c)) !== JSON.stringify(gate)) break;
+        // However this is left, the buzz-acp running ends first, so two never run on one key.
+        try {
+          for (;;) {
+            const exited = await Promise.race([acp.exited, reopened(c)]);
+            if (exited !== null) throw new Error(`it exited ${exited}`);
+            if (JSON.stringify(admits(c)) !== JSON.stringify(gate)) break;
+          }
+          console.error(`${what} starts again, since whom it admits changed`);
+        } finally {
+          acp.kill();
+          await acp.exited;
         }
-        console.error(`${what} starts again, since whom it admits changed`);
-        acp.kill();
-        await acp.exited;
       }
     });
   });

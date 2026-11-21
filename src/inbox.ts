@@ -180,39 +180,56 @@ export const aboutSession = (db: Database, source: string, about: string, under 
     .get(source, about, under ? 1 : 0)?.session ?? undefined;
 
 /**
- * Whether someone other than the person wrote event `e` at a door: a request, or a reply to what the coworker
- * wrote, which holds their words; the record of what the coworker itself wrote there holds none.
+ * Whether event `e` is someone other than the person asking the coworker at a door: a request, or a reply to
+ * what it wrote, which holds their words; the record of what the coworker itself wrote there holds none. A reply
+ * from one the coworker asked there itself, whom its latest own message in the thread before it mentioned, is
+ * what comes back to it, not someone asking (SPEC part 14).
  */
-export const written = (e: Event | null | undefined): e is Event =>
-  !!e && /:(others|reply)$/.test(e.source) && e.payload !== null;
-
-/**
- * In session `s`, where someone other than the person asked, the latest event one of them wrote at a door, a
- * request or a reply: who, and where; or null.
- */
-export function othersIn(db: Database, s: string) {
-  const events = db.query<Event, [string]>("select * from inbox where session = ? order by id desc").all(s);
-  return events.some((e) => e.source.endsWith(":others")) ? (events.find(written) ?? null) : null;
+export function asking(db: Database, e: Event | null | undefined): e is Event {
+  if (!e || !/:(others|reply)$/.test(e.source)) return false;
+  const said = JSON.parse(e.payload ?? "null") as { text?: string; key?: string } | null;
+  if (said?.text === undefined) return false;
+  if (e.source.endsWith(":others")) return true;
+  const own = db
+    .query<{ payload: string | null }, [string, string | null, number]>(
+      "select payload from inbox where source = ? and ref like 'sent %' and about is ? and id < ? order by id desc limit 1",
+    )
+    .get(e.source, e.about, e.id);
+  const { mentioned = [] } = JSON.parse(own?.payload ?? "{}") as { mentioned?: string[] };
+  return !mentioned.includes(said.key ?? "");
 }
 
 /**
- * Who wrote the events from others that the latest run in session `s` began with, as the person is told: each
- * by the name they give in Buzz, if any, the start of the key the relay bears out, and for an agent, the start
- * of its owner's key, in brackets; or nothing.
+ * In session `s`, where someone other than the person asked, the latest event one of them wrote at a door
+ * asking it, a request or a reply (`asking`): who, and where; or null.
  */
-export function othersWho(db: Database, s: string) {
+export function othersIn(db: Database, s: string) {
+  const events = db.query<Event, [string]>("select * from inbox where session = ? order by id desc").all(s);
+  return events.some((e) => e.source.endsWith(":others"))
+    ? (events.find((e) => asking(db, e)) ?? null)
+    : null;
+}
+
+/**
+ * Who wrote the words of others, requests or replies, that the latest run in session `s` began with, or with
+ * `asked` only those asking it (`asking`), as the person is told: each by the name they give in Buzz, if any,
+ * the start of the key the relay bears out, and for an agent, the start of its owner's key, in brackets; or
+ * nothing.
+ */
+export function othersWho(db: Database, s: string, asked = false) {
   const who = db
-    .query<{ payload: string }, [string]>(
-      `select payload from inbox where source like '%:others' and id in
-        (select value from json_each((select events from runs where session = ? order by id desc limit 1)))`,
+    .query<Event, [string]>(
+      `select * from inbox where (source like '%:others' or source like '%:reply') and payload ->> '$.text' is not null
+        and id in (select value from json_each((select events from runs where session = ? order by id desc limit 1)))`,
     )
     .all(s)
+    .filter((e) => !asked || asking(db, e))
     .map((e) => {
       const {
         from = "",
         key = "",
         owner,
-      } = JSON.parse(e.payload) as { from?: string; key?: string; owner?: string };
+      } = JSON.parse(e.payload as string) as { from?: string; key?: string; owner?: string };
       // buzz-acp gives a writer as "<name> (npub: <npub>, hex: <key>)", or with no name "<npub> (hex: <key>)".
       const name = /^(.*) \(npub: /.exec(from)?.[1];
       const whose = owner ? `, the agent of Buzz key ${owner.slice(0, 8)}` : "";

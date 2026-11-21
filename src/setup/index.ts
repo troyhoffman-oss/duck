@@ -234,8 +234,8 @@ export function setting<K extends (typeof SETTINGS)[number]>(setup: Setup, cowor
  * set, unless the firm locks it. Settings duck cannot read, or a list it cannot use, answer its person only.
  */
 export function answersOf(setup: Setup, coworker: string): Answers {
-  const start = isTeam(setup, coworker) || setup.settings.answers === "anyone" ? "anyone" : "person";
   try {
+    const start = isTeam(setup, coworker) || setup.settings.answers === "anyone" ? "anyone" : "person";
     const own = settingsOf(setup, coworker).answers;
     if (own === undefined || setup.settings.locked?.includes("answers")) return start;
     if (own === "person" || own === "anyone") return own;
@@ -251,13 +251,15 @@ export function answersOf(setup: Setup, coworker: string): Answers {
 
 /**
  * Whether the writer of Buzz key `key`, where it is an agent the one whose signed tag names `owner`, may ask
- * coworker `coworker` for work (SPEC part 14): where it answers anyone, anyone; under a list, a named person or
- * an agent whose owner is named; where it answers only its person, no one but them, whose messages are theirs.
+ * coworker `coworker` for work (SPEC part 14): where it answers anyone, anyone; under a list, a named person, an
+ * agent whose owner is named, or an agent of its own person, as they may; where it answers only its person, no
+ * one but them, whose messages are theirs.
  */
 export function mayAsk(setup: Setup, coworker: string, key?: string, owner?: string) {
   const answers = answersOf(setup, coworker);
   if (answers === "anyone") return true;
   if (answers === "person") return false;
+  if (owner !== undefined && owner === ownerOf(setup, coworker)) return true;
   return answers.some((a) => a.key === key || (owner !== undefined && a.key === owner));
 }
 
