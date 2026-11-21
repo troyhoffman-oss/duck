@@ -16,6 +16,7 @@ import {
   fileOf,
   HOME,
   isTeam,
+  mayAsk,
   ownerOf,
   secret,
 } from "./setup";
@@ -52,8 +53,9 @@ type Written = {
  * Takes what was written at an http or buzz `door`, sent with the door's key. At a buzz door only what the
  * owner wrote is the person's message; anything else is an event that says who wrote it and where. In a
  * thread the coworker wrote in, or a DM, it goes on in the session that last wrote or was answered there;
- * elsewhere it is outside words on the work lane, or at a door that answers others, the start of an others
- * run. Either keeps the place it was written and is about its thread. At a buzz door the answer to the
+ * elsewhere, from one who may ask (`mayAsk`), it is a request, the start of an others run, which keeps the
+ * place it was written and is about its thread; from anyone else it is outside words on the work lane, with
+ * no place to answer and no thread. At a buzz door the answer to the
  * person's message ends when the runs it woke or steered have, and what they said has gone out.
  */
 export async function take(c: Coworker, door: string, request: Request) {
@@ -76,8 +78,10 @@ export async function take(c: Coworker, door: string, request: Request) {
     // buzz-acp names no message to answer under for an agent's that starts no thread and mentions only agents
     // (resolve_reply_anchor in its queue.rs), so it is answered under that message, which starts the thread.
     const anchored = body.place && { ...body.place, ...(!reply && !dm && { reply: body.id }) };
+    // buzz-acp's gate also admits the team coworkers whose replies must reach this one, so whether it is a
+    // request is decided here, from the same setting.
     const [place, thread] =
-      answersOf(c.setup, c.name) !== "person" || wrote
+      mayAsk(c.setup, c.name, key, owner) || wrote
         ? [anchored, `${channel}/${root ?? body.id}`]
         : [undefined, null];
     const text = cutSignIns(c.setup, c.name, body.text);
@@ -481,14 +485,18 @@ export function listen(c: Coworker) {
           stderr: "inherit",
           signal: c.signal,
         });
-        for (;;) {
-          const exited = await Promise.race([acp.exited, reopened(c)]);
-          if (exited !== null) throw new Error(`it exited ${exited}`);
-          if (JSON.stringify(admits(c)) !== JSON.stringify(gate)) break;
+        // However this is left, the buzz-acp running ends first, so two never run on one key.
+        try {
+          for (;;) {
+            const exited = await Promise.race([acp.exited, reopened(c)]);
+            if (exited !== null) throw new Error(`it exited ${exited}`);
+            if (JSON.stringify(admits(c)) !== JSON.stringify(gate)) break;
+          }
+          console.error(`${what} starts again, since whom it admits changed`);
+        } finally {
+          acp.kill();
+          await acp.exited;
         }
-        console.error(`${what} starts again, since whom it admits changed`);
-        acp.kill();
-        await acp.exited;
       }
     });
   });

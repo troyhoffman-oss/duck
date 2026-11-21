@@ -571,7 +571,8 @@ const UNHELD = "(The coworker sent a message here whose words duck does not hold
  * Runs the Buzz command `input` gives as `coworker` (SPEC part 9), in a folder of its own that no coworker
  * reaches: each of its `files` is copied in under its name, and each file the CLI writes there is saved among
  * the coworker's as a plug's is. Each file in and out is added to `moved`. A message it sends from session `s`
- * is kept as that session's word in its thread, so a reply there comes back to `s` (SPEC part 11).
+ * is kept as that session's word in its thread, with whom it mentioned and none of its words, so a reply there
+ * comes back to `s` (SPEC part 11).
  */
 async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: Moved[]) {
   const args = (input.args as unknown[]).map(String);
@@ -605,7 +606,13 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
           })
         : sent;
       const at = `${option("--channel")}/${root}`;
-      const id = s ? add(c.db, "buzz:reply", `sent ${sent}`, null, null, s, at) : null;
+      // Whom it mentioned, so a reply of one it asked there is known as what comes back to it (SPEC part 14).
+      const mentioned = args.flatMap((a, i) =>
+        a === "--mention" ? [args[i + 1] ?? ""] : a.startsWith("--mention=") ? [a.slice(10)] : [],
+      );
+      const id = s
+        ? add(c.db, "buzz:reply", `sent ${sent}`, JSON.stringify({ mentioned }), null, s, at)
+        : null;
       if (id !== null) mark(c.db, [id], "done");
       // One where the person talks to it, known by their own messages there, is a message to them (SPEC part 9).
       const theirs = "select 1 from inbox where source = 'buzz' and payload ->> '$.channel' = ?";
@@ -847,7 +854,8 @@ const resume = (db: Database, id: number, s: string, what: Json) =>
  * call's exact effect. Each of its inputs `files` is a file, copied as it is now among the files the person
  * was sent, which the question carries and a yes sends. The question goes once the run ends, through quiet
  * hours if the person's own message started it. In a session someone else wrote in, an others run or a team
- * coworker's request, it says someone else asked, and who (SPEC parts 11 and 14). A box's reason `why` is
+ * coworker's request, or from a run that began with someone else's words in any session, the person's own
+ * conversation among them, it says someone else asked, and who (SPEC parts 11 and 14). A box's reason `why` is
  * given the person under its first line, and the coworker. Where the input as it is held does not read
  * plainly, `reads` gives each entry as the question shows it; the call holds the input itself.
  */
@@ -862,9 +870,8 @@ function hold(
   reads: (input: Json) => Json = (i) => i,
 ) {
   const urgent = personAt(c, s) !== null;
-  const asker = othersIn(c.db, s as string)
-    ? `Someone other than you${othersWho(c.db, s as string)} asked for this. `
-    : "";
+  const who = othersWho(c.db, s as string);
+  const asker = othersIn(c.db, s as string) || who ? `Someone other than you${who} asked for this. ` : "";
   for (const key of files) {
     const copies = [input[key]].flat().map((path) => {
       const [at, copy] = [fileIn(c.setup, c.name, String(path)), `held/${randomUUID()}`];
@@ -1219,7 +1226,7 @@ function wrote(c: Coworker, s: string | undefined, item: number, fresh: boolean)
   if (!s) return;
   if (fresh && othersIn(c.db, s)) {
     const person = personOf(c.setup, c.name).name;
-    logged(c.db, item, `Asked for by someone other than ${person}${othersWho(c.db, s)}.`);
+    logged(c.db, item, `Asked for by someone other than ${person}${othersWho(c.db, s, true)}.`);
   }
   const kept = runOf(c, s);
   kept.item = item;

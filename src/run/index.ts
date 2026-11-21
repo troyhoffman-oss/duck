@@ -6,6 +6,7 @@ import { AGENT, cutHeld, JOB, lapse, OTHERS, readIn, WORK } from "../gate";
 import {
   aboutSession,
   add,
+  asking,
   attach,
   type Event,
   itemSession,
@@ -14,7 +15,6 @@ import {
   openDb,
   othersIn,
   waiting,
-  written,
 } from "../inbox";
 import { AT_ONCE, checkerText, ended, endRef, type Job, moved, resume, take, workerText } from "../jobs";
 import { gained, openItems, useList } from "../list";
@@ -96,12 +96,13 @@ export function startCoworker(setup: Setup, name: string) {
   /** Where a team coworker's request that an agent made works: as the work lane does, with the plugs' `others` states. */
   const agentAt: At = { cwd: HOME, mcpServers: gateAt(AGENT) };
   /**
-   * Where a team coworker's run of `events` works (SPEC part 14): where an agent wrote one of them at a door,
-   * as its event names the person whose agent it is, at an agent's request's address, else at the work lane's.
+   * Where a team coworker's run of `events` works (SPEC part 14): where an agent asking it wrote one of them
+   * (`asking`), as its event names the person whose agent it is, at an agent's request's address, else at the work lane's.
    */
   const teamAt = (events: (Event | null)[]) =>
     events.some(
-      (e) => written(e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
+      (e) =>
+        asking(db, e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
     )
       ? agentAt
       : workAt;
@@ -555,10 +556,10 @@ export function startCoworker(setup: Setup, name: string) {
     const [s, k] = [of(first), key(first)];
     const batch = events.filter((e) => key(e) === k);
     const note = `Note from duck: this run answers someone other than ${person.name}. What you end it on goes to them where they wrote.\n\n`;
-    // Who it answers: each who wrote in the batch at a door, a request or a reply, or where none did, as a job's
-    // or an ask's end, who last did in the thread. An agent's event names the person whose agent it is (SPEC
+    // Who it answers: each who asks in the batch (`asking`), with a request or a reply, or where none does, as a
+    // job's or an ask's end, or the reply of one it asked, who last did in the thread. An agent's event names the person whose agent it is (SPEC
     // part 14).
-    const writers = batch.filter(written);
+    const writers = batch.filter((e) => asking(db, e));
     const askers = writers.length > 0 ? writers : s ? [othersIn(db, s)] : [];
     return () =>
       runIn(s, batch, team ? teamAt(askers) : othersAt, note + cameIn(batch), team, async (s, run) => {
