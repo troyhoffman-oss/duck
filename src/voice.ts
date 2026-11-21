@@ -70,7 +70,15 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
       const members = (await newest({ kinds: [39002], "#d": [parent] }))?.tags.filter((t) => t[0] === "p");
       const keys = new Set(members?.map((t) => t[1]));
       const open = (await newest({ kinds: [39000], "#d": [parent] }))?.tags.some((t) => t[0] === "public");
-      if (!backing || open || keys.size !== 2 || !keys.has(owner) || !keys.has(relay.me)) return;
+      const why = !backing
+        ? "the start names no backing channel"
+        : open
+          ? "the channel is open to the community"
+          : keys.size !== 2 || !keys.has(owner) || !keys.has(relay.me)
+            ? `its members are not just the two of them (${keys.size} members)`
+            : undefined;
+      if (why)
+        return console.error(`a call of ${c.name}'s person at ${c.name}.${door} is not joined: ${why}`);
       await call(parent, backing, start.created_at);
       callEnded(c.name);
     } catch (e) {
@@ -209,6 +217,7 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
       } else if (said.type === "joined") {
         for (const p of [...(said.peers ?? []), said]) peers.set(p.peer_index, p.pubkey);
         if (leaving || inCall(c)?.say) return;
+        console.log(JSON.stringify({ call: c.name, door, happened: "joined" }));
         callKept(c.db, door, "started");
         joined = true;
         calls.set(c.name, { door, say });
@@ -245,6 +254,7 @@ export function voiceIn(c: Coworker, door: string, set: Door, take: (id: string,
     }, 20);
 
     await closed.promise;
+    if (joined) console.log(JSON.stringify({ call: c.name, door, happened: "left" }));
     ended = () => {};
     // A call never joined, as when the speech model refuses the session, was no call.
     if (joined) callKept(c.db, door, "ended");
