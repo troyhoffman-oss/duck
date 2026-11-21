@@ -95,14 +95,16 @@ export type SpeechSession = {
  * line the person speaks is a tone (`lineTone`); half a second after its sound stops, the stand-in hands it
  * off and says its own acknowledgement, and gives the line's transcript in two parts, the last arriving after
  * the hand-off and ending past its offset, as a real model's can. What the door gives it to say it says after a
- * pause of 600 ms, a word every 150 ms, stopping where the person's sound cuts in, and its transcript is only
- * what it said. Its times are in ms since the session opened. It reports its seconds of use every 5 s and when
- * closed.
+ * pause of 600 ms, a word every 150 ms, stopping where the person's sound cuts in or after a word a test has
+ * it cut at (`cuts`), and its transcript is only what it said. Its times are in ms since the session opened.
+ * It reports its seconds of use every 5 s and when closed.
  */
 export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } = {}) {
   const key = randomBytes(24).toString("base64url");
   const sessions: SpeechSession[] = [];
   const told = new Map<string, Line>();
+  /** Where it stops saying what it is given: after the first word holding one of these. */
+  const cut: string[] = [];
   const calls = new Map<ServerWebSocket<unknown>, ReturnType<typeof call>>();
   const server = Bun.serve({
     hostname: FROM_CONTAINERS.bind,
@@ -288,7 +290,9 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
           session?.given.push({ type: kind, delegation: delegation_id, content });
           if (kind !== "commentary") return;
           send({ type: "session.commentary.appended", client_event_id: event_id });
-          return say(content, TONES.said);
+          const at = Math.min(...cut.map((c) => content.indexOf(c)).filter((i) => i >= 0));
+          const end = at === Infinity ? -1 : content.slice(at).search(/\s/);
+          return say(end < 0 ? content : content.slice(0, at + end), TONES.said);
         }
         if (type === "session.close") {
           hush();
@@ -324,6 +328,10 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
       lineTone(text);
       told.set(text, { hand: true, transcript: true, ...line });
     },
+    /** What it is given to say from now on stops after the first word that holds `word`, as a real model's may. */
+    cuts(word: string) {
+      cut.push(word);
+    },
     /** Waits until the door has opened `count` sessions in all, and returns the last. */
     async opened(count: number, seconds = 30) {
       await until(
@@ -343,6 +351,7 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
         trouble.clear();
         sessions.length = 0;
         told.clear();
+        cut.length = 0;
       }
     },
     [Symbol.asyncDispose]: () => server.stop(true),
