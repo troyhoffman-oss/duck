@@ -387,7 +387,11 @@ export function startCoworker(setup: Setup, name: string) {
               `${name}'s ${what} set aside ${n.label}: ${because}; it is tried again from ${new Date(due).toISOString()}, or at once with something new for it`,
             );
             if (before && what !== "person lane")
-              broken(coworker, `${what} ${n.label} failing since ${since}`, { lane: what, failing: n.label, because });
+              broken(coworker, `${what} ${n.label} failing since ${since}`, {
+                lane: what,
+                failing: n.label,
+                because,
+              });
           }
       } catch (error) {
         console.error(`${name}'s ${what} stopped: ${(error as Error).message}`);
@@ -554,7 +558,8 @@ export function startCoworker(setup: Setup, name: string) {
         keys: [`event ${unsorted.id}`],
         label: `the screening of event ${unsorted.id}`,
         run: async () => {
-          if ((await screen(setup, db, unsorted)) === "noise" && mode === "on") mark(db, [unsorted.id], "done");
+          if ((await screen(setup, db, unsorted)) === "noise" && mode === "on")
+            mark(db, [unsorted.id], "done");
         },
       };
     const at = (e: Event) =>
@@ -657,7 +662,10 @@ export function startCoworker(setup: Setup, name: string) {
   const jobLanes = Array.from({ length: AT_ONCE }, () =>
     lane("job lane", () => {
       if (paused()) return;
-      const job = take(db, [...aside.keys()].filter(held).flatMap((k) => (/^job (\d+)$/.exec(k) ? [Number(k.slice(4))] : [])));
+      const job = take(
+        db,
+        [...aside.keys()].filter(held).flatMap((k) => (/^job (\d+)$/.exec(k) ? [Number(k.slice(4))] : [])),
+      );
       if (!job) return;
       const run = async () => {
         try {
