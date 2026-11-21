@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+<meta name="robots" content="noindex">
+<title>Send this to your coworker</title>
+<!--
+  duck's page for a plug that wants each person's sign-in (SPEC part 9). The service sends the person here
+  with its code and the link's state; the page turns them into one string for the person to send their
+  coworker, and loads nothing and sends nothing, so the code leaves only as the person sends it.
+-->
+<style>
+  :root { --ink: #1e3246; --ground: #f2efe6; --soft: #5b6b7a; --line: #d8d3c4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #f2efe6; --ground: #1e3246; --soft: #b5bfc9; --line: #3a5068; }
+  }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 17px/1.5 system-ui, sans-serif; }
+  main { max-width: 34rem; margin: 0 auto; padding: 3rem 16px; }
+  svg { width: 40px; height: 40px; }
+  h1 { font-size: 1.5rem; margin: 1rem 0 0.5rem; }
+  p { margin: 0.5rem 0; }
+  .soft { color: var(--soft); }
+  #string {
+    display: block; margin: 1.25rem 0; padding: 1rem; border: 1px solid var(--line); border-radius: 8px;
+    font: 15px/1.4 ui-monospace, monospace; word-break: break-all; user-select: all; -webkit-user-select: all;
+  }
+  button {
+    font: inherit; padding: 0.6rem 1.4rem; border-radius: 8px; border: 0; cursor: pointer;
+    background: var(--ink); color: var(--ground);
+  }
+  [hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="7.3 8.2 86 86" role="img" aria-label="duck"><path fill="currentColor" fill-rule="evenodd" d="M50 91 C44.5 91 40.6 88.2 38.2 83.6 L9.4 48.4 C6.8 45.2 7.4 40.6 11.6 40.2 C14 40 15.6 41.6 16.8 43.4 C24.5 50 37.5 46.5 45.2 30 L46.6 15.5 C47 11.4 53 11.4 53.4 15.5 L54.8 30 C62.5 46.5 75.5 50 83.2 43.4 C84.4 41.6 86 40 88.4 40.2 C92.6 40.6 93.2 45.2 90.6 48.4 L61.8 83.6 C59.4 88.2 55.5 91 50 91 Z"/></svg>
+  <section id="signed" hidden>
+    <h1>Send this to your coworker</h1>
+    <p>You signed in. Copy this and send it to your coworker now, wherever you talk with them. It works once,
+      and some services let it work only for a minute.</p>
+    <code id="string"></code>
+    <button id="copy" type="button">Copy</button>
+    <p id="copied" class="soft" aria-live="polite"></p>
+  </section>
+  <section id="failed" hidden>
+    <h1>The sign-in did not finish</h1>
+    <p id="why"></p>
+    <p>Ask your coworker for the link again, or open it again if you still have it.</p>
+  </section>
+</main>
+<script>
+  // A service sends the code in the query, or in the fragment where the link asks for response_mode=fragment,
+  // which no host's log holds. A fragment of the service's own that carries neither leaves the query to read.
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const given = fragment.has("code") || fragment.has("error") ? fragment : new URLSearchParams(location.search);
+  const [code, state] = [given.get("code"), given.get("state")];
+  // The code stays out of the browser's history and of any page this one could lead to.
+  history.replaceState(null, "", location.pathname);
+  if (code && state) {
+    // The code goes in base64url, so the string is one word whatever characters the service's codes hold.
+    const bytes = String.fromCharCode(...new TextEncoder().encode(code));
+    const string = `duck-sign-in:${state}:${btoa(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
+    document.getElementById("string").textContent = string;
+    const copied = document.getElementById("copied");
+    document.getElementById("copy").addEventListener("click", () =>
+      navigator.clipboard.writeText(string).then(
+        () => (copied.textContent = "Copied. Now send it to your coworker."),
+        () => (copied.textContent = "This browser would not copy it: select it above and copy it."),
+      ),
+    );
+    document.getElementById("signed").hidden = false;
+  } else {
+    const why = given.get("error_description") || given.get("error") || "The service sent no code.";
+    document.getElementById("why").textContent = why;
+    document.getElementById("failed").hidden = false;
+  }
+</script>
+</body>
+</html>

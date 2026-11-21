@@ -79,7 +79,17 @@ export type Plug = {
     { kind: string; id: string; about?: { kind: string; field: string }; label?: string }
   >;
   boxes?: string[];
+  /**
+   * Where the plug wants each person's own sign-in (SPEC part 9): the service's authorize address, whose own
+   * parameters duck keeps, and its token address, the firm's app's client id there, the name of the secret of
+   * its client secret where it has one, the scopes asked for, and the address of duck's page where the firm
+   * hosts it, which the person lands on.
+   */
+  signin?: { authorize: string; token: string; client: string; key?: string; scopes: string[]; page: string };
 };
+
+/** What a plug's `signin` names. */
+const SIGNIN = ["authorize", "token", "client", "scopes", "page"] as const;
 
 /**
  * A coworker's person: their name, their zone, their quiet hours there as two HH:MM times or none, their
@@ -355,6 +365,14 @@ export function secret(setup: Setup, name: string, coworker?: string): string {
   return line.slice(name.length + 1);
 }
 
+/** The keys and sign-ins duck keeps for coworker `coworker`, by name, read at each use. */
+export const keysOf = (setup: Setup, coworker: string): Record<string, string> =>
+  Object.fromEntries(
+    stored(keysFile(setup, coworker))
+      .filter(Boolean)
+      .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+  );
+
 /** Those of secrets `names` the firm's secret store lacks, each once. */
 export function lacking(setup: Setup, names: string[]) {
   const lines = stored(setup.secrets.file);
@@ -387,6 +405,7 @@ export function check(folder: string): string[] {
     ),
     ...claimed(setup).flatMap((c) => plugKeys(setup, c)),
     ...Object.values(setup.plugs ?? {}).flatMap((p) => (p.events?.push ? [p.events.push] : [])),
+    ...Object.values(setup.plugs ?? {}).flatMap((p) => (p.signin?.key ? [p.signin.key] : [])),
   ];
   for (const name of lacking(setup, named))
     problems.push(`the secret store ${setup.secrets.file} has no ${name}`);
@@ -495,6 +514,11 @@ export function check(folder: string): string[] {
           problems.push(`plug ${name}'s tool ${tool} makes a ${kind}; a link is one of: ${KINDS.join(", ")}`);
     for (const box of plug.boxes ?? [])
       if (!existsSync(box)) problems.push(`plug ${name}'s box ${box} does not exist`);
+    const lacks = SIGNIN.filter((part) => plug.signin && !plug.signin[part]?.length);
+    if (lacks.length > 0)
+      problems.push(
+        `plug ${name}'s signin names no ${lacks.join(", ").replace(/, (?=[^,]*$)/, " or ")}: a plug that wants each person's sign-in names its service's authorize and token addresses, the firm's app's client id there, the scopes it asks for and the page the person lands on`,
+      );
     const polled = plug.events?.poll?.tool;
     if (polled && (plug.tools?.[polled] || plug.others?.[polled]))
       problems.push(
