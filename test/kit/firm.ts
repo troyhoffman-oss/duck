@@ -106,7 +106,7 @@ type Setup = {
   compaction: { idle: string };
   jobs: { calls: number };
   settings: { quiet: string[]; one_message_per: string; answers?: string };
-  buzz?: { relay: string; owner?: string };
+  buzz?: { relay: string };
   doors: Record<string, Record<string, object>>;
   plugs: Record<
     string,
@@ -249,8 +249,8 @@ async function writeSetup(
  * containers, networks and volumes duck labels `duck.firm=<name>` are the only ones the kit stops, kills or
  * removes. `reach` says where the kit listens and how duck's containers reach it. With `login`, the firm
  * reaches a real model on the claude-login route, through the Claude login in that folder. With `buzz`, the
- * firm has that Buzz relay, duck's own identity there is authorized by the relay's owner where duck check names
- * its key, the coworker is claimed with the tag of the person there and has a door named buzz on it, and the
+ * firm has that Buzz relay, the relay's owner adds duck's own key there as an admin where duck check names it,
+ * the coworker is claimed with the tag of the person there and has a door named buzz on it, and the
  * person meets it there; with `text` the coworker has a door named text on
  * that line, and with `email` a door named email at that mail service. With `mail`, those of the mail plug's tools answer as the test declares them. With `sorter`, the
  * sorter runs in that mode. With `second`, the firm has a second person and coworker, at a desk door of its
@@ -453,18 +453,12 @@ export async function startFirm(
       writeFileSync(path, Bun.YAML.stringify(setup, null, 2));
     };
 
-    // As an admin's agent does: where duck check names duck's own Buzz key, the relay's owner authorizes it
-    // in Buzz and the setup takes her ownership proof, and she adds the key to the member list as an admin.
+    // As an admin's agent does: where duck check names duck's own Buzz key, the relay's owner adds it to the
+    // member list as an admin.
     const duckKey = given.buzz
       ? /duck's Buzz key is ([0-9a-f]{64})/.exec((await attempt("check")).out)?.[1]
       : undefined;
-    if (given.buzz && duckKey) {
-      const owner = given.buzz.tagFor(duckKey);
-      edit((setup) => {
-        if (setup.buzz) setup.buzz.owner = owner;
-      });
-      await given.buzz.makeAdmin(duckKey);
-    }
+    if (given.buzz && duckKey) await given.buzz.makeAdmin(duckKey);
     /** Makes `coworker` for the person `handle` names, and returns its Buzz key. */
     const make = async (coworker: string, handle: string) =>
       (/its Buzz key is ([0-9a-f]{64})/.exec(await run("make", coworker, handle)) as string[])[1] as string;

@@ -276,7 +276,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     E2E,
   );
 
-  test.failing(
+  test(
     "a duck the owner makes a member again says the owner's step once in its log, and duck check names duck's key and that step as still to do until the owner makes it an admin again",
     async () => {
       const told = `duck's Buzz key ${duck()} is not an admin`;

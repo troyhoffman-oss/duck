@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { schnorr } from "@noble/curves/secp256k1.js";
 
-/** An identity in Buzz: its secret key in hex, its owner's NIP-OA auth tag as Buzz copies it, and its relay. */
-export type Identity = { key: string; owner: string; relay: string };
+/** An identity in Buzz: its secret key in hex, its relay, and for an agent, its owner's NIP-OA auth tag. */
+export type Identity = { key: string; relay: string; owner?: string };
 
 /** A signed Nostr event, as the relay holds it. */
 export type Event = {
@@ -20,13 +20,13 @@ const now = () => Math.floor(Date.now() / 1000);
 const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1] ?? "";
 
 /**
- * Event `kind` with `tags` and `content`, made at `created_at`, signed as `who` with its owner's tag, as Buzz's
- * CLI signs every event.
+ * Event `kind` with `tags` and `content`, made at `created_at`, signed as `who`, with its owner's tag where it
+ * is an agent, as Buzz's CLI signs every event of one.
  */
 function sign(who: Identity, created_at: number, kind: number, tags: string[][], content: string): Event {
   const secret = Buffer.from(who.key, "hex");
   const pubkey = hex(schnorr.getPublicKey(secret));
-  const all = [...tags, JSON.parse(who.owner) as string[]];
+  const all = who.owner ? [...tags, JSON.parse(who.owner) as string[]] : tags;
   const id = createHash("sha256")
     .update(JSON.stringify([0, pubkey, created_at, kind, all, content]))
     .digest();
@@ -34,17 +34,22 @@ function sign(who: Identity, created_at: number, kind: number, tags: string[][],
 }
 
 /**
- * Holds `who`'s connection to its relay (NIP-42, with the owner's tag) and hands `handler` once each artifact
+ * Holds `who`'s connection to its relay (NIP-42) and hands `handler` once each artifact
  * revision (kind 45010, NIP-AR) someone else writes, from when it starts, in a system channel (NIP-CL) `who`
  * made, with that channel's label. The channels are the relay's own record of those `who` made (39000, which no
  * client writes), asked again at each sign-in and each membership notice (44100, 44101) to `who`, since a
  * subscription's channels are fixed when sent; a notice's content decides nothing. The relay sends a notice of a
  * system channel only to a filter that names that type (buzz-relay src/handlers/side_effects.rs:1318-1327).
  * Revisions the relay holds from before a subscription's end of stored events come oldest first, as written. It
- * connects again when the relay goes, and 5 minutes after a refused sign-in, until closed. Returns what
- * publishes an event as `who`, what asks the relay, and the channel `who` made for a label.
+ * connects again when the relay goes, until closed, and after a refused sign-in, logged when its reason is new,
+ * in 5 minutes, or in one, telling `notMember`, where `who` is not on the member list. Returns what publishes
+ * an event as `who`, what asks the relay, and the channel `who` made for a label.
  */
-export function connect(who: Identity, handler: (revision: Event, label: string) => void) {
+export function connect(
+  who: Identity,
+  handler: (revision: Event, label: string) => void,
+  notMember = () => {},
+) {
   const me = hex(schnorr.getPublicKey(Buffer.from(who.key, "hex")));
   const what = `the Buzz connection of ${me.slice(0, 8)}`;
   const started = now();
@@ -62,7 +67,7 @@ export function connect(who: Identity, handler: (revision: Event, label: string)
   const seen = new Map<string, number>();
   let socket: WebSocket | undefined;
   let [current, closed] = [undefined as WebSocket | undefined, false];
-  let signedIn = () => {};
+  let [signedIn, refused] = [() => {}, ""];
   let ready = new Promise<void>((resolve) => (signedIn = resolve));
   /** Signed in now or within 10 s, so nothing waits on a relay that is gone. */
   const soon = () =>
@@ -171,11 +176,15 @@ export function connect(who: Identity, handler: (revision: Event, label: string)
         send("AUTH", auth);
       } else if (type === "OK" && a === signIn) {
         if (b !== true) {
-          console.error(`${what} was refused, so it tries again in 5 minutes: ${c}`);
-          wait = 300_000;
+          // buzz-relay src/handlers/auth.rs:786-790
+          const outside = c.includes("not a relay member");
+          wait = outside ? 60_000 : 300_000;
+          if (c !== refused) console.error(`${what} was refused, so it tries again every ${wait / 60_000} min: ${c}`);
+          refused = c;
+          if (outside) notMember();
           return ws.close();
         }
-        socket = ws;
+        [socket, refused] = [ws, ""];
         signedIn();
         send("REQ", "notices", { kinds: [44100, 44101], "#p": [me], "#t": ["system"] });
         resync();
@@ -245,6 +254,8 @@ export function connect(who: Identity, handler: (revision: Event, label: string)
       });
     },
     query,
+    /** Resolves once `who` is signed in. */
+    ready: () => ready,
     /** The oldest system channel `who` made labelled `label`, by the relay's record once asked, or none. */
     channel: async (label: string) => {
       await soon();

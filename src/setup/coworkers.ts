@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import {
+  adminFile,
   checkName,
   type Facts,
   factsFile,
@@ -122,51 +123,21 @@ export function claim(setup: Setup, name: string, tag: string, person: string, h
 }
 
 /** duck's own Buzz key, in hex, in a file in its storage that only duck reads, made the first time it is asked for. */
-function duckKey(setup: Setup) {
+export function duckKey(setup: Setup) {
   const file = join(setup.storage.folder, "keys.env");
   if (!existsSync(file)) write(file, `BUZZ_KEY=${hex(schnorr.utils.randomSecretKey())}\n`, 0o600);
   return readFileSync(file, "utf8").trim().slice("BUZZ_KEY=".length);
 }
 
-/** Whether `owner`, an ownership proof as Buzz copies it, signs Buzz key `key`. */
-function proves(owner: string | undefined, key: string) {
-  try {
-    return signs(JSON.parse(owner ?? "[]"), key);
-  } catch {
-    return false;
-  }
-}
-
-/** duck's own Buzz key's public key, in hex. */
-const duckPublic = (setup: Setup) => hex(schnorr.getPublicKey(Buffer.from(duckKey(setup), "hex")));
-
-/** The owner's step that makes duck's key an admin, which the plugin knows duck by (SPEC part 11). */
+/** The owner's step that makes duck's key an admin: duck signs in and the plugin knows it by that (SPEC part 11). */
 export const ADMIN_STEP =
-  "the community's owner opens Settings, then Community admin, then Membership, chooses Add directly, puts that key in Public identity, chooses the role Admin and presses Add member";
+  "the community's owner opens Settings, then Community admin, then Membership, chooses Add directly, puts that key in Public identity, chooses the role Admin and presses Add member, or where Membership lists that key already, chooses Make admin on it";
 
-const STEPS = `in Buzz's desktop app the community's owner or an admin opens Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), puts that key in Application public key (hex), presses Authorize identity and then Authorize this key, presses Copy ownership proof and puts the proof in duck.yaml as buzz.owner in single quotes, since Buzz copies it as a JSON list; then ${ADMIN_STEP}`;
-
-/** What is wrong with duck's own identity where the firm has Buzz: a proof in the setup that does not sign its key. */
-export function identityProblems(setup: Setup) {
-  if (!setup.buzz?.owner) return [];
-  const key = duckPublic(setup);
-  return proves(setup.buzz.owner, key)
-    ? []
-    : [`buzz.owner does not sign duck's own Buzz key ${key}: ${STEPS}`];
-}
-
-/** What is still to do where the firm has Buzz and the setup holds no proof of duck's own identity yet. */
-export function identityToDo(setup: Setup) {
-  return setup.buzz && !setup.buzz.owner
-    ? [
-        `still to do: duck's Buzz key is ${duckPublic(setup)}; ${STEPS}. Until then duck's channels are off, and coworkers are made and claimed with duck make and duck claim`,
-      ]
-    : [];
-}
-
-/** duck's own identity in Buzz where the setup's proof signs its key; with none, duck's channels are off. */
-export function identity(setup: Setup) {
-  const owner = setup.buzz?.owner;
-  if (setup.buzz && owner && proves(owner, duckPublic(setup)))
-    return { key: duckKey(setup), owner, relay: setup.buzz.relay };
+/** What is still to do where the firm has Buzz and the running duck has not found its key an admin there. */
+export function adminToDo(setup: Setup) {
+  if (!setup.buzz || existsSync(adminFile(setup))) return [];
+  const key = hex(schnorr.getPublicKey(Buffer.from(duckKey(setup), "hex")));
+  return [
+    `still to do: duck's Buzz key is ${key}; ${ADMIN_STEP}. The running duck finds it within a minute; until then duck's channels are off, and coworkers are made with no member and claimed with duck make and duck claim`,
+  ];
 }

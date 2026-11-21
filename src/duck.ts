@@ -10,7 +10,7 @@ import { modelRelay } from "./model-relay";
 import { type Coworker, startCoworker } from "./run";
 import { check, claimed, container, factsOf, gives, made, NIGHTLY, personOf, readSetup } from "./setup";
 import { backup, restore } from "./setup/backup";
-import { claim, identityToDo, make } from "./setup/coworkers";
+import { adminToDo, claim, make } from "./setup/coworkers";
 import { install, LOGIN } from "./setup/install";
 import { DREAM, useTimers } from "./timers";
 
@@ -135,7 +135,7 @@ const [command] = process.argv.slice(2);
 if (command === "check") {
   const problems = check(process.cwd());
   for (const problem of problems) console.log(problem);
-  for (const line of identityToDo(readSetup(process.cwd()))) console.log(line);
+  for (const line of adminToDo(readSetup(process.cwd()))) console.log(line);
   console.log(problems.length === 0 ? "the setup is ready to install" : `${problems.length} problems`);
   process.exit(problems.length === 0 ? 0 : 1);
 } else if (command === "install") await install(process.cwd());

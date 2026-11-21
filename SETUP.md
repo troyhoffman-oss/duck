@@ -85,21 +85,21 @@ On the login route, `model.route` is `claude-login`, `model.login` is a folder o
 
 Check: `duck check` prints no line about `model` or the Claude login.
 
-## 7. Authorize duck in the firm's Buzz community
+## 7. Add duck to the firm's Buzz community
 
-Run `duck check`. With `buzz.relay` set and no proof yet, its last lines include one that begins `still to do: duck's Buzz key is` and a 64-character key. Give that key to the community's owner or admin from question 2, with the steps exactly as duck words them; the last step only the owner can take:
+Run `duck check`. With `buzz.relay` set, its last lines include one that begins `still to do: duck's Buzz key is` and a 64-character key, until the running duck has found that key an admin in the community. Give the key to the community's owner from question 2, with the step exactly as duck words it; only the owner can take it:
 
-> in Buzz's desktop app the community's owner or an admin opens Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), puts that key in Application public key (hex), presses Authorize identity and then Authorize this key, presses Copy ownership proof and puts the proof in duck.yaml as buzz.owner in single quotes, since Buzz copies it as a JSON list; then the community's owner opens Settings, then Community admin, then Membership, chooses Add directly, puts that key in Public identity, chooses the role Admin and presses Add member
+> the community's owner opens Settings, then Community admin, then Membership, chooses Add directly, puts that key in Public identity, chooses the role Admin and presses Add member, or where Membership lists that key already, chooses Make admin on it
 
-The plugin knows duck only by that admin role. The proof is not a secret. Put it in `duck.yaml` as `buzz.owner: '<proof>'` and commit. Until it is there duck's channels are off, and coworkers can still be made and claimed with `duck make` and `duck claim` (step 9, second path).
+Nothing comes back to the server and the setup holds nothing about it. duck shows in the member list as an admin named duck, and the plugin knows duck only by that role. Once step 8's install is up, the running duck finds the key an admin within a minute. Until then duck's channels are off, and coworkers can still be made with no member and claimed with `duck make` and `duck claim` (step 9, second path).
 
-Check: `duck check` prints no `still to do` line and no line about `buzz.owner`. After step 8's install, duck's log (`podman logs duck-<firm>`) has no line that duck's Buzz key is not an admin on the community's member list.
+Check: after step 8's install and the owner's step, `duck check` prints no `still to do` line, and duck's log (`podman logs duck-<firm>`) has no line after the owner's step that duck's Buzz key is not an admin on the community's member list.
 
 ## 8. Check and install
 
 Run `duck check` and fix each line it prints until its last line is `the setup is ready to install` and it exits 0. A `still to do` line above it does not stop an install; step 7 deals with it. Then run `duck install`. The first install builds duck's two images, which takes a while.
 
-Check: `duck install` exits 0 and its last line is `duck: started`. `podman ps --filter label=duck.firm=<firm>` shows `duck-<firm>` up. `systemctl --user is-enabled duck-firm-<firm>.service` prints `enabled`. With duck's channels on, `systemctl --user is-active duck-firm-<firm>-install.path` prints `active`.
+Check: `duck install` exits 0 and its last line is `duck: started`. `podman ps --filter label=duck.firm=<firm>` shows `duck-<firm>` up. `systemctl --user is-enabled duck-firm-<firm>.service` prints `enabled`. With `buzz.relay` set, `systemctl --user is-active duck-firm-<firm>-install.path` prints `active`.
 
 ## 9. Make the first coworker, and its person claims it
 
@@ -153,14 +153,14 @@ In `<duck>`, check out the newer commit of `main` and run `bun install --product
 
 - `duck check` names each problem on a line of its own, with what to do.
 - `duck install` stops at the first failure: `the setup has problems; run duck check:` with the lines; a podman command and podman's own error; or `duck is not ready after 120 s; see podman logs duck-<firm>`.
-- duck's log is `duck.log` in the storage folder. It outlives a new container. It holds, among the rest, a backup that failed, an offer not sent, and `duck's channels are off: …` when the setup holds no proof.
+- duck's log is `duck.log` in the storage folder. It outlives a new container. It holds, among the rest, a backup that failed, an offer not sent, and `duck's Buzz key … is not an admin on the community's member list …` until the owner's step of step 7.
 - A coworker's goose: `podman logs duck-<firm>-<coworker>`.
 - An install a claim from the plugin started: `journalctl --user -u duck-firm-<firm>-install.service`.
 
 ## Reference
 
 - **Commands.** `duck --help` lists them: `check`, `install`, `make`, `claim`, `import`, `backup`, `restore`.
-- **duck.yaml.** [examples/harbor/duck.yaml](examples/harbor/duck.yaml) has the keys a firm sets, each with a comment. Keys it leaves out: `buzz.owner` (step 7), `model.login` (step 6), `settings.locked`, `buzz.tools`, a plug's `others`, a text door's `line` and `auth`, and an email door. The type `Setup` in [src/setup/index.ts](src/setup/index.ts) lists every key duck reads, and SPEC.md part 1 says what each means. `duck check` refuses a setup that lists people or coworkers: duck keeps those itself.
+- **duck.yaml.** [examples/harbor/duck.yaml](examples/harbor/duck.yaml) has the keys a firm sets, each with a comment. Keys it leaves out: `model.login` (step 6), `settings.locked`, `buzz.tools`, a plug's `others`, a text door's `line` and `auth`, and an email door. The type `Setup` in [src/setup/index.ts](src/setup/index.ts) lists every key duck reads, and SPEC.md part 1 says what each means. `duck check` refuses a setup that lists people or coworkers: duck keeps those itself.
 - **Model routes.** `api-key` and `claude-login` (SPEC part 12).
 - **Doors.** Every claimed coworker has a `buzz` door, which duck makes at `buzz.relay`. The setup may add, under `doors.<coworker>`, an `http` door, a `text` door with a `line` and an `auth`, which `duck check` reads as the name of a secret, or an `email` door: `kind: email`, `address` the mail service's API (`https://api.agentmail.to` for AgentMail, the first service), `mailbox` the coworker's own address there, `key` the name of the secret holding a key scoped to that one mailbox, and `auth` the name of the secret holding the person's own mail address. The email door opens no port: it holds the service's stream.
 - **Plugs.** One entry under `plugs` each: an address, headers that name secrets, the coworkers it is given to (`everyone` or a list), its tools' states (`free`, `ask first`, `removed`), and how its events arrive, pushed or polled (SPEC part 1, Plugs).

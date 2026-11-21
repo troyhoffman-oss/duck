@@ -5,7 +5,6 @@ import { KINDS } from "../list";
 import { routes } from "../model-relay";
 import { loginProblems } from "../model-relay/claude-login";
 import { questions } from "../sorter";
-import { identityProblems } from "./coworkers";
 
 /**
  * A coworker's door. At an `http` door, `key` names the secret both sides send. At a `text` door, `address`
@@ -151,11 +150,10 @@ export type Setup = {
   /** The firm's default for each coworker's settings (SPEC part 1, Settings). */
   settings: { quiet: [string, string]; one_message_per?: string; answers?: string; locked?: string[] };
   /**
-   * The firm's Buzz relay, where each claimed coworker has its buzz door; the ownership proof of duck's own
-   * identity there, as Buzz copies it; and the states of the commands of Buzz's CLI that its `buzz` tool runs,
-   * named by their leading words, with `*` for the rest (SPEC part 9).
+   * The firm's Buzz relay, where each claimed coworker has its buzz door, and the states of the commands of
+   * Buzz's CLI that its `buzz` tool runs, named by their leading words, with `*` for the rest (SPEC part 9).
    */
-  buzz?: { relay: string; owner?: string; tools?: Record<string, string> };
+  buzz?: { relay: string; tools?: Record<string, string> };
   plugs?: Record<string, Plug>;
   /** The doors a named coworker has beyond its buzz door. */
   doors?: Record<string, Record<string, Door>>;
@@ -180,6 +178,8 @@ export const factsFile = (setup: Setup, coworker: string) =>
 export const keysFile = (setup: Setup, coworker: string) => join(setup.storage.folder, coworker, "keys.env");
 /** The empty file a claim from Buzz leaves for the host's duck install; with a dot, no coworker is named so. */
 export const installFile = (setup: Setup) => join(setup.storage.folder, "install.wanted");
+/** When the running duck found its Buzz key an admin, while it is one; with a dot, no coworker is named so. */
+export const adminFile = (setup: Setup) => join(setup.storage.folder, "admin.since");
 
 /**
  * The settings coworker `coworker`'s person changed, or with none, the firm's admins, which only duck's code
@@ -426,7 +426,6 @@ export function check(folder: string): string[] {
   for (const [command, state] of Object.entries(setup.buzz?.tools ?? {}))
     if (!TOOL_STATES.includes(state))
       problems.push(`buzz's command ${command} is "${state}"; a tool is one of: ${TOOL_STATES.join(", ")}`);
-  problems.push(...identityProblems(setup));
   const coworkers = made(setup);
   const unmade = (where: string, coworker: string) =>
     !coworkers.includes(coworker) &&

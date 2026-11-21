@@ -72,7 +72,7 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     }
   }
 
-  test.failing(
+  test(
     "duck's offer shows in the person's New agent, signed by duck's own key with no owner's tag, as is duck's profile, named duck",
     async () => {
       const made = await firm.duck("make", "lark", "ana", "Ana");

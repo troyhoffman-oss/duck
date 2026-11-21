@@ -20,7 +20,6 @@ import {
   readSetup,
   type Setup,
 } from ".";
-import { identity } from "./coworkers";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const CONTAINERFILE = join(import.meta.dir, "Containerfile");
@@ -192,15 +191,15 @@ function boot(firm: string) {
 }
 
 /**
- * While duck's channels are on, writes and starts the path unit that runs duck install in `folder` when a claim
- * or a stop there leaves its empty file in storage, since the duck container has no podman; with it off, takes
+ * Where the setup has Buzz, writes and starts the path unit that runs duck install in `folder` when a claim or
+ * a stop from there leaves its empty file in storage, since the duck container has no podman; without, takes
  * them away. The service takes the file before it installs, and systemd looks for it again when the service
  * ends, so a claim made during an install gets an install of its own.
  */
 function claims(setup: Setup, folder: string) {
   const [path, service] = [`duck-firm-${setup.firm}-install.path`, `duck-firm-${setup.firm}-install.service`];
   const trigger = installFile(setup);
-  if (!identity(setup)) {
+  if (!setup.buzz) {
     if (!existsSync(join(UNITS, path))) return;
     exec("systemctl", ["--user", "disable", "--now", path]);
     for (const file of [path, service]) unlinkSync(join(UNITS, file));

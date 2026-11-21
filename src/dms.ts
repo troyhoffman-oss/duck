@@ -1,10 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Event } from "./buzz";
 import { type Item, shown } from "./list";
 import { monthCosts, monthOf } from "./model-relay";
 import {
+  adminFile,
   container,
   factsOf,
   installFile,
@@ -20,7 +21,7 @@ import {
   settingsOf,
   zoneOf,
 } from "./setup";
-import { ADMIN_STEP, buzzKey, claim, identity, signs, write, writeFacts } from "./setup/coworkers";
+import { ADMIN_STEP, adminToDo, buzzKey, claim, duckKey, signs, write, writeFacts } from "./setup/coworkers";
 import { rezone } from "./timers";
 
 /**
@@ -63,18 +64,17 @@ const LIMIT = /^set model calls per job ([1-9]\d{0,3})$/;
 const LIMITED = "Done: a job's run is cut off at that many model calls from its next call.";
 const NOT_ADMIN = "Only an owner or admin of this community sets that, so nothing changed.";
 
-const OFF =
-  "duck's channels are off: the setup holds no ownership proof of duck's Buzz key; duck check says how";
 const NOT_LISTED = (key: string) =>
-  `duck's Buzz key ${key} is not an admin on the community's member list, so the plugin shows nothing from duck; to make it one, ${ADMIN_STEP}`;
+  `duck's Buzz key ${key} is not an admin on the community's member list, so duck's channels are off; to make it one, ${ADMIN_STEP}`;
 
 /** First value of tag `name` on `event`, or "". */
 const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1] ?? "";
 
 /**
- * duck in its channels (SPEC part 11, duck's channel), once the setup's proof signs its key: a person's request
- * (a `duck.request` artifact the plugin writes) that is an ownership proof is a claim, and one in a fixed form
- * changes a coworker of theirs; duck answers each with its revision of that request, in fixed words. Each
+ * duck in its channels (SPEC part 11, duck's channel), where the setup has Buzz, signed in as its own key, once
+ * it finds that key an admin on the member list: a person's request (a `duck.request` artifact the plugin
+ * writes) that is an ownership proof is a claim, and one in a fixed form changes a coworker of theirs; duck
+ * answers each with its revision of that request, in fixed words. Each
  * coworker made for a person is offered to them, at start and when `duck make` says (SIGHUP). The writer is the
  * key that signed the request, which the relay takes only from that key signed in (NIP-42), and duck takes a
  * request only in the channel it made for that writer. One that carries an owner's tag is an agent's and gets
@@ -82,16 +82,15 @@ const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === na
  * offers and what duck publishes go one at a time, since the connection asks one query at a time.
  */
 export function talk(setup: Setup) {
-  const me = identity(setup);
-  if (!me) return setup.buzz && console.error(OFF);
-  let sending = Promise.resolve();
+  if (!setup.buzz) return;
+  let sending: Promise<unknown> = Promise.resolve();
   /** `step` once the claims, changes and offers before it are done. */
   const after = (step: () => Promise<string>) => {
     const done = sending.then(step);
     sending = done.then(() => {}).catch(() => {});
     return done;
   };
-  const duck = connect(me, (asked, label) => {
+  const duck = connect({ key: duckKey(setup), relay: setup.buzz.relay }, (asked, label) => {
     if (tagOf(asked, "type") !== "duck.request" || tagOf(asked, "op") !== "create" || tagOf(asked, "auth"))
       return;
     const [text, writer] = [asked.content.trim(), asked.pubkey];
@@ -108,7 +107,9 @@ export function talk(setup: Setup) {
         revise(duck, [tagOf(asked, "h"), tagOf(asked, "d")], ["duck.request", "Request", answer], asked),
       )
       .catch((e: Error) => console.error(`an answer: ${e.message}`));
-  });
+  }, () => admitted(setup, duck.me, false));
+  // Nothing goes out, and no request is answered, until duck first finds itself an admin.
+  sending = inList(setup, duck);
   const offerAll = () => {
     sending = sending
       .then(() => offer(setup, duck))
@@ -147,13 +148,26 @@ export function talk(setup: Setup) {
     firmChanged();
     for (const name of running.keys()) listed(name);
   }, 600_000);
-  duck
-    .send(0, [], JSON.stringify({ name: "duck", about: "The service your firm's coworkers run on." }))
-    .catch((e: Error) => console.error(`duck's profile: ${e.message}`));
-  // The plugin knows duck only by a key the member list names as an admin.
-  admins(setup, duck)
-    .then((all) => all.includes(duck.me) || console.error(NOT_LISTED(duck.me)))
-    .catch((e: Error) => console.error(`duck's place on the member list: ${e.message}`));
+  after(() => duck.send(0, [], JSON.stringify({ name: "duck", about: "The service your firm's coworkers run on." }))).catch(
+    (e: Error) => console.error(`duck's profile: ${e.message}`),
+  );
+}
+
+/** Resolves once duck finds its key an admin on the member list, read once signed in and each minute until then. */
+async function inList(setup: Setup, duck: ReturnType<typeof connect>) {
+  const out = () => admins(setup, duck).then((all) => !all.includes(duck.me), () => true);
+  while (await duck.ready().then(out)) await Bun.sleep(60_000);
+}
+
+/** Whether duck has said it is off the member list since it last found itself on it. */
+let told = false;
+
+/** Records for duck check whether duck's key `me` is an admin, as duck last found, and says once when it is not. */
+function admitted(setup: Setup, me: string, admin: boolean) {
+  if (admin && !existsSync(adminFile(setup))) write(adminFile(setup), `${new Date().toISOString()}\n`);
+  if (!admin && !told) console.error(NOT_LISTED(me));
+  if (!admin) rmSync(adminFile(setup), { force: true });
+  told = !admin;
 }
 
 /**
@@ -288,9 +302,11 @@ async function relayKey(relay: string) {
 async function admins(setup: Setup, duck: ReturnType<typeof connect>) {
   const signer = await relayKey(setup.buzz?.relay ?? "");
   const [members] = await duck.query({ kinds: [13534], authors: [signer], limit: 1 });
-  return (members?.tags ?? [])
+  const all = (members?.tags ?? [])
     .filter(([tag, , role]) => tag === "member" && (role === "owner" || role === "admin"))
     .map(([, key]) => key as string);
+  admitted(setup, duck.me, all.includes(duck.me));
+  return all;
 }
 
 /**
@@ -568,10 +584,10 @@ function nameOf(profile: Event) {
  * it is, or the one person, not an agent, whose Buzz name it is without regard to case.
  */
 export async function member(setup: Setup, given: string) {
-  const me = identity(setup);
-  if (!me) throw new Error(OFF);
+  if (!setup.buzz || !existsSync(adminFile(setup))) throw new Error(adminToDo(setup)[0] ?? "the setup has no Buzz");
   if (/^[0-9a-f]{64}$/.test(given)) return given;
   const wanted = given.trim().toLowerCase();
+  const me = { key: duckKey(setup), relay: setup.buzz.relay };
   const people = (await connect(me, () => {}).query({ kinds: [0] })).filter(
     (p) => wanted !== "" && !p.tags.some((t) => t[0] === "auth") && nameOf(p).toLowerCase() === wanted,
   );
@@ -583,16 +599,13 @@ export async function member(setup: Setup, given: string) {
 
 /**
  * The key of the person `member` names for `duck make`, which the firm's running duck looks up, as only it
- * reaches Buzz as duck; with duck's channels off, or that duck not running, it refuses.
+ * reaches Buzz as duck; until it has found its key an admin there, or with that duck not running, it refuses.
  */
 export function personFor(setup: Setup, member: string) {
-  if (!identity(setup)) throw new Error(OFF);
   const ask = ["podman", "exec", container(setup.firm), "bun", "src/duck.ts", "member", member];
   const asked = Bun.spawnSync(ask, { stdout: "pipe", stderr: "pipe" });
   if (asked.exitCode === 0) return asked.stdout.toString().trim();
   if (asked.exitCode === 1)
     throw new Error(asked.stderr.toString().trim() || "duck could not reach Buzz in 30 s");
-  throw new Error(
-    "duck's channels are off while the firm's duck container is not running; duck install starts it",
-  );
+  throw new Error("the firm's duck container is not running, and only it finds members; duck install starts it");
 }
