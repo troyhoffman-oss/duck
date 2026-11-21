@@ -19,7 +19,7 @@ import { AT_ONCE, checkerText, ended, endRef, type Job, moved, resume, take, wor
 import { gained, openItems, useList } from "../list";
 import { history, memory, upTo } from "../notes";
 import { answeredBy, due, openAsks, type Row, settle, tells } from "../outbox";
-import { container, doorsOf, duckAddress, HOME, jobCalls, ms, personOf, type Setup } from "../setup";
+import { container, doorsOf, duckAddress, HOME, isTeam, jobCalls, ms, personOf, type Setup } from "../setup";
 import { GOOSE_PORT } from "../setup/install";
 import { line, logLine, screen } from "../sorter";
 import { dreaming, tick } from "../timers";
@@ -261,8 +261,8 @@ export function startCoworker(setup: Setup, name: string) {
    * slowest-changing first (SPEC part 5), then `words`. The standing words, the notes' lines and the list
    * are shown where they changed since `s` last saw them, since a session's history holds what it saw, and so
    * are the lines the open items' logs gained since its last run began. Only a work-lane run is shown the last
-   * messages sent, since the main conversation's own history holds them. A run that is not `mine`, an others
-   * run, is shown none of the person's own (SPEC part 11).
+   * messages sent, since the main conversation's own history holds them; a team coworker's request is not
+   * (SPEC part 14). A run that is not `mine`, an others run, is shown none of the person's own (SPEC part 11).
    */
   function begin(s: string, events: Event[], words: string, mine = true) {
     const ids = events.map((e) => e.id);
@@ -272,7 +272,7 @@ export function startCoworker(setup: Setup, name: string) {
       ? ` These tool calls have no known result: ${cut.join("; ")}. Check before repeating one.`
       : "";
     const note = cut ? `Note from duck: your last run was cut short by a restart.${unknown}\n\n` : "";
-    const sent = s === session || !mine ? [] : lastTold(db);
+    const sent = s === session || !mine || othersIn(db, s) ? [] : lastTold(db);
     const told =
       sent.length > 0
         ? `Note from duck: the last messages you sent ${person.name}, oldest first.\n${sent.join("\n")}\n\n`
@@ -503,9 +503,11 @@ export function startCoworker(setup: Setup, name: string) {
   /**
    * The others lane (SPEC part 11): what others write at a door that answers them, one run at a time, each
    * thread in a session of its own that has the gate's others tools and none of goose's extensions, so no
-   * shell and no file tools. What a run ends on is posted in its thread. An event that goes on a thread, or
-   * an ask's outcome, resumes the thread's session.
+   * shell and no file tools. A team coworker's is its requests (SPEC part 14): each thread's session works in
+   * its home with its own memory, list and tools, as the work lane does. What a run ends on is posted in its
+   * thread. An event that goes on a thread, or an ask's or a job's outcome, resumes the thread's session.
    */
+  const team = isTeam(setup, name);
   const othersLane = lane("others lane", () => {
     if (paused()) return;
     const of = (e: Event) =>
@@ -518,7 +520,7 @@ export function startCoworker(setup: Setup, name: string) {
     const batch = events.filter((e) => key(e) === k);
     const note = `Note from duck: this run answers someone other than ${person.name}. What you end it on goes to them where they wrote.\n\n`;
     return () =>
-      runIn(s, batch, othersAt, note + cameIn(batch), false, async (s) => {
+      runIn(s, batch, team ? workAt : othersAt, note + cameIn(batch), team, async (s) => {
         const [answer, where] = [await lastSaid(s), othersIn(db, s)];
         if (answer && where) void answerOthers(coworker, where, answer);
       });

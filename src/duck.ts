@@ -140,11 +140,11 @@ if (command === "check") {
   process.exit(problems.length === 0 ? 0 : 1);
 } else if (command === "install") await install(process.cwd());
 else if (command === "make") {
-  const [coworker = "", handle, named] = process.argv.slice(3);
+  const [coworker = "", handle, named, channel] = process.argv.slice(3);
   const firm = readSetup(process.cwd());
   // The running duck finds the person, and is told (SIGHUP) to offer them the coworker once it is made.
   const person = named === undefined ? undefined : personFor(firm, named);
-  const key = make(process.cwd(), coworker, handle, person);
+  const key = make(process.cwd(), coworker, handle, person, channel);
   if (person) Bun.spawnSync(["podman", "kill", "--signal", "HUP", container(firm.firm)]);
   console.log(`duck made coworker ${coworker}; its Buzz key is ${key}`);
 } else if (command === "claim") {
@@ -180,7 +180,7 @@ else if (command === "member") {
 } else if (command === "buzz") await face(process.argv[3] ?? "");
 else {
   console.log(
-    "duck check: says what is wrong with the setup in this folder\nduck install: makes the running system match it\nduck make <coworker> [handle] [member]: makes a coworker, for the person the handle names if given, and prints its Buzz key; with the person's Buzz name or key as member, duck offers it to them in duck's plugin in Buzz\nduck claim <coworker> <tag> <name> [handle]: gives the coworker to the person whose NIP-OA auth tag signs its Buzz key, named <name>, and installs\nduck import <coworker> <kind> <path>: loads a person's history from before into the coworker's archive, and from an earlier agent's folder what it remembered and scheduled into before/ in the coworker's home\nduck backup: copies every coworker's database and stored files to the setup's bucket now\nduck restore <coworker> [time]: brings a coworker's folder back from its newest copy, or the newest whose UTC time starts with [time]; run it with the firm's duck stopped, then duck install",
+    "duck check: says what is wrong with the setup in this folder\nduck install: makes the running system match it\nduck make <coworker> [handle] [member] [channel]: makes a coworker, for the person the handle names if given, and prints its Buzz key; with the person's Buzz name or key as member, duck offers it to them in duck's plugin in Buzz; with its team's channel, by its Buzz id, it is a team coworker, which anyone in the community may ask by mentioning it\nduck claim <coworker> <tag> <name> [handle]: gives the coworker to the person whose NIP-OA auth tag signs its Buzz key, named <name>, and installs\nduck import <coworker> <kind> <path>: loads a person's history from before into the coworker's archive, and from an earlier agent's folder what it remembered and scheduled into before/ in the coworker's home\nduck backup: copies every coworker's database and stored files to the setup's bucket now\nduck restore <coworker> [time]: brings a coworker's folder back from its newest copy, or the newest whose UTC time starts with [time]; run it with the firm's duck stopped, then duck install",
   );
   process.exit(command === "--help" ? 0 : 2);
 }

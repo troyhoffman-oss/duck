@@ -43,12 +43,18 @@ export const buzzKey = (setup: Setup, coworker: string) =>
 /**
  * Makes coworker `name` in the setup in `folder`, for the person `handle` names where given (SPEC part 1): its
  * facts, unclaimed, and a Buzz key of its own, in its folder. A folder duck kept from before keeps what it
- * holds. Where given, `person` is the Buzz key of the person duck offers it to. Returns the Buzz key's public
- * key, which its person's claim signs.
+ * holds. Where given, `person` is the Buzz key of the person duck offers it to, and `channel` the Buzz id of
+ * its team's channel, which makes it a team coworker (SPEC part 14). Returns the Buzz key's public key, which
+ * its person's claim signs.
  */
-export function make(folder: string, name: string, handle?: string, person?: string) {
+export function make(folder: string, name: string, handle?: string, person?: string, channel?: string) {
   const setup = readSetup(folder);
   checkName(name);
+  // Buzz names a channel by a UUID; duck looks no name up.
+  if (channel !== undefined && !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(channel))
+    throw new Error(`"${channel}" is not a channel's Buzz id, a UUID such as Buzz's channel list shows`);
+  if (channel !== undefined && !setup.buzz)
+    throw new Error("a team coworker is asked in Buzz, and the setup names no Buzz relay");
   if (existsSync(factsFile(setup, name))) throw new Error(`duck has made coworker ${name} already`);
   // A claim from Buzz gives no handle, so a coworker made for a person has theirs now; "" is no handle.
   if (handle !== undefined || person) checkHandle(setup, name, handle ?? "");
@@ -69,6 +75,7 @@ export function make(folder: string, name: string, handle?: string, person?: str
     made_at: at,
     claimed_at: null,
     ...(person && { for: person }),
+    ...(channel && { channel }),
   });
   return buzzKey(setup, name);
 }

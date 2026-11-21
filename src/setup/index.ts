@@ -14,7 +14,7 @@ import { questions } from "../sorter";
  * a key to that mailbox and `auth` the person's own mail address. At a `voice` door, a call in Buzz, `address`
  * is the speech model's live API, `model` and `voice` what it speaks with and `key` names the secret of its key.
  * Every claimed coworker has a `buzz` door, which duck makes, at the setup's relay; it answers anyone who
- * mentions the coworker where its `answers` is `anyone`, and otherwise only its owner.
+ * mentions the coworker where its `answers` is `anyone`, as a team coworker's does, and otherwise only its owner.
  */
 export type Door = {
   kind: string;
@@ -45,6 +45,8 @@ export type Facts = {
   /** The name and picture, an HTTPS address, its person gave it in Buzz, which its profile shows. */
   called?: string;
   picture?: string;
+  /** A team coworker's (SPEC part 14): the Buzz id of the channel its team reads, named when it was made. */
+  channel?: string;
 };
 
 /**
@@ -258,7 +260,13 @@ export function zoneOf(zone: string) {
 export const gives = (plug: Plug, coworker: string) =>
   plug.coworkers === "everyone" || (Array.isArray(plug.coworkers) && plug.coworkers.includes(coworker));
 
-/** Coworker `coworker`'s doors: those the setup names for it, and its buzz door where the firm has a relay. */
+/** Whether coworker `coworker` is a team coworker: one made with its team's channel (SPEC part 14). */
+export const isTeam = (setup: Setup, coworker: string) => factsOf(setup, coworker).channel !== undefined;
+
+/**
+ * Coworker `coworker`'s doors: those the setup names for it, and its buzz door where the firm has a relay,
+ * which answers anyone where the setup says so or the coworker is a team coworker (SPEC part 14).
+ */
 export const doorsOf = (setup: Setup, coworker: string): Record<string, Door> => ({
   ...setup.doors?.[coworker],
   ...(setup.buzz && {
@@ -266,7 +274,7 @@ export const doorsOf = (setup: Setup, coworker: string): Record<string, Door> =>
       kind: "buzz",
       address: setup.buzz.relay,
       key: "BUZZ_KEY",
-      ...(setup.settings.answers === "anyone" && { answers: "anyone" }),
+      ...((setup.settings.answers === "anyone" || isTeam(setup, coworker)) && { answers: "anyone" }),
     },
   }),
 });
