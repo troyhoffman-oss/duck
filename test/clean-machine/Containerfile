@@ -1,0 +1,52 @@
+# An empty server, as a rented Debian one comes: systemd as init, ssh, sudo, apt and network out, and none of
+# what SETUP.md installs.
+FROM docker.io/library/debian:trixie-slim@sha256:7378260c0a098d27ac206225db5e7d92b8c7c84ea7afccc86eeb513756bbd392
+RUN apt-get update \
+  && apt-get install --yes --no-install-recommends systemd systemd-sysv dbus dbus-user-session libpam-systemd \
+    openssh-server sudo ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+# Under rootless podman the machine has only the 65,537 user ids of the user who runs it, where a server has
+# billions and gives each account a range of its own. So admin is the last id and has all the others as its
+# subordinate ids, and an account added later is given every id but its own, which leaves rootless podman there
+# every 16-bit id but 65535.
+RUN groupadd --gid 65536 admin && useradd --create-home --shell /bin/bash --uid 65536 --gid 65536 admin \
+  && echo 'admin ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/admin \
+  && echo admin:1:65535 > /etc/subuid && echo admin:1:65535 > /etc/subgid
+# It runs on each change to the account files, its own included, so it writes only what differs.
+COPY --chmod=755 <<'EOF' /usr/local/sbin/subids
+#!/bin/sh
+added='$3 >= 1000 && $3 < 65534'
+for pair in "subuid 3" "subgid 4"; do
+  set -- $pair
+  awk -F: "NR == FNR { if ($added) own[\$1]; next } !(\$1 in own)" /etc/passwd "/etc/$1" > "/etc/$1.new"
+  awk -F: -v id="$2" "$added"' { printf "%s:1:%d\n%s:%d:%d\n", $1, $id - 1, $1, $id + 1, 65535 - $id }' \
+    /etc/passwd >> "/etc/$1.new"
+  if cmp -s "/etc/$1" "/etc/$1.new"; then rm "/etc/$1.new"; else mv "/etc/$1.new" "/etc/$1"; fi
+done
+EOF
+# systemd leaves the container's root mount private, and rootless podman needs it shared, as on a server.
+COPY <<'EOF' /etc/systemd/system/shared-root.service
+[Unit]
+DefaultDependencies=no
+Before=local-fs.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mount --make-rshared /
+[Install]
+WantedBy=local-fs.target
+EOF
+COPY <<'EOF' /etc/systemd/system/subids.path
+[Path]
+PathChanged=/etc/passwd
+PathChanged=/etc/subuid
+PathChanged=/etc/subgid
+[Install]
+WantedBy=multi-user.target
+EOF
+COPY <<'EOF' /etc/systemd/system/subids.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/subids
+EOF
+RUN systemctl enable shared-root.service subids.path
+CMD ["/sbin/init"]

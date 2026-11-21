@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import pkg from "../../package.json";
-import { FROM_CONTAINERS, freePort } from "./reach";
+import { FROM_CONTAINERS, freePort, type Reach } from "./reach";
 
 /** Buzz's relay at commit 44e97e9, as duck's buzz-acp and CLI are, and the stores it runs on, each at its multi-platform digest. */
 const IMAGES = {
@@ -94,16 +94,21 @@ export type Writer = "rosa" | "theo" | "ana" | "heron";
  * Theo and Ana; and Heron, an agent she owns as she owns the coworker, with a profile that says so as Buzz's own
  * agents' do. Once duck has made the coworker, `meet` has the four share a channel, harbor-ops, and the person
  * open a DM with it. The relay is published on a free port under the address duck's containers reach it at,
- * and each writer's Buzz CLI runs in a container so it reaches the relay at that same address. Everything
- * carries the label duck.kit=<name>, which duck's install never touches, and goes when the test ends, passed
- * or failed.
+ * by `reach`, and each writer's Buzz CLI runs in a container so it reaches the relay at that same address.
+ * Everything is named for and carries the label duck.kit=<name>, which duck's install never touches, and goes
+ * when the test ends, passed or failed.
  */
-export async function startBuzz() {
-  const name = `duck-kit-${randomBytes(3).toString("hex")}`;
+export async function startBuzz({
+  name = `duck-kit-${randomBytes(3).toString("hex")}`,
+  reach = FROM_CONTAINERS,
+}: {
+  name?: string;
+  reach?: Reach;
+} = {}) {
   const folder = mkdtempSync(join(tmpdir(), `${name}-`));
   mkdirSync(join(folder, "files"));
   const port = freePort();
-  const url = `ws://${FROM_CONTAINERS.host}:${port}`;
+  const url = `ws://${reach.host}:${port}`;
   const hex = () => randomBytes(32).toString("hex");
   const secrets = {
     rosa: randomBytes(32),
@@ -160,7 +165,7 @@ export async function startBuzz() {
     await run(
       "relay",
       ...net,
-      ...["-p", `${FROM_CONTAINERS.bind}:${port}:3000`],
+      ...["-p", `${reach.bind}:${port}:3000`],
       ...env("relay", {
         RELAY_URL: url,
         RELAY_OWNER_PUBKEY: keys.rosa,
@@ -178,7 +183,7 @@ export async function startBuzz() {
         BUZZ_S3_ACCESS_KEY: s3.user,
         BUZZ_S3_SECRET_KEY: s3.password,
         BUZZ_S3_ADDRESSING_STYLE: "path",
-        BUZZ_MEDIA_BASE_URL: `http://${FROM_CONTAINERS.host}:${port}/media`,
+        BUZZ_MEDIA_BASE_URL: `http://${reach.host}:${port}/media`,
       }),
       IMAGES.relay,
     );
