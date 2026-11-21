@@ -250,6 +250,7 @@ export function startCoworker(setup: Setup, name: string) {
     home,
     sending,
     wake,
+    dispatch,
     conversation,
     connected,
     up,

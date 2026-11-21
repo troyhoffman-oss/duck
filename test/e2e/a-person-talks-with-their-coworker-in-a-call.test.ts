@@ -377,7 +377,7 @@ describe("a person talks with their coworker in a call", () => {
     expect(card.lines).toContainEqual(expect.stringMatching(CARD));
   });
 
-  test.failing("a question raised in a call is asked in the call: once she has heard all of it, her spoken yes, which duck takes from what she said as the speech model hands nothing off, is read as a typed yes is and releases the held call, whose outcome she hears in the call", async () => {
+  test("a question raised in a call is asked in the call: once she has heard all of it, her spoken yes, which duck takes from what she said as the speech model hands nothing off, is read as a typed yes is and releases the held call, whose outcome she hears in the call", async () => {
     sends();
     reads(YES, "yes");
     firm.model.on(all(coworkerRun, said('"answer":"yes"')), say(SENT));
@@ -404,7 +404,7 @@ describe("a person talks with their coworker in a call", () => {
     }
   });
 
-  test.failing("her spoken no to a question asked in the call, which the speech model also hands off, is read once, and the held call does not run", async () => {
+  test("her spoken no to a question asked in the call, which the speech model also hands off, is read once, and the held call does not run", async () => {
     sends();
     reads(NO, "no");
     firm.model.on(all(coworkerRun, said('"answer":"no"')), say(KEPT));
@@ -426,7 +426,7 @@ describe("a person talks with their coworker in a call", () => {
     }
   });
 
-  test.failing("a question the speech model cuts short after whom the file goes to: her yes answers nothing and nothing is sent, and once she hangs up the question waits for her in Buzz, where her typed yes releases it", async () => {
+  test("a question the speech model cuts short after whom the file goes to: her yes answers nothing and nothing is sent, and once she hangs up the question waits for her in Buzz, where her typed yes releases it", async () => {
     sends();
     reads(YES, "yes", 2);
     firm.model.on(all(coworkerRun, said('"answer":"yes"')), say(SENT));

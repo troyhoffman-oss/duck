@@ -5,6 +5,7 @@ import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-
 import { heard, told } from "./archive";
 import { cutSignIns, hasSignIn, readIn, signIn } from "./gate";
 import { aboutSession, add, broken, type Event, has, lastEvent, mark as state, waiting } from "./inbox";
+import { asking } from "./outbox";
 import type { Coworker } from "./run";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
 import { buzzKey } from "./setup/coworkers";
@@ -128,12 +129,13 @@ export function taken(c: Coworker, door: string, body: Written) {
 /**
  * Writes what the person wrote at `door` as an inbox event, with their files where the coworker reads them
  * and cannot change them, and wakes the coworker. A buzz door's message keeps its place as the payload. At a
- * door but email or voice, where no ask goes, it is held as `reading` until duck has read what it answers of
- * the questions it asked them (SPEC part 9). It returns `ended`, which settles when the runs the message wakes
- * or steers have ended and what they said has gone out, or null for a message already taken.
+ * door an ask goes to, any but email, and at a voice door while a question asked in the call is open, it is
+ * held as `reading` until duck has read what it answers of the questions it asked them (SPEC part 9). It
+ * returns `ended`, which settles when the runs the message wakes or steers have ended and what they said has
+ * gone out, or null for a message already taken.
  */
 function written(c: Coworker, door: string, body: Written) {
-  const reads = askDoors(c).includes(door);
+  const reads = askDoors(c).includes(door) || asking(c.db, door);
   const event = c.db.transaction(() => {
     const event = add(c.db, door, body.id, body.place ? JSON.stringify(body.place) : null);
     if (event === null) return null;
@@ -150,17 +152,20 @@ function written(c: Coworker, door: string, body: Written) {
   return { ended: (reads ? readIn(c, event) : Promise.resolve()).then(() => c.wake()).then(() => c.sending) };
 }
 
-/** The doors of `c` an ask may go to: all its person's doors but email and voice, since neither answers an ask. */
+/**
+ * The doors of `c` an ask may wait at: all its person's doors but email, where none is answered, and voice,
+ * where one goes only while the person is in a call (SPEC part 9).
+ */
 export const askDoors = (c: Coworker) =>
   c.doors.filter((d) => !["email", "voice"].includes(doorsOf(c.setup, c.name)[d]?.kind as string));
 
 /**
- * Where `c`'s next message goes: the call the person is in with the coworker, or else the door among their
- * own but voice where they last wrote, or before they ever have, the first; for an `ask`, among `askDoors`
- * where it has any. With that door's setup and their last message there.
+ * Where `c`'s next message, an `ask` or not, goes: the call the person is in with the coworker, or else the
+ * door among their own but voice where they last wrote, or before they ever have, the first; for an `ask`,
+ * among `askDoors` where it has any. With that door's setup and their last message there.
  */
 export function doorTo(c: Coworker, ask = false) {
-  const call = ask ? undefined : inCall(c);
+  const call = inCall(c);
   if (call?.say) return { door: call.door, set: doorsOf(c.setup, c.name)[call.door] as Door, last: null };
   const spoken = (d: string) => doorsOf(c.setup, c.name)[d]?.kind === "voice";
   const doors = ask && askDoors(c).length > 0 ? askDoors(c) : c.doors.filter((d) => !spoken(d));
@@ -172,10 +177,10 @@ export function doorTo(c: Coworker, ask = false) {
 /**
  * Sends `text` from the main conversation, an `ask` or not, to the door `doorTo` names, with each file of the
  * coworker's it names, which the person sees by its name: at a buzz door, to the place of their last message
- * there; in a call, to the speech model to say, which the archive keeps as it is said. With `team`, what a
- * team coworker says on its own goes to its team's channel instead, at its buzz door (SPEC part 14). It returns the door,
- * the archive's id of the message where it is kept now, and `delivered`: when the try the door took ended, or
- * null when it took none. A delivery the door does not take after three tries is logged as not delivered,
+ * there; in a call, to the speech model to say, or for an ask, to ask, which the archive keeps as it is said.
+ * With `team`, what a team coworker says on its own goes to its team's channel instead, at its buzz door (SPEC
+ * part 14). It returns the door, the archive's id of the message where it is kept now, and `delivered`: when
+ * the try the door took ended, or null when it took none. A delivery the door does not take after three tries is logged as not delivered,
  * and the door is broken.
  */
 export function deliver(c: Coworker, said: string, since: number, ask = false, team = false) {
@@ -188,7 +193,8 @@ export function deliver(c: Coworker, said: string, since: number, ask = false, t
   const text = files.reduce((t, p) => t.replaceAll(p, basename(p)), said);
   console.log(JSON.stringify({ reply: c.name, door, ms: Math.round(performance.now() - since) }));
   if (set.kind === "voice") {
-    inCall(c)?.say?.(text);
+    const call = inCall(c);
+    (ask ? call?.ask : call?.say)?.(text);
     return { door, id: undefined, delivered: Promise.resolve(Date.now()) };
   }
   const id = told(c.db, door, c.conversation() ?? null, text, files);
@@ -357,8 +363,8 @@ export function listen(c: Coworker) {
     if (set.kind === "email") return mailIn(c, door, set);
     if (set.kind === "telegram") return telegramIn(c, door, set);
     if (set.kind === "voice")
-      return voiceIn(c, door, set, (id, text) =>
-        (async () => taken(c, door, { id, text }))().catch((e: Error) =>
+      return voiceIn(c, door, set, (id, text, at) =>
+        (async () => taken(c, door, { id, text, ...(at && { at }) }))().catch((e: Error) =>
           console.error(`the voice door ${c.name}.${door} did not keep line ${id}: ${e.message}`),
         ),
       );
