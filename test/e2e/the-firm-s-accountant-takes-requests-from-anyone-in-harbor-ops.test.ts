@@ -280,6 +280,10 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     // The item records which coworker asked, and whose it is.
     const [coworker, person] = [firm.secondKey.slice(0, 8), buzz.keys.theo.slice(0, 8)];
     expect(codeLog(TITLE).filter((l) => l.includes(coworker) && l.includes(person))).toHaveLength(1);
+    // A coworker asked, so tally's run had its own list and the plugs' tools as their `others` states give them,
+    // which in this firm is none, where Theo's own request in step 5 could send mail.
+    const asked = firm.model.requests.find(all(tally, said(QUESTION)));
+    expect([asked?.has(TOOLS.writeItem), asked?.has("send_mail")]).toEqual([true, false]);
   });
 
   test.failing("Rosa tells tally only Ana may ask it now: Theo's next mention gets no answer and no eyes, and Ana's still does", async () => {
