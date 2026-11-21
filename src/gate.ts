@@ -143,12 +143,31 @@ function linkFor(setup: Setup, coworker: string, name: string) {
   return link.href;
 }
 
+/** A service's refusal of a sign-in: its own words, and whether it said the grant itself is gone. */
+type Refused = { words: string; gone: boolean };
+
+/** The account an OpenID id_token names, by its email or else its username: read for a line, never trusted. */
+function accountOf(token: unknown) {
+  try {
+    const claims = JSON.parse(Buffer.from(String(token).split(".")[1] ?? "", "base64url").toString());
+    const account = claims.email ?? claims.preferred_username;
+    return typeof account === "string" ? account : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Asks plug `name`'s token address for a sign-in with `grant`, as the firm's app with its client secret: the
- * sign-in, keeping `before`'s refresh token where the service gives no new one, or the service's own words
- * for why it refused. One that cannot be reached throws.
+ * sign-in, keeping `before`'s refresh token where the service gives no new one, with the account its id_token
+ * names, if any, or the service's refusal. One that cannot be reached throws.
  */
-async function tokenFor(setup: Setup, name: string, grant: Record<string, string>, before?: SignIn) {
+async function tokenFor(
+  setup: Setup,
+  name: string,
+  grant: Record<string, string>,
+  before?: SignIn,
+): Promise<{ signedIn: SignIn; account?: string } | Refused> {
   const signin = setup.plugs?.[name]?.signin as NonNullable<Plug["signin"]>;
   const answer = await fetch(signin.token, {
     method: "POST",
@@ -163,13 +182,17 @@ async function tokenFor(setup: Setup, name: string, grant: Record<string, string
   });
   const got = (await answer.json().catch(() => ({}))) as Record<string, unknown>;
   if (!answer.ok || typeof got.access_token !== "string")
-    return String(got.error_description ?? got.error ?? `it answered HTTP ${answer.status}`);
+    // OAuth's invalid_grant says the code or refresh token itself is gone; a service that is down says no such thing.
+    return {
+      words: String(got.error_description ?? got.error ?? `it answered HTTP ${answer.status}`),
+      gone: got.error === "invalid_grant",
+    };
   const signedIn: SignIn = {
     access: got.access_token,
     refresh: typeof got.refresh_token === "string" ? got.refresh_token : before?.refresh,
     until: typeof got.expires_in === "number" ? Date.now() + got.expires_in * 1000 : undefined,
   };
-  return signedIn;
+  return { signedIn, account: accountOf(got.id_token) };
 }
 
 /** The renewal of each coworker's sign-in to each plug under way, so a sign-in is renewed once at a time. */
@@ -177,8 +200,9 @@ const renewing = new Map<string, Promise<string>>();
 
 /**
  * The access token coworker `coworker`'s person signed in to plug `name` with: renewed with its refresh token,
- * once, where it has run out or the plug refused it as `refused`. A renewal the service refuses drops the
- * sign-in. Throws NotConnected where there is none.
+ * once, where it has run out or the plug refused it as `refused`. A renewal the service refuses because the
+ * grant is gone drops the sign-in; any other failure keeps it and fails the call. Throws NotConnected where
+ * there is none.
  */
 async function bearer(setup: Setup, coworker: string, name: string, refused?: string): Promise<string> {
   const kept = keysOf(setup, coworker)[`SIGNIN_${name}`];
@@ -197,29 +221,32 @@ async function bearer(setup: Setup, coworker: string, name: string, refused?: st
           { grant_type: "refresh_token", refresh_token: signedIn.refresh },
           signedIn,
         )
-      : "it gave no refresh token";
-    if (typeof renewed === "string") {
-      console.error(`${coworker}'s sign-in to plug ${name} was not renewed, so it is dropped: ${renewed}`);
+      : { words: "it gave no refresh token", gone: true };
+    if ("words" in renewed) {
+      const fate = renewed.gone ? "dropped" : "kept";
+      console.error(
+        `${coworker}'s sign-in to plug ${name} was not renewed, and is ${fate}: ${renewed.words}`,
+      );
+      if (!renewed.gone)
+        throw new Error(`${name}'s service did not renew the sign-in, in its words: ${renewed.words}`);
       keepSignIns(setup, coworker, { [`SIGNIN_${name}`]: null });
       throw new NotConnected(name);
     }
-    keepSignIns(setup, coworker, { [`SIGNIN_${name}`]: JSON.stringify(renewed) });
-    return renewed.access;
+    keepSignIns(setup, coworker, { [`SIGNIN_${name}`]: JSON.stringify(renewed.signedIn) });
+    return renewed.signedIn.access;
   })().finally(() => renewing.delete(key));
   renewing.set(key, renewal);
   return renewal;
 }
 
-/** Each coworker's trades of sign-in strings, one at a time. */
-const trading = new Map<string, Promise<unknown>>();
-
 /**
  * Trades the code of each sign-in string in `text`, which coworker `c`'s person wrote at a door, for their
  * sign-in to the plug its link's state is open for, and returns `text` with a plain line of what came of it in
  * the place of each, so neither the archive nor the model ever holds a code. A good trade spends the state and
- * every other open link to that plug; a refused one leaves the state good. Messages are traded one at a time.
+ * every other open link to that plug, and its line names the account where the service says which; a refused
+ * one leaves the state good.
  */
-export function signIn(c: Coworker, text: string): Promise<string> {
+export async function signIn(c: Coworker, text: string) {
   const { setup, name: coworker } = c;
   const person = personOf(setup, coworker).name;
   const trade = async (state: string, code: string) => {
@@ -239,27 +266,27 @@ export function signIn(c: Coworker, text: string): Promise<string> {
     const got = await tokenFor(setup, open.plug, grant).catch((e: Error) => e);
     if (got instanceof Error)
       return `${person} sent a sign-in code for ${open.plug}, and duck could not reach the service to trade it (${got.message}). ${again}`;
-    if (typeof got === "string")
-      return `${person} sent a sign-in code for ${open.plug}, and the service refused it, in its words: ${got.replace(/\.?$/, ".")} ${again}`;
+    if ("words" in got)
+      return `${person} sent a sign-in code for ${open.plug}, and the service refused it, in its words: ${got.words.replace(/\.?$/, ".")} ${again}`;
     const spent = Object.entries(keysOf(setup, coworker))
       .filter(([name, value]) => name.startsWith("LINK_") && JSON.parse(value).plug === open.plug)
       .map(([name]) => [name, null]);
     keepSignIns(setup, coworker, {
       ...Object.fromEntries(spent),
-      [`SIGNIN_${open.plug}`]: JSON.stringify(got),
+      [`SIGNIN_${open.plug}`]: JSON.stringify(got.signedIn),
     });
-    return `${person} connected ${open.plug}. Call ${open.plug}__connect, and its tools are listed for you.`;
+    const as = got.account ? ` as ${got.account}` : "";
+    return `${person} connected ${open.plug}${as}. Call ${open.plug}__connect, and its tools are listed for you.`;
   };
   // The message is taken whatever comes of a trade, so a failure is a line too.
   const failed = (e: Error) => `${person} sent a sign-in code, and duck failed to trade it: ${e.message}.`;
-  const turn = (trading.get(coworker) ?? Promise.resolve()).then(async () => {
-    let lines = text;
-    for (const [whole, state, code] of text.matchAll(SIGNIN))
-      lines = lines.replace(whole, `[duck: ${await trade(state as string, code as string).catch(failed)}]`);
-    return lines;
-  });
-  trading.set(coworker, turn);
-  return turn;
+  let lines = text;
+  for (const [whole, state, code] of text.matchAll(SIGNIN)) {
+    const line = await trade(state as string, code as string).catch(failed);
+    // A function, so no `$` in a name or a service's words is read as a pattern that puts the code back.
+    lines = lines.replace(whole, () => `[duck: ${line}]`);
+  }
+  return lines;
 }
 
 /** Whether `text` holds a sign-in string. */
@@ -269,7 +296,8 @@ export const hasSignIn = (text: string) => text.match(SIGNIN) !== null;
 export const cutSignIns = (setup: Setup, coworker: string, text: string) =>
   text.replace(
     SIGNIN,
-    `[duck: a sign-in code came from someone other than ${personOf(setup, coworker).name}, and was not used.]`,
+    () =>
+      `[duck: a sign-in code came from someone other than ${personOf(setup, coworker).name}, and was not used.]`,
   );
 
 /**

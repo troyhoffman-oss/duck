@@ -82,6 +82,10 @@ export const add = (
     )
     .get(source, ref, about, new Date().toISOString(), payload, item, session)?.id ?? null;
 
+/** Whether the inbox holds event `ref` from `source` already. */
+export const has = (db: Database, source: string, ref: string) =>
+  db.query("select 1 from inbox where source = ? and ref = ?").get(source, ref) !== null;
+
 /** Tells the main conversation, once for `ref`, `what` broke: a door or a polled source (SPEC part 10). */
 export function broken(c: Coworker, ref: string, what: object) {
   if (add(c.db, "broken", ref, JSON.stringify(what), null, c.conversation() ?? null) !== null) void c.wake();
