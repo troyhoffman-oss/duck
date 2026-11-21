@@ -75,7 +75,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
       .map((l) => l.text);
   };
 
-  test.failing("Theo mentions tally in harbor-ops and gets its answer in his thread, from a run with its own notes, list and tools, and his second question there goes on from the first", async () => {
+  test("Theo mentions tally in harbor-ops and gets its answer in his thread, from a run with its own notes, list and tools, and his second question there goes on from the first", async () => {
     const ASK = "What did we pay for the 4B boiler repair?";
     const ANSWER = "The 4B boiler repair was $640, paid on November 3.";
     const MORE = "Which account did it come out of?";
@@ -96,7 +96,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect([more?.shows(ASK), more?.shows(ANSWER)]).toEqual([true, true]);
   });
 
-  test.failing("what Theo tells tally, Ana hears when she asks in a thread of her own", async () => {
+  test("what Theo tells tally, Ana hears when she asks in a thread of her own", async () => {
     const TOLD = "Heads up: Bayside Heating serviced the 4B boiler on Monday.";
     const NOTE = "4B boiler: serviced by Bayside Heating on Monday (Theo, in harbor-ops).";
     const NOTED = "Noted.";
@@ -115,7 +115,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     await buzz.inThread(ana, ANSWER, 90, key);
   });
 
-  test.failing("Theo's request becomes an item on tally's list that says Theo asked, and Rosa sees it in tally's To-dos", async () => {
+  test("Theo's request becomes an item on tally's list that says Theo asked, and Rosa sees it in tally's To-dos", async () => {
     const ASK = "Please reconcile the October rent roll for 4B.";
     const TITLE = "4B: reconcile the October rent roll";
     const ON_IT = "On it: the October rent roll for 4B is on my list.";
@@ -132,7 +132,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect(shown.lines).toContain(TITLE);
   });
 
-  test.failing("a long request from Ana starts a job, Theo's question meanwhile is answered before the job ends, and the job's result arrives in Ana's thread", async () => {
+  test("a long request from Ana starts a job, Theo's question meanwhile is answered before the job ends, and the job's result arrives in Ana's thread", async () => {
     const ASK = "Please put together this year's 4B expense summary.";
     const STARTED = "I've started on it and will post the summary here.";
     const BRIEF = "Sum 4B's expenses this year by category. Done means: a total and the boiler's share.";
@@ -166,7 +166,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     await buzz.inThread(ana, RESULT, 120, key);
   });
 
-  test.failing("a call that needs a yes is asked of Rosa in her DM with tally, naming Theo as the one who asked, and on her yes it runs once, from tally's own mail account, and Theo hears in his thread", async () => {
+  test("a call that needs a yes is asked of Rosa in her DM with tally, naming Theo as the one who asked, and on her yes it runs once, from tally's own mail account, and Theo hears in his thread", async () => {
     const ASK = "Can you send Dana the 4B renewal terms?";
     const ASKED = "I've asked Rosa before it goes.";
     const YES = "Yes, send it.";

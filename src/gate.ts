@@ -17,7 +17,7 @@ import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive, told } from "./archive";
 import { listChanged, SETTINGS_TOOL, tellSettings } from "./dms";
 import { act, doorTo, saved } from "./doors";
-import { add, broken, mark, othersWho, type Pushed, sessionItem } from "./inbox";
+import { add, broken, mark, othersIn, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
 import { LIST_TOOLS, type Link, link, linkedTo, logged, useList } from "./list";
 import { modelRelay } from "./model-relay";
@@ -378,8 +378,8 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
 }
 
 /**
- * The gate's addresses for a work-lane session, for a job's worker or checker and for an others run; the
- * person lane's is /mcp.
+ * The gate's addresses for a work-lane session or a team coworker's request (SPEC part 14), for a job's worker
+ * or checker and for an others run; the person lane's is /mcp.
  */
 export const [WORK, JOB, OTHERS] = ["/mcp/work", "/mcp/job", "/mcp/others"];
 
@@ -585,8 +585,9 @@ const resume = (db: Database, id: number, s: string, what: Json) =>
  * Holds plug `plug`'s call of `tool` with `input`, made in session `s`, as an ask whose question shows the
  * call's exact effect. Each of its inputs `files` is a file, copied as it is now among the files the person
  * was sent, which the question carries and a yes sends. The question goes once the run ends, through quiet
- * hours if the person's own message started it. In an others run it says someone else asked, and who (SPEC
- * part 11). A box's reason `why` is given the person under its first line, and the coworker.
+ * hours if the person's own message started it. In a session someone else wrote in, an others run or a team
+ * coworker's request, it says someone else asked, and who (SPEC parts 11 and 14). A box's reason `why` is
+ * given the person under its first line, and the coworker.
  */
 function hold(
   c: Coworker,
@@ -595,12 +596,12 @@ function hold(
   input: Json,
   files: string[],
   s: string | undefined,
-  lane: string,
   why?: string,
 ) {
   const urgent = personAt(c, s) !== null;
-  const asker =
-    lane === OTHERS ? `Someone other than you${othersWho(c.db, s as string)} asked for this. ` : "";
+  const asker = othersIn(c.db, s as string)
+    ? `Someone other than you${othersWho(c.db, s as string)} asked for this. `
+    : "";
   for (const key of files) {
     const copies = [input[key]].flat().map((path) => {
       const [at, copy] = [fileIn(c.setup, c.name, String(path)), `held/${randomUUID()}`];
@@ -935,12 +936,16 @@ function record(db: Database, item: number, made: Made) {
 }
 
 /**
- * Session `s` of `c` wrote item `item`: duck publishes its list, and what its run made before it wrote one goes
- * on it.
+ * Session `s` of `c` wrote item `item`, `fresh` where it made it: duck publishes its list, and what its run
+ * made before it wrote one goes on it. An item a team coworker's request made records who asked (SPEC part 14).
  */
-function wrote(c: Coworker, s: string | undefined, item: number) {
+function wrote(c: Coworker, s: string | undefined, item: number, fresh: boolean) {
   listChanged(c.name, c.db);
   if (!s) return;
+  if (fresh && othersIn(c.db, s)) {
+    const person = personOf(c.setup, c.name).name;
+    logged(c.db, item, `Asked for by someone other than ${person}${othersWho(c.db, s)}.`);
+  }
   const kept = runOf(c, s);
   kept.item = item;
   for (const made of kept.made.splice(0)) record(c.db, item, made);
@@ -1021,10 +1026,11 @@ async function call(c: Coworker, params: Json, lane: string) {
       );
     }
     if (mine === TELL) {
-      // What an others run tells is never urgent, and says whose run it came from (SPEC part 11).
+      // What a run that answers someone else tells is never urgent, and says whose run it came from (SPEC part 11).
       const whose = () => `someone other than ${personOf(setup, coworker).name}${othersWho(db, String(s))}`;
-      const told =
-        lane === OTHERS ? { urgent: false, text: `From a run that answered ${whose()}: ${input.text}` } : {};
+      const told = othersIn(db, String(s))
+        ? { urgent: false, text: `From a run that answered ${whose()}: ${input.text}` }
+        : {};
       result = words(`It waits in the outbox as row ${tell(db, { ...input, ...told })}.`);
     } else if (JOB_TOOLS.some((t) => t === mine)) {
       result = words(useJobs(db, name, input, s, c.home, c.cut));
@@ -1047,9 +1053,10 @@ async function call(c: Coworker, params: Json, lane: string) {
         state === "removed"
           ? words(`That command of buzz is removed at ${setup.firm}.`, true)
           : state === "ask first"
-            ? words(hold(c, "duck", "buzz", input, input.files ? ["files"] : [], s, lane))
+            ? words(hold(c, "duck", "buzz", input, input.files ? ["files"] : [], s))
             : await useBuzz(c, input, s, moved);
-    } else if (mine) result = words(useList(db, name, input, (item) => wrote(c, s, item)));
+    } else if (mine)
+      result = words(useList(db, name, input, (item) => wrote(c, s, item, input.id === undefined)));
     else if (plug && send) {
       // A box refuses a call by throwing, as the gate does a file the coworker may not give.
       outcome = "refused";
@@ -1070,7 +1077,7 @@ async function call(c: Coworker, params: Json, lane: string) {
               true,
             )
           : state === "ask first"
-            ? words(hold(c, name.slice(0, at), tool, input, files, s, lane, reason))
+            ? words(hold(c, name.slice(0, at), tool, input, files, s, reason))
             : await callPlug(setup, coworker, name.slice(0, at), send, tool, input, files, moved);
     } else result = words(`${name} is not one of your tools.`, true);
     if (state === "ask first") outcome = "held";

@@ -144,11 +144,16 @@ export const sessionItem = (db: Database, s: string) =>
     )
     .get(s)?.item_id ?? undefined;
 
-/** The latest session item `id` was worked in, other than `not`: where its work goes on (SPEC part 5). */
+/**
+ * The latest session item `id` was worked in, other than `not` and a thread someone else wrote in, which the
+ * others lane runs: where its work goes on (SPEC part 5).
+ */
 export const itemSession = (db: Database, id: number | null, not?: string) =>
   db
     .query<Event, [number | null, string | null]>(
-      "select * from inbox where item_id = ? and session is not null and session is not ? order by id desc limit 1",
+      `select * from inbox where item_id = ? and session is not null and session is not ?
+        and session not in (select session from inbox where source like '%:others' and session is not null)
+        order by id desc limit 1`,
     )
     .get(id, not ?? null)?.session ?? undefined;
 

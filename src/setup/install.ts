@@ -16,6 +16,7 @@ import {
   HISTORY,
   HOME,
   installFile,
+  isTeam,
   personOf,
   readSetup,
   type Setup,
@@ -109,6 +110,8 @@ function writeGoose(setup: Setup, name: string) {
   );
   const harness = text("harness.md")
     .replace("{account}", account)
+    // A team coworker answers anyone who may ask with its own memory and tools (SPEC part 14).
+    .replace("{others}", text(isTeam(setup, name) ? "team.md" : "others.md").trim())
     .replace("{doors}", [doors.slice(0, -1).join(", "), doors.at(-1)].filter(Boolean).join(" and "))
     .replaceAll("{coworker}", name)
     .replaceAll("{person}", person.name)
