@@ -670,7 +670,7 @@ describe("Rosa talks with her coworker at her desk, on her phone and by text", (
     expect(firm.mail.callsTo("save_draft")).toHaveLength(1);
   });
 
-  test.failing("her standing words are written whole by duck's own tool in her conversation, shown to later runs once and again when they change, and kept in the version history; goose's own file tools cannot change them", async () => {
+  test("her standing words are written whole by duck's own tool in her conversation, shown to later runs once and again when they change, and kept in the version history; goose's own file tools cannot change them", async () => {
     const STANDING = "Copy Dana Reyes on every mail about rent. (Rosa said so in chat.)";
     const CHANGED = "Copy Dana Reyes and Sam Okafor on every mail about rent. (Rosa said so in chat.)";
     const SAY = {

@@ -124,6 +124,9 @@ function writeGoose(setup: Setup, name: string) {
   write(join(config, basename(DREAMING)), text("dreaming.md"));
   for (const folder of ["home", "files", "history"])
     mkdirSync(join(setup.storage.folder, name, folder), { recursive: true });
+  // The standing words are mounted read-only over their own path, which must be a file before the mount.
+  const standing = join(setup.storage.folder, name, "home", "standing.md");
+  if (!existsSync(standing)) writeFileSync(standing, "");
 }
 
 /**
@@ -261,6 +264,8 @@ export async function install(folder: string) {
         ...flag("--cap-add", "NET_ADMIN"),
         ...flag("--workdir", HOME),
         ...flag("-v", `${own}/home:${HOME}`, `${own}/files:${FILES}:ro`, `${own}/goose:/duck/goose`),
+        // Only duck's `standing` tool, which writes the file in place, changes the standing words (SPEC part 8).
+        ...flag("-v", `${own}/home/standing.md:${HOME}/standing.md:ro`),
         ...flag("-v", `${own}/goose/config:/duck/goose/config:ro`, `${own}/history:${HISTORY}:ro`),
         ...flag("-e", "GOOSE_PATH_ROOT=/duck/goose", `HOME=${HOME}`, "ANTHROPIC_API_KEY=none"),
         // goose's time block in every turn, and the shell's clock, are in the container's zone.
