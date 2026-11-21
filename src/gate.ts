@@ -633,9 +633,9 @@ export const [WORK, AGENT, JOB, OTHERS] = ["/mcp/work", "/mcp/agent", "/mcp/job"
 /**
  * duck's own tools for `coworker` on `lane`: the list's, the timers', the archive's, the jobs', `tell` on
  * the work lane (SPEC part 10), `settings` and `standing` only in its person's own runs (SPEC parts 1 and
- * 8), and `buzz` where it
- * has a buzz door. A job has none (SPEC part 6), and an
- * others run only `tell` (SPEC part 11). None answers a held call (SPEC part 9).
+ * 8), and `buzz` where it has a buzz door. A job has none (SPEC part 6), an others run only `tell` (SPEC
+ * part 11), and another coworker's request no timers and no jobs (SPEC part 14). None answers a held call
+ * (SPEC part 9).
  */
 const own = (setup: Setup, coworker: string, lane: string) =>
   lane === JOB
@@ -644,9 +644,9 @@ const own = (setup: Setup, coworker: string, lane: string) =>
       ? [TELL]
       : [
           ...LIST_TOOLS,
-          ...TIMER_TOOLS,
+          ...(lane === AGENT ? [] : TIMER_TOOLS),
           ARCHIVE_TOOL,
-          ...JOB_TOOLS,
+          ...(lane === AGENT ? [] : JOB_TOOLS),
           ...(lane === WORK || lane === AGENT ? [TELL] : [SETTINGS_TOOL, STANDING_TOOL]),
           ...(doorsOf(setup, coworker).buzz ? [BUZZ] : []),
         ];

@@ -2,11 +2,23 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-ai/advanced-imessage/grpc";
-import { heard, told } from "./archive";
+import { heard, lastHeard, told } from "./archive";
 import { cutSignIns, hasSignIn, readIn, signIn } from "./gate";
 import { aboutSession, add, broken, type Event, has, lastEvent, mark as state, waiting } from "./inbox";
 import type { Coworker } from "./run";
-import { claimed, type Door, doorsOf, FILES, factsOf, fileOf, HOME, isTeam, ownerOf, secret } from "./setup";
+import {
+  claimed,
+  type Door,
+  doorsOf,
+  FILES,
+  factsOf,
+  fileOf,
+  HOME,
+  isTeam,
+  ownerOf,
+  type Setup,
+  secret,
+} from "./setup";
 import { buzzKey, signs } from "./setup/coworkers";
 import { telegramIn, telegramOut } from "./telegram";
 import { inCall, voiceIn } from "./voice";
@@ -370,16 +382,23 @@ function reopened(c: Coworker) {
 }
 
 /**
- * Starts the buzz-acp of each buzz door of coworker `c` again, with whom its gate admits now: it is ended with
- * SIGTERM, on which its source drains the turn under way first, and started once it has exited. Only buzz-acp
- * starts again; the coworker, its goose and its runs go on. Duck does this when the firm's claimed team
- * coworkers change.
+ * Starts buzz-acp again at each buzz door of coworker `c` whose gate admits the firm's team coworkers, that is
+ * each door that does not answer by its own `answers`, with whom it admits now. buzz-acp is ended with SIGTERM:
+ * it stops reading at once, gives the turn under way up to 30 s to end and then cuts it, and is started once it
+ * has exited. Only buzz-acp starts again; the coworker, its goose and its runs go on. Duck does this when the
+ * firm's claimed team coworkers change.
  */
 export function reopen(c: Coworker) {
   const next = reopening.get(c);
   reopening.delete(c);
   next?.resolve(null);
 }
+
+/** The Buzz keys of the firm's claimed team coworkers but `but` (SPEC part 14). */
+export const teamKeys = (setup: Setup, but?: string) =>
+  claimed(setup)
+    .filter((n) => n !== but && isTeam(setup, n))
+    .map((n) => buzzKey(setup, n));
 
 /**
  * Whom buzz-acp's gate admits at buzz door `set` of `c`, as its environment gives it: whom the door answers,
@@ -388,9 +407,7 @@ export function reopen(c: Coworker) {
  */
 function admits(c: Coworker, set: Door) {
   if (set.answers) return { BUZZ_ACP_RESPOND_TO: set.answers };
-  const teams = claimed(c.setup)
-    .filter((n) => n !== c.name && isTeam(c.setup, n))
-    .map((n) => buzzKey(c.setup, n));
+  const teams = teamKeys(c.setup, c.name);
   return teams.length > 0
     ? { BUZZ_ACP_RESPOND_TO: "allowlist", BUZZ_ACP_RESPOND_TO_ALLOWLIST: teams.join(",") }
     : { BUZZ_ACP_RESPOND_TO: "owner-only" };
@@ -423,6 +440,10 @@ export function listen(c: Coworker) {
     const what = `buzz-acp at ${c.name}.${door}`;
     return keep(c, door, what, async () => {
       for (;;) {
+        // buzz-acp reads from 5 s before it starts, so what the person wrote while it was not running would be
+        // missed. It reads from their latest message here instead, which it hands on again and duck has taken
+        // already, and at most 15 minutes back.
+        const last = lastHeard(c.db, door);
         const acp = Bun.spawn(["buzz-acp"], {
           env: {
             ...process.env,
@@ -435,12 +456,13 @@ export function listen(c: Coworker) {
             // A turn stays open while the person's runs go on, and a busy agent gets only its own place's
             // events, so the events of other places go to the pool's other agents meanwhile.
             BUZZ_ACP_AGENTS: "4",
+            ...(last && { BUZZ_ACP_REPLAY_FLOOR: String(Math.floor(Date.parse(last) / 1000)) }),
           },
           stdout: "inherit",
           stderr: "inherit",
           signal: c.signal,
         });
-        const exited = await Promise.race([acp.exited, reopened(c)]);
+        const exited = await (set.answers ? acp.exited : Promise.race([acp.exited, reopened(c)]));
         if (exited !== null) throw new Error(`it exited ${exited}`);
         console.error(`${what} starts again, since the firm's team coworkers changed`);
         acp.kill();
