@@ -230,6 +230,11 @@ function claims(setup: Setup, folder: string) {
 /** Each of `values` after flag `name`, as podman takes them. */
 const flag = (name: string, ...values: string[]) => values.flatMap((value) => [name, value]);
 
+/** Makes firm `firm`'s bridge network `name` where it is missing, isolated from other bridge networks. */
+const bridge = (firm: string, name: string) =>
+  podman(["network", "exists", name], true) === null &&
+  podman(["network", "create", "--label", `duck.firm=${firm}`, "--opt", "isolate=true", name]);
+
 /** Makes the running system match the setup in `folder` (SPEC part 1). */
 export async function install(folder: string) {
   const problems = check(folder);
@@ -241,8 +246,7 @@ export async function install(folder: string) {
   for (const name of names) {
     writeGoose(setup, name);
     const network = container(setup.firm, name);
-    if (podman(["network", "exists", network], true) === null)
-      podman(["network", "create", "--label", `duck.firm=${setup.firm}`, "--opt", "isolate=true", network]);
+    bridge(setup.firm, network);
     const own = join(setup.storage.folder, name);
     const did = ensure(
       setup.firm,
@@ -272,11 +276,15 @@ export async function install(folder: string) {
   }
   const [setupFile, duckName] = [join(folder, "duck.yaml"), container(setup.firm)];
   const networks = names.map((name) => container(setup.firm, name));
+  // duck is on a bridge network of its own from its first install, so a coworker's network can be connected to
+  // it later; with none, rootless podman would give it one that takes no other.
+  bridge(setup.firm, duckName);
   const did = ensure(
     setup.firm,
     duckName,
     duck,
     [
+      ...flag("--network", duckName),
       ...flag("-p", `${host}:${port}:${port}`),
       ...flag("-v", `${setup.storage.folder}:/duck/storage`, `${folder}:/duck/setup:ro`),
       ...flag("-v", `${setup.secrets.file}:/duck/secrets.env:ro`),
