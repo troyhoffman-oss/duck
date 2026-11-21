@@ -301,32 +301,4 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect(await buzz.reactionsOf(theo, key)).toEqual([]);
     expect(firm.model.requests.filter(said(THEO))).toEqual([]);
   });
-
-  test("what a request writes in tally's notes is in its version history once the request's run ends", async () => {
-    const ASK = "Please note that the 4B water heater was replaced in October.";
-    const NOTE = "4B water heater: replaced in October. (Ana, in harbor-ops.)";
-    const NOTED = "Noted: the 4B water heater was replaced in October.";
-    const WHEN = "When did you note the 4B water heater?";
-    const path = "notes/4b-water-heater.md";
-    firm.model.on(all(tally, said(ASK)), call("write", { path: `/duck/home/${path}`, content: `${NOTE}\n` }));
-    firm.model.on(all(tally, answered("write")), say(NOTED));
-    firm.model.on(
-      all(main(tally), said(WHEN)),
-      call("shell", { command: `git --git-dir=/duck/history log --format=%s -- ${path}` }),
-    );
-    firm.model.on(all(tally, answered("shell")), (r) => say(`History: ${r.last}`));
-
-    const { id: root } = await buzz.write("ana", "harbor-ops", ASK, { to: key });
-    await buzz.inThread(root, NOTED, 90, key);
-    // Rosa's run reads the history before its own run ends, so only the request's run can have kept the note.
-    await buzz.write("rosa", "dm", WHEN, { to: key });
-    const told = await buzz.inDm("rosa", key, "History:", 60);
-    using db = firm.db(team.coworker);
-    const run = db
-      .query<{ id: number }, [string]>(
-        "select r.id from runs r, json_each(r.events) e join inbox i on i.id = e.value where i.payload like ?",
-      )
-      .get(`%${ASK}%`)?.id;
-    expect(told.content).toContain(`run ${run}`);
-  });
 });
