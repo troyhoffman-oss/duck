@@ -94,10 +94,12 @@ export type SpeechSession = {
  * 16-bit mono PCM in base64, and client delegation. It takes the key the door's setup names as a bearer. A
  * line the person speaks is a tone (`lineTone`); half a second after its sound stops, the stand-in hands it
  * off and says its own acknowledgement, and gives the line's transcript in two parts, the last arriving after
- * the hand-off and ending past its offset, as a real model's can. What the door gives it to say it says after a
- * pause of 600 ms, a word every 150 ms, stopping where the person's sound cuts in or after a word a test has
- * it cut at (`cuts`), and its transcript is only what it said. Its times are in ms since the session opened.
- * It reports its seconds of use every 5 s and when closed.
+ * the hand-off and ending past its offset, as a real model's can. What the door gives it to say it acknowledges
+ * at once, with its place on the stand-in's clock, and says after what it is saying now and a pause of a second,
+ * as a real model's speech can follow its acknowledgement; its own acknowledgement of a line it says after
+ * 600 ms. It says a word every 150 ms, stopping where the person's sound cuts in or after a word a test has it
+ * cut at (`cuts`), and its transcript is only what it said. Its times, its transcripts' and acknowledgements'
+ * among them, are in ms since the session opened. It reports its seconds of use every 5 s and when closed.
  */
 export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } = {}) {
   const key = randomBytes(24).toString("base64url");
@@ -144,7 +146,7 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
     // The line the person is speaking now, its times in ms since the session opened, as all its times are.
     let line: { pcm: Int16Array[]; start: number; end: number; quiet?: Timer } | undefined;
     // What it is saying, and what waits its turn.
-    const queue: { words: string[]; tone: number; index: number; pause: boolean }[] = [];
+    const queue: { words: string[]; tone: number; index: number; pause: number }[] = [];
     let saying: Timer | undefined;
     const usage = setInterval(
       () => session && send({ type: "session.usage.updated", usage: { seconds: seconds() } }),
@@ -152,10 +154,10 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
     );
     const seconds = () => Math.ceil(ms() / 1000);
 
-    /** Says `text` in `tone` once what it is saying now is said, a word every 150 ms, after a pause of 600 ms. */
-    function say(text: string, tone: number) {
+    /** Says `text` in `tone` once what it is saying now is said, a word every 150 ms, after `pause` ms. */
+    function say(text: string, tone: number, pause: number) {
       const index = (session?.spoken.push("") ?? 1) - 1;
-      queue.push({ words: text.split(" "), tone, index, pause: true });
+      queue.push({ words: text.split(" "), tone, index, pause });
       if (!saying) next();
     }
     function next() {
@@ -165,9 +167,10 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
       saying = undefined;
       if (!now || word === undefined || !session) return;
       if (now.pause) {
-        now.pause = false;
+        const pause = now.pause;
+        now.pause = 0;
         now.words.unshift(word);
-        saying = setTimeout(next, 600);
+        saying = setTimeout(next, pause);
         return;
       }
       const audio = toneOf(now.tone, 0.15);
@@ -221,7 +224,7 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
           offset_ms: offset,
           delegation: { id, type: "delegation", target: "client" },
         });
-        say("One moment.", TONES.acknowledgement);
+        say("One moment.", TONES.acknowledgement, 600);
       }
       if (transcript)
         setTimeout(
@@ -289,10 +292,15 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
           const kind = String(type).split(".")[1] as SpeechSession["given"][number]["type"];
           session?.given.push({ type: kind, delegation: delegation_id, content });
           if (kind !== "commentary") return;
-          send({ type: "session.commentary.appended", client_event_id: event_id });
+          send({
+            type: "session.commentary.appended",
+            client_event_id: event_id,
+            start_ms: ms(),
+            end_ms: ms(),
+          });
           const at = Math.min(...cut.map((c) => content.indexOf(c)).filter((i) => i >= 0));
           const end = at === Infinity ? -1 : content.slice(at).search(/\s/);
-          return say(end < 0 ? content : content.slice(0, at + end), TONES.said);
+          return say(end < 0 ? content : content.slice(0, at + end), TONES.said, 1000);
         }
         if (type === "session.close") {
           hush();
