@@ -289,6 +289,97 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect([asked?.has(TOOLS.writeItem), asked?.has("send_mail")]).toEqual([true, false]);
   });
 
+  // Before the step on who may ask, which fails until that is built and leaves Theo's request there unanswered.
+  test.failing("a request Finch makes of tally, in a thread Finch starts, in a thread Theo started, or under what tally posted on its own, is given no job or timer tools and of the plugs only what their `others` states give", async () => {
+    const UNGIVEN = [TOOLS.startJob, "jobs", "note_job", "stop_job", TOOLS.setTimer, TOOLS.removeTimer];
+    /** What tally's run of request `text` was given that a coworker's request is not: in this firm, no plug tool. */
+    const beyond = (text: string) => {
+      const run = firm.model.requests.find(all(tally, said(text)));
+      if (!run) throw new Error(`tally had no run of "${text}"`);
+      const plugs = run.tools.filter((t) => /(^|__)mail__/.test(t) && !t.endsWith("__connect"));
+      return [...UNGIVEN.filter((name) => run.has(name)), ...plugs];
+    };
+    /** Finch's message to tally in harbor-ops, under event `reply` if given. */
+    const toTally = (input: string, reply?: string) => {
+      const under = reply ? ["--reply-to", reply] : [];
+      const args = ["messages", "send", "--channel", buzz.channel, ...under, "--mention", key, "--content", "-"];
+      return call(TOOLS.buzz, { args, input });
+    };
+
+    // A thread Finch starts.
+    const [ASK, QUESTION, ANSWER] = [
+      "Ask tally what the 4B water bill came to.",
+      "@tally what did the 4B water bill come to?",
+      "The 4B water bill came to $212.",
+    ];
+    firm.model.on(all(main(finch), said(ASK)), toTally(QUESTION));
+    firm.model.on(all(finch, answered(TOOLS.buzz)), say("I've asked tally."));
+    firm.model.on(all(tally, said(QUESTION)), say(ANSWER));
+    firm.model.on(all(finch, said(ANSWER)), say(`tally says: ${ANSWER}`));
+    await firm.second.send("desk", ASK);
+    await firm.second.nextWith(`tally says: ${ANSWER}`, 120);
+    expect(beyond(QUESTION)).toEqual([]);
+
+    // A thread Theo started, where tally answered him first, so Finch's request goes on in the session his began.
+    const [THEO, FEE, LATER, DUE, ON] = [
+      "What is the 4B parking fee?",
+      "The 4B parking fee is $75 a month.",
+      "In Theo's parking thread, ask tally when the fee is due.",
+      "@tally when is the 4B parking fee due?",
+      "The 4B parking fee is due on the 1st.",
+    ];
+    let root = "";
+    firm.model.on(all(tally, said(THEO)), say(FEE));
+    firm.model.on(all(main(finch), said(LATER)), () => toTally(DUE, root));
+    firm.model.on(all(finch, answered(TOOLS.buzz)), say("I've asked tally in your thread."));
+    firm.model.on(all(tally, said(DUE)), say(ON));
+    firm.model.on(all(finch, said(ON)), say(`tally says: ${ON}`));
+    root = (await buzz.write("theo", "harbor-ops", THEO, { to: key })).id;
+    await buzz.inThread(root, FEE, 90, key);
+    await firm.second.send("desk", LATER);
+    await firm.second.nextWith(`tally says: ${ON}`, 120);
+    expect(beyond(DUE)).toEqual([]);
+
+    // Under what tally posted in harbor-ops from a run of its own work lane, which Finch's reply goes on in.
+    const METER = {
+      ref: "<gas-4b@harbor.example>",
+      payload: {
+        from: "Harbor Gas <meters@gas.harbor.example>",
+        subject: "4B gas meter reading due",
+        text: "The 4B gas meter reading is due by November 30.",
+      },
+      person: team.coworker,
+    };
+    const [POSTED, ASKED, WHO] = [
+      "Team: the 4B gas meter reading is due by November 30.",
+      "Reply to tally's gas meter post and ask who reads the meter.",
+      "@tally who reads the 4B gas meter?",
+    ];
+    let post = "";
+    firm.model.on(all(sorter, shows(METER.payload.subject)), say("wake: a reading due"));
+    firm.model.on(
+      all(tally, shows(METER.payload.subject), (r) => r.has(TOOLS.tell)),
+      call(TOOLS.buzz, {
+        args: ["messages", "send", "--channel", buzz.channel, "--content", "-"],
+        input: POSTED,
+      }),
+    );
+    firm.model.on(all(tally, answered(TOOLS.buzz)), say("Posted."));
+    firm.model.on(all(main(finch), said(ASKED)), () => toTally(WHO, post));
+    firm.model.on(all(finch, answered(TOOLS.buzz)), say("I've asked tally under its post."));
+    firm.model.on(all(tally, said(WHO)), say("Noted."));
+    await firm.push(METER);
+    const posted = async () => {
+      post = (await buzz.inHarborOps("theo", key)).find((m) => m.content === POSTED)?.id ?? "";
+      return post !== "";
+    };
+    await until(`"${POSTED}" in harbor-ops`, posted, 90);
+    await firm.second.send("desk", ASKED);
+    await firm.second.nextWith("I've asked tally under its post.", 60);
+    await until(`tally's run of "${WHO}"`, async () => firm.model.requests.some(all(tally, said(WHO))), 90);
+    expect(beyond(WHO)).toEqual([]);
+  });
+
   test.failing("Rosa tells tally only Ana may ask it now: Theo's next mention gets no answer and no eyes, and Ana's still does", async () => {
     const LIMIT = "From now on only Ana may ask you for work.";
     const LIMITED = "Done: only Ana may ask me now.";

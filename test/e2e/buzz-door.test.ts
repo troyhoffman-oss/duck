@@ -477,4 +477,37 @@ describe("the Buzz door", () => {
     },
     E2E,
   );
+
+  test.failing(
+    "a DM the person writes while duck is stopped is answered once it starts again, and the one answered before it stopped is not answered again",
+    async () => {
+      firm.model.clear();
+      const main = (r: ModelRequest) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell);
+      const [BEFORE, ANSWERED, WHILE, LATER] = [
+        "What does 4B pay a month?",
+        "4B pays $2,400 a month.",
+        "And what does 5C pay?",
+        "5C pays $2,100 a month.",
+      ];
+      // The questions the steps before left open are each read against what she writes.
+      firm.model.on(reading, say("neither"), { times: Number.POSITIVE_INFINITY });
+      firm.model.on(all(main, said(BEFORE)), say(ANSWERED));
+      firm.model.on(all(main, said(WHILE)), say(LATER));
+
+      await buzz.person.send(BEFORE);
+      await buzz.inDm("rosa", buzz.keys.wren, ANSWERED, 60);
+      await firm.stop();
+      await buzz.person.send(WHILE);
+      // Longer than the 5 s buzz-acp looks back from its own start, so her message is older than that look.
+      await Bun.sleep(8_000);
+      await firm.start();
+
+      await buzz.inDm("rosa", buzz.keys.wren, LATER, 120);
+      const answers = (await buzz.dmOf("rosa")).map((m) => m.content);
+      expect([ANSWERED, LATER].map((t) => answers.filter((a) => a === t).length)).toEqual([1, 1]);
+      expect(firm.model.requests.filter(all(main, said(BEFORE)))).toHaveLength(1);
+      firm.trouble.check();
+    },
+    E2E,
+  );
 });
