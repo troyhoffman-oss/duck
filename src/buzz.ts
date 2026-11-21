@@ -23,7 +23,13 @@ const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === na
  * Event `kind` with `tags` and `content`, made at `created_at`, signed as `who`, with its owner's tag where it
  * is an agent, as Buzz's CLI signs every event of one.
  */
-function sign(who: Identity, created_at: number, kind: number, tags: string[][], content: string): Event {
+export function sign(
+  who: Identity,
+  created_at: number,
+  kind: number,
+  tags: string[][],
+  content: string,
+): Event {
   const secret = Buffer.from(who.key, "hex");
   const pubkey = hex(schnorr.getPublicKey(secret));
   const all = who.owner ? [...tags, JSON.parse(who.owner) as string[]] : tags;
@@ -34,21 +40,56 @@ function sign(who: Identity, created_at: number, kind: number, tags: string[][],
 }
 
 /**
- * Holds `who`'s connection to its relay (NIP-42) and hands `handler` once each artifact
- * revision (kind 45010, NIP-AR) someone else writes, from when it starts, in a system channel (NIP-CL) `who`
- * made, with that channel's label. The channels are the relay's own record of those `who` made (39000, which no
- * client writes), asked again at each sign-in and each membership notice (44100, 44101) to `who`, since a
- * subscription's channels are fixed when sent; a notice's content decides nothing. The relay sends a notice of a
- * system channel only to a filter that names that type (buzz-relay src/handlers/side_effects.rs:1318-1327).
- * Revisions the relay holds from before a subscription's end of stored events come oldest first, as written. It
+ * What a connection hands on: events of `kinds` in the channels the relay's record `channels` lists for a key,
+ * each a channel by its `d` tag, with the label `label` gives it, or none where it is not one; asked again at
+ * each notice `notices` lists, since a subscription's channels are fixed when sent.
+ */
+type Channels = {
+  kinds: number[];
+  channels: (me: string) => object;
+  label: (channel: Event, me: string) => string | undefined;
+  notices: (me: string) => object;
+};
+
+/**
+ * The artifact revisions (kind 45010, NIP-AR) in each system channel (NIP-CL) a key made, by the relay's own
+ * record of them (39000, which no client writes), labelled as their second `t` tag, after their type. The relay
+ * sends a notice of a system channel only to a filter that names that type (buzz-relay
+ * src/handlers/side_effects.rs:1318-1327).
+ */
+export const SYSTEM: Channels = {
+  kinds: [45010],
+  channels: (me) => ({ kinds: [39000], "#P": [me], "#t": ["system"] }),
+  label: (c, me) =>
+    tagOf(c, "t") === "system" && tagOf(c, "P") === me
+      ? (c.tags.filter((t) => t[0] === "t")[1]?.[1] ?? "")
+      : undefined,
+  notices: (me) => ({ kinds: [44100, 44101], "#p": [me], "#t": ["system"] }),
+};
+
+/** The starts and ends of calls (kinds 48100, 48103) in every channel a key is a member of (39002). */
+export const MEMBER: Channels = {
+  kinds: [48100, 48103],
+  channels: (me) => ({ kinds: [39002], "#p": [me] }),
+  label: () => "",
+  notices: (me) => ({ kinds: [44100, 44101], "#p": [me] }),
+};
+
+/**
+ * Holds `who`'s connection to its relay (NIP-42) and hands `handler` once each event someone else writes of
+ * the kinds `listened` names, from when it starts, in a channel it names (by default, the artifact revisions
+ * in each system channel `who` made), with that channel's label. The channels are asked again at each sign-in
+ * and each membership notice to `who`; a notice's content decides nothing.
+ * Events the relay holds from before a subscription's end of stored events come oldest first, as written. It
  * connects again when the relay goes, until closed, and after a refused sign-in, logged when its reason is new,
  * in 5 minutes, or in one, telling `notMember`, where `who` is not on the member list. Returns what publishes
  * an event as `who`, what asks the relay, and the channel `who` made for a label.
  */
 export function connect(
   who: Identity,
-  handler: (revision: Event, label: string) => void,
+  handler: (event: Event, label: string) => void,
   notMember = () => {},
+  listened = SYSTEM,
 ) {
   const me = hex(schnorr.getPublicKey(Buffer.from(who.key, "hex")));
   const what = `the Buzz connection of ${me.slice(0, 8)}`;
@@ -61,7 +102,7 @@ export function connect(
   };
   /** A writer's clock is not duck's: an ask reaches back as far as the relay takes a time (ingest.rs), 900 s. */
   const since = () => Math.max(started, now() - 900);
-  /** Each system channel `who` made, by id, with its label and when it was made, as the relay last said. */
+  /** Each channel listened in, by id, with its label and when it was made, as the relay last said. */
   let made = new Map<string, { label: string; at: number }>();
   /** Each message handed on, by id, with when duck first saw it, kept 2,000 s, past its last ask again. */
   const seen = new Map<string, number>();
@@ -112,37 +153,35 @@ export function connect(
   const listen = () => {
     if (listening) socket?.send(JSON.stringify(["CLOSE", listening]));
     [listening, held] = [`messages-${++ids}`, []];
-    const filter = { kinds: [45010], "#h": [...made.keys()], since: since() };
+    const filter = { kinds: listened.kinds, "#h": [...made.keys()], since: since() };
     if (made.size > 0) socket?.send(JSON.stringify(["REQ", listening, filter]));
   };
   const hand = (b: Event) => {
     const label = made.get(tagOf(b, "h"))?.label;
-    if (seen.has(b.id) || b.pubkey === me || !label) return;
+    if (seen.has(b.id) || b.pubkey === me || label === undefined) return;
     seen.set(b.id, now());
     for (const [id, at] of seen) if (at < now() - 2000) seen.delete(id);
     handler(b, label);
   };
   /**
-   * Asks the relay again which system channels `who` made, page by page back to the first, since it answers
+   * Asks the relay again which channels `who` listens in, page by page back to the first, since it answers
    * newest first up to its page limit (buzz-relay src/handlers/req.rs:1324, 1360-1364): a page short of it, or
    * with nothing new, is the last. Then it listens to them.
    */
   const sync = async () => {
     const all = new Map<string, Event>();
     for (let until: number | undefined; ; ) {
-      const page = await query({ kinds: [39000], "#P": [me], "#t": ["system"], limit: 1000, until });
+      const page = await query({ ...listened.channels(me), limit: 1000, until });
       const fresh = page.filter((c) => !all.has(tagOf(c, "d")));
       for (const c of fresh) all.set(tagOf(c, "d"), c);
       if (page.length < 1000 || fresh.length === 0) break;
       until = Math.min(...page.map((c) => c.created_at));
     }
-    // Its first `t` is its type, then its label (NIP-CL).
-    const mine = [...all.values()].filter((c) => tagOf(c, "t") === "system" && tagOf(c, "P") === me);
     made = new Map(
-      mine.map((c) => [
-        tagOf(c, "d"),
-        { label: c.tags.filter((t) => t[0] === "t")[1]?.[1] ?? "", at: Number(tagOf(c, "created_at")) },
-      ]),
+      [...all.values()].flatMap((c) => {
+        const label = listened.label(c, me);
+        return label === undefined ? [] : [[tagOf(c, "d"), { label, at: Number(tagOf(c, "created_at")) }]];
+      }),
     );
     listen();
   };
@@ -187,7 +226,7 @@ export function connect(
         }
         [socket, refused] = [ws, ""];
         signedIn();
-        send("REQ", "notices", { kinds: [44100, 44101], "#p": [me], "#t": ["system"] });
+        send("REQ", "notices", listened.notices(me));
         resync();
       } else if (type === "OK") waiting.get(a)?.(b === true, c);
       else if (type === "EVENT" && a === found?.id) found.events.push(b);

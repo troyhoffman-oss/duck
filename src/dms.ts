@@ -218,6 +218,12 @@ export function listChanged(name: string, db: Database) {
   listed(name);
 }
 
+/** Has duck publish the seconds a call of coworker `name`'s added: in its person's preferences and the admins' card. */
+export function callEnded(name: string) {
+  listed(name);
+  firmChanged();
+}
+
 /**
  * Where an item of coworker `name`'s shows in its person's To-dos: an open or waiting item whose next step its
  * person holds needs them, named as the coworker knows them, in full or by their first name; any other open
@@ -329,11 +335,11 @@ async function admins(setup: Setup, duck: ReturnType<typeof connect>) {
 
 /**
  * Publishes what the firm's admins see, as one `duck.firm` artifact in each owner's and admin's channel with
- * duck, which is an admin itself: each coworker's person, state, whether its goose is up, when it last ran and its cost this calendar
- * month, and the most model calls of a job's run.
+ * duck, which is an admin itself: each coworker's person, state, whether its goose is up, when it last ran,
+ * its cost and seconds of calls this calendar month, and the most model calls of a job's run.
  */
 async function publishFirm(setup: Setup, duck: ReturnType<typeof connect>) {
-  const costs = monthCosts(setup);
+  const { costs, seconds } = monthCosts(setup);
   const coworkers = made(setup).map((name) => {
     const { name: person, state } = factsOf(setup, name);
     const own = running.get(name);
@@ -345,6 +351,7 @@ async function publishFirm(setup: Setup, duck: ReturnType<typeof connect>) {
       up: own?.up() ?? false,
       last_ran: ran ?? null,
       cost: Math.round((costs.get(name) ?? 0) * 100) / 100,
+      voice_seconds: seconds.get(name),
     };
   });
   const content = JSON.stringify({
@@ -386,9 +393,11 @@ async function publishList(setup: Setup, duck: ReturnType<typeof connect>, name:
 
 /**
  * Publishes coworker `name`'s settings as its `duck.person` artifact: each with its value and whether the firm
- * locks it, messages an hour as its person names them, and its cost this calendar month (SPEC part 1, Cost).
+ * locks it, messages an hour as its person names them, and its cost and seconds of calls this calendar month
+ * (SPEC part 1, Cost).
  */
 async function publishSettings(setup: Setup, duck: ReturnType<typeof connect>, name: string) {
+  const month = monthCosts(setup, personOf(setup, name).zone);
   const of = (key: (typeof SETTINGS)[number]) => ({
     value: setting(setup, name, key) ?? null,
     locked: setup.settings.locked?.includes(key) ?? false,
@@ -405,7 +414,9 @@ async function publishSettings(setup: Setup, duck: ReturnType<typeof connect>, n
     quiet: of("quiet"),
     messages_per_hour: { ...each, value: perHour },
     zone: of("zone"),
-    cost: Math.round((monthCosts(setup, personOf(setup, name).zone).get(name) ?? 0) * 100) / 100,
+    cost: Math.round((month.costs.get(name) ?? 0) * 100) / 100,
+    // Only a coworker that has talked in a call this month shows its seconds.
+    voice_seconds: month.seconds.get(name),
   });
   await publishFor(setup, duck, name, ["duck.person", `${name}'s preferences`, content]);
 }

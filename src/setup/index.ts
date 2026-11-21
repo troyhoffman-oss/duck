@@ -11,9 +11,10 @@ import { questions } from "../sorter";
  * is the line's project at Photon's Spectrum, `line` the line's https:// address, `key` names the project's
  * secret and `auth` the person's own handle as Photon writes it, the one sender it takes. At an `email` door,
  * `address` is the mail service's API, `mailbox` the coworker's own address there, `key` names the secret of
- * a key to that mailbox and `auth` the person's own mail address. Every claimed coworker has a `buzz` door,
- * which duck makes, at the setup's relay; it answers anyone who mentions the coworker where its `answers` is
- * `anyone`, and otherwise only its owner.
+ * a key to that mailbox and `auth` the person's own mail address. At a `voice` door, a call in Buzz, `address`
+ * is the speech model's live API, `model` and `voice` what it speaks with and `key` names the secret of its key.
+ * Every claimed coworker has a `buzz` door, which duck makes, at the setup's relay; it answers anyone who
+ * mentions the coworker where its `answers` is `anyone`, and otherwise only its owner.
  */
 export type Door = {
   kind: string;
@@ -23,6 +24,8 @@ export type Door = {
   line?: string;
   mailbox?: string;
   answers?: string;
+  model?: string;
+  voice?: string;
 };
 
 /**
@@ -369,7 +372,9 @@ export function check(folder: string): string[] {
     ...(setup.model.key ? [setup.model.key] : []),
     ...(setup.sorter.key ? [setup.sorter.key] : []),
     ...[setup.backup?.key, setup.backup?.secret, setup.backup?.password].filter((name) => name !== undefined),
-    ...doors.flatMap(([, d]) => Object.values(d).flatMap((d) => [d.key, ...(d.auth ? [d.auth] : [])])),
+    ...doors.flatMap(([, d]) =>
+      Object.values(d).flatMap((d) => [d.key, d.auth].filter((n) => n !== undefined)),
+    ),
     ...claimed(setup).flatMap((c) => plugKeys(setup, c)),
     ...Object.values(setup.plugs ?? {}).flatMap((p) => (p.events?.push ? [p.events.push] : [])),
   ];
@@ -432,17 +437,26 @@ export function check(folder: string): string[] {
     problems.push(`${where} names coworker ${coworker}, which duck has not made; make it with duck make`);
   for (const [name, own] of doors) {
     unmade("doors", name);
-    for (const [door, d] of Object.entries(own))
-      if (
+    for (const [door, d] of Object.entries(own)) {
+      const lacks = (["model", "voice", "key"] as const).filter((part) => !d[part]);
+      if (d.kind === "voice" && lacks.length > 0)
+        problems.push(
+          `door ${name}.${door} names no ${lacks.join(", ").replace(/, (?=[^,]*$)/, " or ")}: a voice door names its speech model's address, its model and voice, and the secret of its key`,
+        );
+      else if (d.kind === "voice" && !setup.buzz)
+        problems.push(`door ${name}.${door} is a call in Buzz, and the setup has no Buzz relay`);
+      else if (
         !(
           d.kind === "http" ||
+          d.kind === "voice" ||
           (d.kind === "text" && !!d.auth && !!d.line) ||
           (d.kind === "email" && !!d.auth && !!d.mailbox)
         )
       )
         problems.push(
-          `door ${name}.${door} is of kind "${d.kind}"; the setup gives http, text with a line and an auth, and email with a mailbox and an auth, and duck makes each coworker's buzz door`,
+          `door ${name}.${door} is of kind "${d.kind}"; the setup gives http, text with a line and an auth, email with a mailbox and an auth, and voice with a model, a voice and a key, and duck makes each coworker's buzz door`,
         );
+    }
   }
   for (const [name, plug] of Object.entries(setup.plugs ?? {})) {
     if (Array.isArray(plug.coworkers))

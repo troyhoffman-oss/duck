@@ -8,6 +8,7 @@ import { aboutSession, add, broken, type Event, lastEvent, mark as state, waitin
 import type { Coworker } from "./run";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
 import { buzzKey } from "./setup/coworkers";
+import { inCall, voiceIn } from "./voice";
 
 /** A file as it crosses a door: its name, media type and bytes in base64. */
 type DoorFile = { name: string; type: string; data: string };
@@ -91,12 +92,12 @@ export function saved(folder: string, name: string, bytes: Buffer) {
 /**
  * Writes what the person wrote at `door` as an inbox event, with their files where the coworker reads them
  * and cannot change them, and wakes the coworker. A buzz door's message keeps its place as the payload. At a
- * door but email it is held as `reading` until duck has read what it answers of the questions it asked them
- * (SPEC part 9). It returns when the runs the message wakes or steers have ended and what they said has gone
- * out, or null for a message already taken.
+ * door but email or voice, where no ask goes, it is held as `reading` until duck has read what it answers of
+ * the questions it asked them (SPEC part 9). It returns when the runs the message wakes or steers have ended
+ * and what they said has gone out, or null for a message already taken.
  */
 function taken(c: Coworker, door: string, body: Written) {
-  const reads = doorsOf(c.setup, c.name)[door]?.kind !== "email";
+  const reads = askDoors(c).includes(door);
   const event = c.db.transaction(() => {
     const event = add(c.db, door, body.id, body.place ? JSON.stringify(body.place) : null);
     if (event === null) return null;
@@ -113,16 +114,20 @@ function taken(c: Coworker, door: string, body: Written) {
   return (reads ? readIn(c, event) : Promise.resolve()).then(() => c.wake()).then(() => c.sending);
 }
 
-/** The doors of `c` an ask may go to: all its person's doors but email, since mail answers no ask. */
-export const askDoors = (c: Coworker) => c.doors.filter((d) => doorsOf(c.setup, c.name)[d]?.kind !== "email");
+/** The doors of `c` an ask may go to: all its person's doors but email and voice, since neither answers an ask. */
+export const askDoors = (c: Coworker) =>
+  c.doors.filter((d) => !["email", "voice"].includes(doorsOf(c.setup, c.name)[d]?.kind as string));
 
 /**
- * Where `c`'s next message goes: the door among its person's own where they last wrote, or before they ever
- * have, the first; for an `ask`, among `askDoors` where it has any. With that door's setup and their last
- * message there.
+ * Where `c`'s next message goes: the call the person is in with the coworker, or else the door among their
+ * own but voice where they last wrote, or before they ever have, the first; for an `ask`, among `askDoors`
+ * where it has any. With that door's setup and their last message there.
  */
 export function doorTo(c: Coworker, ask = false) {
-  const doors = ask && askDoors(c).length > 0 ? askDoors(c) : c.doors;
+  const call = ask ? undefined : inCall(c);
+  if (call?.say) return { door: call.door, set: doorsOf(c.setup, c.name)[call.door] as Door, last: null };
+  const spoken = (d: string) => doorsOf(c.setup, c.name)[d]?.kind === "voice";
+  const doors = ask && askDoors(c).length > 0 ? askDoors(c) : c.doors.filter((d) => !spoken(d));
   const last = lastEvent(c.db, doors);
   const door = last?.source ?? (doors[0] as string);
   return { door, set: doorsOf(c.setup, c.name)[door] as Door, last };
@@ -131,17 +136,22 @@ export function doorTo(c: Coworker, ask = false) {
 /**
  * Sends `text` from the main conversation, an `ask` or not, to the door `doorTo` names, with each file of the
  * coworker's it names, which the person sees by its name: at a buzz door, to the place of their last message
- * there. It returns the door, the archive's id of the message, and `delivered`: when the try the door took
- * ended, or null when it took none. A delivery the door does not take after three tries is logged as not
- * delivered, and the door is broken.
+ * there; in a call, to the speech model to say, which the archive keeps as it is said. It returns the door,
+ * the archive's id of the message where it is kept now, and `delivered`: when the try the door took ended, or
+ * null when it took none. A delivery the door does not take after three tries is logged as not delivered,
+ * and the door is broken.
  */
 export function deliver(c: Coworker, said: string, since: number, ask = false) {
   const { door, set, last } = doorTo(c, ask);
   const named = [...new Set(said.match(PATH) ?? [])].map((p) => p.replace(/[.,;:!?]+$/, ""));
   const files = named.filter((p) => fileOf(c.setup, c.name, p));
   const text = files.reduce((t, p) => t.replaceAll(p, basename(p)), said);
-  const id = told(c.db, door, c.conversation() ?? null, text, files);
   console.log(JSON.stringify({ reply: c.name, door, ms: Math.round(performance.now() - since) }));
+  if (set.kind === "voice") {
+    inCall(c)?.say?.(text);
+    return { door, id: undefined, delivered: Promise.resolve(Date.now()) };
+  }
+  const id = told(c.db, door, c.conversation() ?? null, text, files);
   const local = files.map((p) => fileOf(c.setup, c.name, p) as string);
   const body = JSON.stringify({
     id: `${c.name}-${id}`,
@@ -292,16 +302,17 @@ async function post(c: Coworker, set: Door, payload: string | null, text: string
  * Starts buzz-acp at each buzz door of `c`. It hands each Buzz message for the coworker to `duck buzz` as an
  * ACP prompt: in a DM, from the owner or an agent the owner also owns, and where it is mentioned, from them or
  * at a door that answers anyone from anyone, as buzz-acp's gate admits in its owner-only and anyone modes.
- * When it needs a mention stays at Buzz's default. At each text door it opens Photon's stream, and at each
- * email door the mail service's. buzz-acp stops when it cannot reach its relay after a few tries, and a stream
- * can end, so each is kept going until the coworker stops, which ends buzz-acp and the stream. It settles when
- * every door has stopped.
+ * When it needs a mention stays at Buzz's default. At each text door it opens Photon's stream, at each email
+ * door the mail service's, and at a voice door it joins the person's calls with the coworker. buzz-acp stops
+ * when it cannot reach its relay after a few tries, and a stream can end, so each is kept going until the
+ * coworker stops, which ends buzz-acp and the stream. It settles when every door has stopped.
  */
 export function listen(c: Coworker) {
   const port = c.setup.listen.split(":")[1];
   const doors = Object.entries(doorsOf(c.setup, c.name)).map(([door, set]) => {
     if (set.kind === "text") return textIn(c, door, set);
     if (set.kind === "email") return mailIn(c, door, set);
+    if (set.kind === "voice") return voiceIn(c, door, set, (id, text) => taken(c, door, { id, text }));
     if (set.kind !== "buzz") return undefined;
     return keep(c, door, `buzz-acp at ${c.name}.${door}`, async () => {
       const acp = Bun.spawn(["buzz-acp"], {

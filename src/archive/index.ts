@@ -44,6 +44,14 @@ export const told = (db: Database, door: string, session: string | null, text: s
     ]).lastInsertRowid,
   );
 
+/** Keeps that a call at voice door `door` `happened`: started or ended. */
+export const callKept = (db: Database, door: string, happened: string) =>
+  db.run("insert into messages (at, way, door, text, files) values (?, 'call', ?, ?, '[]')", [
+    now(),
+    door,
+    happened,
+  ]);
+
 /** What the person wrote in events `ids`, with the paths of the files they sent. */
 export function said(db: Database, ids: number[]) {
   const rows = db
@@ -191,6 +199,6 @@ export function readArchive(db: Database, person: string, input: Record<string, 
       ? `${m.text.slice(0, CHARS)}… (cut from ${m.text.length} characters; read it whole with message ${m.id})`
       : m.text;
   const line = (m: Message) =>
-    `- ${m.at}, ${m.way === "in" ? `${m.author ?? person} wrote` : `to ${person}`} at ${m.door}${m.source ? `, loaded from ${m.source}` : ""}${m.session ? `, session ${m.session}` : ""}: ${cut(m)}`;
+    `- ${m.at}, ${m.way === "in" ? `${m.author ?? person} wrote` : m.way === "call" ? "a call" : `to ${person}`} at ${m.door}${m.source ? `, loaded from ${m.source}` : ""}${m.session ? `, session ${m.session}` : ""}: ${cut(m)}`;
   return found.length > 0 ? found.map(line).join("\n") : "No message matches.";
 }

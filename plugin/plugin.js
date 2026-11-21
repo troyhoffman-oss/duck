@@ -241,6 +241,9 @@ export function apply(ctx) {
 
   /** duck's answers when a setting changed (src/dms.ts); any other is a refusal, shown as it is. */
   const SETTLED = /^(That coworker is (paused|resumed):|Done: that coworker's setting is changed\.)/;
+  /** A month's seconds of calls, where there were any, in whole minutes begun, after its model cost. */
+  const calls = (seconds) => (seconds ? ` and ${Math.ceil(seconds / 60)} min of voice calls` : "");
+
   /** Its person's settings for the coworker, as duck publishes them; a change is a request in fixed words. */
   function Preferences({ agent }) {
     const [prefs, reread] = usePublished("duck.person", agent.pubkey);
@@ -248,7 +251,7 @@ export function apply(ctx) {
     if (prefs === null) return note("Reading its preferences…");
     if (prefs instanceof Error) return note(prefs.message);
     if (!prefs) return note("duck has not shown its preferences yet.");
-    const { coworker, paused, quiet, messages_per_hour: perHour, zone, cost } = prefs;
+    const { coworker, paused, quiet, messages_per_hour: perHour, zone, cost, voice_seconds: voice } = prefs;
     const send = (words) =>
       tell(words)
         .then((answer) => setRefused(SETTLED.test(answer) ? "" : answer))
@@ -336,7 +339,7 @@ export function apply(ctx) {
         h(
           "p",
           { className: "m-0 text-body-sm text-subtle" },
-          `Model use this month at list price: $${cost.toFixed(2)}`,
+          `Model use this month at list price: $${cost.toFixed(2)}${calls(voice)}`,
         ),
     );
   }
@@ -387,7 +390,7 @@ export function apply(ctx) {
               cell(c.person ?? "", "person"),
               cell(stateOf(c), "state"),
               cell(when(c.last_ran), "ran"),
-              cell(`$${c.cost.toFixed(2)}`, "cost"),
+              cell(`$${c.cost.toFixed(2)}${calls(c.voice_seconds)}`, "cost"),
             ),
           ),
         ),

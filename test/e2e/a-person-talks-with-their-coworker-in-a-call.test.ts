@@ -108,7 +108,7 @@ describe("a person talks with their coworker in a call", () => {
       .map((e) => e.state);
   };
 
-  test.failing("the admin gives her coworker a voice door: duck check names what it lacks, and once it names its speech model, voice and secret it installs", async () => {
+  test("the admin gives her coworker a voice door: duck check names what it lacks, and once it names its speech model, voice and secret it installs", async () => {
     firm.edit((setup) => {
       (setup.doors[harbor.coworker] as Record<string, object>).voice = {
         kind: "voice",
@@ -129,7 +129,7 @@ describe("a person talks with their coworker in a call", () => {
     await buzz.person.online(120);
   });
 
-  test.failing("after writing to it in Buzz, she calls her coworker in a private channel of just the two of them: it joins as itself, and its speech model is given its instructions and their names and nothing else", async () => {
+  test("after writing to it in Buzz, she calls her coworker in a private channel of just the two of them: it joins as itself, and its speech model is given its instructions and their names and nothing else", async () => {
     firm.model.on(said(HELLO), say(HI));
     await buzz.person.send(HELLO);
     expect((await buzz.person.next(60)).content).toBe(HI);
@@ -149,7 +149,7 @@ describe("a person talks with their coworker in a call", () => {
     await hangUp(call, session);
   });
 
-  test.failing("her spoken line is her message at the voice door, whole though its last word was heard after the hand-off: she hears the speech model's acknowledgement, then her coworker's first line and answer spoken", async () => {
+  test("her spoken line is her message at the voice door, whole though its last word was heard after the hand-off: she hears the speech model's acknowledgement, then her coworker's first line and answer spoken", async () => {
     firm.model.on(said(ASK), both(say(FIRST), call("shell", { command: "true" })));
     firm.model.on(answered("shell"), say(ANSWER));
     const before = lastMessage();
@@ -167,7 +167,7 @@ describe("a person talks with their coworker in a call", () => {
     await hangUp(inCall, session);
   });
 
-  test.failing("she speaks while her coworker is working, and it steers that run instead of starting a second", async () => {
+  test("she speaks while her coworker is working, and it steers that run instead of starting a second", async () => {
     const [PULL, ALSO] = ["Can you pull the 5C lease?", "And the gate code for 5C?"];
     const BOTH = "The 5C lease is pulled, and its gate code is 1357.";
     firm.model.on(said(PULL), both(say("Pulling the 5C lease."), call("shell", { command: "true" })));
@@ -189,7 +189,7 @@ describe("a person talks with their coworker in a call", () => {
     await hangUp(inCall, session);
   });
 
-  test.failing("a line the speech model hands off with no transcript is not handed on, and the speech model is told to ask her to say it again", async () => {
+  test("a line the speech model hands off with no transcript is not handed on, and the speech model is told to ask her to say it again", async () => {
     const MUMBLE = "Could you also look at the boiler in 2A";
     speech.hears(MUMBLE, { transcript: false });
     const events = voiceEvents().length;
@@ -205,7 +205,7 @@ describe("a person talks with their coworker in a call", () => {
     await hangUp(inCall, session);
   });
 
-  test.failing("she talks over an answer: it stops, and the archive keeps what was said, cut where she cut it", async () => {
+  test("she talks over an answer: it stops, and the archive keeps what was said, cut where she cut it", async () => {
     const [TELL, STOP] = ["Tell me everything about the 2A boiler.", "Wait, stop."];
     const LONG =
       "The 2A boiler was serviced in May, its pilot light failed twice in October, the part is on order from the supplier, and the plumber comes back on Friday morning to fit it and test the heat in every unit on that floor.";
@@ -228,7 +228,7 @@ describe("a person talks with their coworker in a call", () => {
     expect(out).not.toContain(LONG);
   });
 
-  test.failing("a question raised in a call goes to her in Buzz and is not spoken, her yes in the call answers nothing, and her yes in Buzz releases the held call, whose outcome she hears in the call", async () => {
+  test("a question raised in a call goes to her in Buzz and is not spoken, her yes in the call answers nothing, and her yes in Buzz releases the held call, whose outcome she hears in the call", async () => {
     const [FILE, SEND, YES] = ["/duck/home/lease-4B.txt", "Send Dana the 4B lease.", "Yes, send it."];
     /** What the session that made a held call is told on a yes. */
     const OUTCOME = '"answer":"yes"';
@@ -261,7 +261,7 @@ describe("a person talks with their coworker in a call", () => {
     await hangUp(inCall, session);
   });
 
-  test.failing("she hangs up while her coworker is still working: it leaves, its session with the speech model closes, the call ends, the archive keeps the call's start and end around what was said, and the answer reaches her in Buzz", async () => {
+  test("she hangs up while her coworker is still working: it leaves, its session with the speech model closes, the call ends, the archive keeps the call's start and end around what was said, and the answer reaches her in Buzz", async () => {
     const LATE = "What did the inspector say about 3D?";
     const LATER = "The inspector passed 3D with one note about the smoke alarm.";
     firm.model.on(said(LATE), both(say("I'll check the 3D report."), call("shell", { command: "true" })));
@@ -290,7 +290,7 @@ describe("a person talks with their coworker in a call", () => {
     expect(kept.filter((m) => m.way === "out").map((m) => m.text)).toContain("I'll check the 3D report.");
   });
 
-  test.failing("her coworker leaves a call she ends in Buzz while still in it, and a call that nears its time limit before the limit", async () => {
+  test("her coworker leaves a call she ends in Buzz while still in it, and a call that nears its time limit before the limit", async () => {
     const ended = await open(await buzz.privateChannel("rosa", [wren]));
     await ended.call.end();
     await ended.call.leaves(wren, 30);
@@ -305,7 +305,7 @@ describe("a person talks with their coworker in a call", () => {
     timed.call.hangUp();
   });
 
-  test.failing("a call her coworker's person did not start, one with a third member, and one while another is open are not joined", async () => {
+  test("a call her coworker's person did not start, one with a third member, and one while another is open are not joined", async () => {
     const open1 = await open(dm);
     const others = [
       await buzz.call("theo", await buzz.dmWith("theo", wren)),
@@ -324,7 +324,7 @@ describe("a person talks with their coworker in a call", () => {
     await hangUp(open1.call, open1.session);
   });
 
-  test.failing("a call is one line in duck's cost log with the seconds the speech model reported, and the month's voice minutes show beside the model cost in her Preferences and on the admins' card", async () => {
+  test("a call is one line in duck's cost log with the seconds the speech model reported, and the month's voice minutes show beside the model cost in her Preferences and on the admins' card", async () => {
     const LINE = "Just checking the line works.";
     speech.hears(LINE, { hand: false });
     const { call: inCall, session } = await open(dm);

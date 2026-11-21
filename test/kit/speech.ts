@@ -94,9 +94,10 @@ export type SpeechSession = {
  * 16-bit mono PCM in base64, and client delegation. It takes the key the door's setup names as a bearer. A
  * line the person speaks is a tone (`lineTone`); half a second after its sound stops, the stand-in hands it
  * off and says its own acknowledgement, and gives the line's transcript in two parts, the last arriving after
- * the hand-off and ending past its offset, as a real model's can. What the door gives it to say it says a word
- * every 150 ms, stopping where the person's sound cuts in, and its transcript is only what it said. It reports
- * its seconds of use every 5 s and when closed.
+ * the hand-off and ending past its offset, as a real model's can. What the door gives it to say it says after a
+ * pause of 300 ms, a word every 150 ms, stopping where the person's sound cuts in, and its transcript is only
+ * what it said. Its times are in ms since the session opened. It reports its seconds of use every 5 s and when
+ * closed.
  */
 export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } = {}) {
   const key = randomBytes(24).toString("base64url");
@@ -138,23 +139,21 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
       trouble.add(new Error(`the stand-in speech model: ${message}`));
       send({ type: "error", error: { type: "invalid_request_error", message, client_event_id } });
     };
-    // The person's sound as heard: its clock in ms of sound, and the line now being spoken.
-    let heardMs = 0;
+    // The line the person is speaking now, its times in ms since the session opened, as all its times are.
     let line: { pcm: Int16Array[]; start: number; end: number; quiet?: Timer } | undefined;
     // What it is saying, and what waits its turn.
-    const queue: { words: string[]; tone: number; index: number }[] = [];
+    const queue: { words: string[]; tone: number; index: number; pause: boolean }[] = [];
     let saying: Timer | undefined;
-    let outMs = 0;
     const usage = setInterval(
       () => session && send({ type: "session.usage.updated", usage: { seconds: seconds() } }),
       5000,
     );
     const seconds = () => Math.ceil(ms() / 1000);
 
-    /** Says `text` in `tone` once what it is saying now is said, a word every 150 ms. */
+    /** Says `text` in `tone` once what it is saying now is said, a word every 150 ms, after a pause of 300 ms. */
     function say(text: string, tone: number) {
       const index = (session?.spoken.push("") ?? 1) - 1;
-      queue.push({ words: text.split(" "), tone, index });
+      queue.push({ words: text.split(" "), tone, index, pause: true });
       if (!saying) next();
     }
     function next() {
@@ -163,9 +162,14 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
       const word = now?.words.shift();
       saying = undefined;
       if (!now || word === undefined || !session) return;
+      if (now.pause) {
+        now.pause = false;
+        now.words.unshift(word);
+        saying = setTimeout(next, 300);
+        return;
+      }
       const audio = toneOf(now.tone, 0.15);
-      const at = { start_ms: outMs, end_ms: outMs + 150 };
-      outMs += 150;
+      const at = { start_ms: ms(), end_ms: ms() + 150 };
       send({
         type: "session.output_audio.delta",
         delta: Buffer.from(audio.buffer).toString("base64"),
@@ -256,8 +260,8 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
           const bytes = Buffer.from(String(event.audio ?? ""), "base64");
           if (bytes.length % 2 !== 0) return wrong("its sound is not 16-bit", event_id);
           const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length >> 1).slice();
-          const [start, end] = [heardMs, heardMs + (pcm.length * 1000) / RATE];
-          heardMs = end;
+          const end = ms();
+          const start = end - (pcm.length * 1000) / RATE;
           if (!loud(pcm)) return;
           hush();
           line ??= { pcm: [], start: Math.round(start), end: 0 };

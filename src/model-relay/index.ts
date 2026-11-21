@@ -184,21 +184,27 @@ export const monthOf = (at: Date, zone: string) =>
     .format(at)
     .slice(0, 7);
 
-/** For each zone a month is cut in: how far duck's log has been read, and each coworker's cost that month. */
-const tallies = new Map<string, { month: string; read: number; costs: Map<string, number> }>();
+type Tally = { month: string; read: number; costs: Map<string, number>; seconds: Map<string, number> };
+/**
+ * For each zone a month is cut in: how far duck's log has been read, and each coworker's cost and seconds of
+ * calls that month.
+ */
+const tallies = new Map<string, Tally>();
 
 /**
  * Each coworker's cost in US dollars this calendar month in time zone `zone`, the firm's unless given, summed
- * from the model relay's line per call in duck's log, the file podman keeps in storage (src/setup/install.ts).
- * Each look reads only what the log gained since the last in that zone; a new month reads it again from the start.
+ * from the model relay's line per call in duck's log, the file podman keeps in storage (src/setup/install.ts),
+ * and its seconds of calls at its voice door, from the door's line per call there. Each look reads only what
+ * the log gained since the last in that zone; a new month reads it again from the start.
  */
-export function monthCosts(setup: Setup, zone = setup.zone): ReadonlyMap<string, number> {
+export function monthCosts(setup: Setup, zone = setup.zone): Readonly<Pick<Tally, "costs" | "seconds">> {
   const file = join(setup.storage.folder, "duck.log");
   const month = monthOf(new Date(), zone);
   const size = existsSync(file) ? statSync(file).size : 0;
-  const tally = tallies.get(zone) ?? { month: "", read: 0, costs: new Map() };
+  const tally = tallies.get(zone) ?? { month: "", read: 0, costs: new Map(), seconds: new Map() };
   tallies.set(zone, tally);
-  if (month !== tally.month || size < tally.read) Object.assign(tally, { month, read: 0, costs: new Map() });
+  if (month !== tally.month || size < tally.read)
+    Object.assign(tally, { month, read: 0, costs: new Map(), seconds: new Map() });
   const fd = size > tally.read ? openSync(file, "r") : undefined;
   // In pieces, so a log of many months is never held whole.
   for (const piece = Buffer.alloc(1 << 22); fd !== undefined && tally.read < size; ) {
@@ -211,11 +217,12 @@ export function monthCosts(setup: Setup, zone = setup.zone): ReadonlyMap<string,
       const [at = "", , , ...printed] = line.split(" ");
       const text = printed.join(" ");
       if (!text.startsWith('{"relay":')) continue;
-      const { relay, cost } = JSON.parse(text) as { relay: string; cost: number | null };
-      if (cost && monthOf(new Date(at.replace(/(\.\d{3})\d+/, "$1")), zone) === month)
-        tally.costs.set(relay, (tally.costs.get(relay) ?? 0) + cost);
+      const { relay, cost, seconds } = JSON.parse(text) as { relay: string; cost?: number; seconds?: number };
+      if (monthOf(new Date(at.replace(/(\.\d{3})\d+/, "$1")), zone) !== month) continue;
+      if (cost) tally.costs.set(relay, (tally.costs.get(relay) ?? 0) + cost);
+      if (seconds) tally.seconds.set(relay, (tally.seconds.get(relay) ?? 0) + seconds);
     }
   }
   if (fd !== undefined) closeSync(fd);
-  return tally.costs;
+  return tally;
 }
