@@ -394,7 +394,14 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     ];
     // His message's id is known once Buzz's CLI has sent it, which can be after tally's run asks the model.
     const written = Promise.withResolvers<string>();
-    const args = async () => ["messages", "send", "--channel", buzz.channel, "--reply-to", await written.promise];
+    const args = async () => [
+      "messages",
+      "send",
+      "--channel",
+      buzz.channel,
+      "--reply-to",
+      await written.promise,
+    ];
     firm.model.on(all(tally, said(THEO)), async () =>
       call(TOOLS.buzz, { args: [...(await args()), "--content", "-"], input: CHECKING }),
     );

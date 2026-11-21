@@ -432,7 +432,16 @@ describe("the Buzz door", () => {
       const sent = Promise.withResolvers<string>();
       firm.model.on(all(main, said(CLEAN)), async () =>
         call(TOOLS.buzz, {
-          args: ["messages", "send", "--channel", buzz.channel, "--reply-to", await sent.promise, "--content", "-"],
+          args: [
+            "messages",
+            "send",
+            "--channel",
+            buzz.channel,
+            "--reply-to",
+            await sent.promise,
+            "--content",
+            "-",
+          ],
           input: BEFORE,
         }),
       );
