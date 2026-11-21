@@ -5,6 +5,7 @@ import { type Buzz, E2E, type Firm, loadPlugin, startBuzz, startFirm } from "../
 const NOT_FIT = "That proof does not fit a coworker made for you here, so nothing changed.";
 const MINE = "That coworker is yours already.";
 const NOT_ADMIN = "Only an owner or admin of this community sets that, so nothing changed.";
+const LIMITED = "Done: a job's run is cut off at that many model calls from its next call.";
 const OFFERED = "lark, made for you by your firm. The name you give it above is its own.";
 
 // The join path (SPEC part 11, duck's channel), as a person and an admin see it: the person in duck's plugin,
@@ -15,6 +16,8 @@ describe("a person claims the coworker made for them, and nothing of it shows in
   let firm: Firm;
   let plugin: Awaited<ReturnType<typeof loadPlugin>>;
   let lark = "";
+  /** The setup's Buzz, while a step has taken it out. */
+  let relay: { relay: string } | undefined;
   beforeAll(async () => {
     buzz = await startBuzz();
     firm = await startFirm({ buzz });
@@ -148,12 +151,13 @@ describe("a person claims the coworker made for them, and nothing of it shows in
   );
 
   test(
-    "with duck's channels gone from the setup, duck install takes away the units it wrote for claims in them",
+    "with Buzz gone from the setup, duck install takes away the units it wrote for claims from Buzz",
     async () => {
       const claims = [".path", ".service"].map((kind) => `duck-firm-${firm.name}-install${kind}`);
       expect(firm.units()).toEqual(expect.arrayContaining(claims));
       firm.edit((setup) => {
-        delete setup.buzz?.owner;
+        relay = setup.buzz;
+        delete setup.buzz;
       });
       await firm.duck("install");
       expect(firm.units()).toEqual([`duck-firm-${firm.name}.service`]);
@@ -165,7 +169,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
     "an admin's duck make for a person with no handle is refused, since a claim from Buzz gives none, and nothing is made",
     async () => {
       firm.edit((setup) => {
-        if (setup.buzz) setup.buzz.owner = buzz.tagFor(duck());
+        setup.buzz = relay;
       });
       await expect(firm.duck("make", "finch", "", buzz.keys.ana)).rejects.toThrow('"" is not a handle');
       expect(() => firm.facts("finch")).toThrow();
@@ -176,7 +180,7 @@ describe("a person claims the coworker made for them, and nothing of it shows in
   test(
     "a person who sends again the proof of the coworker they claimed is told in fixed words it is theirs already, and anyone else who sends it learns nothing",
     async () => {
-      // The step before put duck's channels back in the setup; installing it starts duck with them on.
+      // The step before put Buzz back in the setup; installing it starts duck with its channels on.
       await firm.duck("install");
       expect(await buzz.askDuck("ana", duck(), buzz.proof("ana", lark))).toBe(MINE);
       expect(await buzz.askDuck("theo", duck(), buzz.proof("ana", lark), 15)).toBeUndefined();
@@ -268,6 +272,28 @@ describe("a person claims the coworker made for them, and nothing of it shows in
         l.some((t) => t.startsWith("robin,")),
       );
       expect(shown.lines.join(" ")).not.toContain("heron");
+    },
+    E2E,
+  );
+
+  test.failing(
+    "a duck the owner makes a member again says the owner's step once in its log, and duck check names duck's key and that step as still to do until the owner makes it an admin again",
+    async () => {
+      const told = `duck's Buzz key ${duck()} is not an admin`;
+      const times = async () => (await firm.logs()).split(told).length - 1;
+      const before = await times();
+      const role = (to: string) =>
+        buzz.publish("rosa", buzz.sign("rosa", 9032, [["p", duck()], ["role", to]], ""));
+      await role("member");
+      // An admin's request has duck read the member list twice: for the request, and for the card it publishes.
+      expect(await buzz.askDuck("rosa", duck(), "set model calls per job 40")).toBe(LIMITED);
+      expect((await times()) - before).toBe(1);
+      const check = await firm.duck("check");
+      expect(check).toContain(`duck's Buzz key is ${duck()}`);
+      expect(check).toContain("Community admin, then Membership");
+      await role("admin");
+      expect(await buzz.askDuck("rosa", duck(), "set model calls per job 50")).toBe(LIMITED);
+      expect(await firm.duck("check")).not.toContain(duck());
     },
     E2E,
   );

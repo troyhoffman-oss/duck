@@ -72,8 +72,8 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
     }
   }
 
-  test(
-    "duck's offer shows in the person's New agent, carrying the tag by which the community's owner authorised duck",
+  test.failing(
+    "duck's offer shows in the person's New agent, signed by duck's own key with no owner's tag, as is duck's profile, named duck",
     async () => {
       const made = await firm.duck("make", "lark", "ana", "Ana");
       lark = /its Buzz key is ([0-9a-f]{64})/.exec(made)?.[1] as string;
@@ -85,7 +85,11 @@ describe("a person adds the coworker made for them from Buzz's Agents tab", () =
       const [offer] = await buzz.query("ana", [
         { artifact: "current", "#h": [channel], "#type": ["duck.offer"] },
       ]);
-      expect(offer?.tags.find((t) => t[0] === "auth")?.[1]).toBe(buzz.keys.rosa);
+      expect(offer?.pubkey).toBe(duck());
+      expect(offer?.tags.some((t) => t[0] === "auth")).toBe(false);
+      const [profile] = await buzz.query("ana", [{ kinds: [0], authors: [duck()] }]);
+      expect(JSON.parse(profile?.content ?? "{}").name).toBe("duck");
+      expect(profile?.tags.some((t) => t[0] === "auth")).toBe(false);
     },
     E2E,
   );
