@@ -470,10 +470,14 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
       if (JSON.stringify(now) !== JSON.stringify(seen.at(-1))) seen.push(now);
       return now;
     };
-    await until(`"${OPENED}" in her DM`, async () => {
-      await look();
-      return (await buzz.dmOf("rosa", key)).some((m) => m.content === OPENED);
-    }, 90);
+    await until(
+      `"${OPENED}" in her DM`,
+      async () => {
+        await look();
+        return (await buzz.dmOf("rosa", key)).some((m) => m.content === OPENED);
+      },
+      90,
+    );
     await until("no reaction left on her yes", async () => (await look()).length === 0, 60);
     console.log(`the reactions on her yes, as they changed: ${JSON.stringify(seen)}`);
     const dm = (await buzz.dmOf("rosa", key)).map((m) => m.content);

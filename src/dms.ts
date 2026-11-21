@@ -5,8 +5,8 @@ import { connect, type Event } from "./buzz";
 import { type Item, shown } from "./list";
 import { monthCosts, monthOf } from "./model-relay";
 import {
-  adminFile,
   type Answers,
+  adminFile,
   container,
   factsOf,
   installFile,
@@ -461,7 +461,9 @@ const NOT_A_SETTING =
 export async function answersFrom(setup: Setup, given: string[]): Promise<Answers> {
   if (given.length === 0) return "person";
   if (given.length === 1 && given[0]?.trim().toLowerCase() === "anyone") return "anyone";
-  const named = await Promise.all(given.map(async (name) => ({ name: name.trim(), key: await member(setup, name) })));
+  const named = await Promise.all(
+    given.map(async (name) => ({ name: name.trim(), key: await member(setup, name) })),
+  );
   return named.filter((a, i) => named.findIndex((b) => b.key === a.key) === i);
 }
 

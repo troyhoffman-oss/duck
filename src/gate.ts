@@ -1332,8 +1332,7 @@ async function call(c: Coworker, params: Json, lane: string) {
         widens(answersOf(setup, coworker), told.answers as Answers);
       if (wider) state = "ask first";
       result = words(wider ? hold(c, "duck", "settings", told, [], s) : changeSettings(c, told));
-    }
-    else if (mine === BUZZ) {
+    } else if (mine === BUZZ) {
       // Arguments it may not run, and files that are not the coworker's, are refused before the call is held.
       outcome = "refused";
       cliArgs((input.args as unknown[]).map(String));

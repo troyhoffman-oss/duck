@@ -20,7 +20,18 @@ import { AT_ONCE, checkerText, ended, endRef, type Job, moved, resume, take, wor
 import { gained, openItems, useList } from "../list";
 import { history, memory, upTo } from "../notes";
 import { answeredBy, due, openAsks, type Row, settle, tells } from "../outbox";
-import { answersOf, container, doorsOf, duckAddress, HOME, isTeam, jobCalls, ms, personOf, type Setup } from "../setup";
+import {
+  answersOf,
+  container,
+  doorsOf,
+  duckAddress,
+  HOME,
+  isTeam,
+  jobCalls,
+  ms,
+  personOf,
+  type Setup,
+} from "../setup";
 import { GOOSE_PORT } from "../setup/install";
 import { line, logLine, screen } from "../sorter";
 import { dreaming, tick } from "../timers";
