@@ -90,7 +90,7 @@ export function talk(setup: Setup) {
     sending = done.then(() => {}).catch(() => {});
     return done;
   };
-  const duck = connect({ key: duckKey(setup), relay: setup.buzz.relay }, (asked, label) => {
+  const answer = (asked: Event, label: string) => {
     if (tagOf(asked, "type") !== "duck.request" || tagOf(asked, "op") !== "create" || tagOf(asked, "auth"))
       return;
     const [text, writer] = [asked.content.trim(), asked.pubkey];
@@ -107,7 +107,10 @@ export function talk(setup: Setup) {
         revise(duck, [tagOf(asked, "h"), tagOf(asked, "d")], ["duck.request", "Request", answer], asked),
       )
       .catch((e: Error) => console.error(`an answer: ${e.message}`));
-  }, () => admitted(setup, duck.me, false));
+  };
+  const duck = connect({ key: duckKey(setup), relay: setup.buzz.relay }, answer, () =>
+    admitted(setup, duck.me, false),
+  );
   // Nothing goes out, and no request is answered, until duck first finds itself an admin.
   sending = inList(setup, duck);
   const offerAll = () => {
@@ -148,15 +151,15 @@ export function talk(setup: Setup) {
     firmChanged();
     for (const name of running.keys()) listed(name);
   }, 600_000);
-  after(() => duck.send(0, [], JSON.stringify({ name: "duck", about: "The service your firm's coworkers run on." }))).catch(
-    (e: Error) => console.error(`duck's profile: ${e.message}`),
-  );
+  after(() =>
+    duck.send(0, [], JSON.stringify({ name: "duck", about: "The service your firm's coworkers run on." })),
+  ).catch((e: Error) => console.error(`duck's profile: ${e.message}`));
 }
 
 /** Resolves once duck finds its key an admin on the member list, read once signed in and each minute until then. */
 async function inList(setup: Setup, duck: ReturnType<typeof connect>) {
-  const out = () => admins(setup, duck).then((all) => !all.includes(duck.me)).catch(() => true);
-  while (await duck.ready().then(out)) await Bun.sleep(60_000);
+  const out = (all: string[]) => !all.includes(duck.me);
+  while (await duck.ready().then(() => admins(setup, duck).then(out, () => true))) await Bun.sleep(60_000);
 }
 
 /** Whether duck has said it is off the member list since it last found itself on it. */
@@ -584,7 +587,8 @@ function nameOf(profile: Event) {
  * it is, or the one person, not an agent, whose Buzz name it is without regard to case.
  */
 export async function member(setup: Setup, given: string) {
-  if (!setup.buzz || !existsSync(adminFile(setup))) throw new Error(adminToDo(setup)[0] ?? "the setup has no Buzz");
+  if (!setup.buzz || !existsSync(adminFile(setup)))
+    throw new Error(adminToDo(setup)[0] ?? "the setup has no Buzz");
   if (/^[0-9a-f]{64}$/.test(given)) return given;
   const wanted = given.trim().toLowerCase();
   const me = { key: duckKey(setup), relay: setup.buzz.relay };

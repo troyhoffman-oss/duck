@@ -179,7 +179,8 @@ export function connect(
           // buzz-relay src/handlers/auth.rs:786-790
           const outside = c.includes("not a relay member");
           wait = outside ? 60_000 : 300_000;
-          if (c !== refused) console.error(`${what} was refused, so it tries again every ${wait / 60_000} min: ${c}`);
+          if (c !== refused)
+            console.error(`${what} was refused, so it tries again every ${wait / 60_000} min: ${c}`);
           refused = c;
           if (outside) notMember();
           return ws.close();
