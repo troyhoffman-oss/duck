@@ -532,7 +532,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
   test.failing("a request whose run fails does not hold up another thread's: Ana's is answered while Theo's keeps failing, and Theo's is answered once its run goes through", async () => {
     const [THEO, LATE] = ["What is the 4B roof warranty?", "The 4B roof warranty runs to 2031."];
     const [ANA, GUTTERS] = ["What is the 4B gutter warranty?", "The 4B gutters carry no warranty."];
-    // Each run of Theo's request fails, with an error goose does not try again, until the step lets it through.
+    // Each run of Theo's request fails with a 400 from the model until the step lets it through.
     let failing = true;
     firm.model.on(
       all(tally, said(THEO)),
