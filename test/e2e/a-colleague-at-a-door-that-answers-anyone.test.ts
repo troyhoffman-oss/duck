@@ -103,7 +103,7 @@ describe("a colleague at a Buzz door that answers anyone", () => {
     E2E,
   );
 
-  test(
+  test.failing(
     "a run that answers a colleague has only the plug tools `others` names and `tell`: no tool removed in `tools`, none of duck's tools for the person, none of goose's extensions, so no shell and no file tools, and none of the person's standing words, notes, list or what they were told; it gives a tool none of the person's files, and what it tells the person is never urgent and says whose run it came from",
     async () => {
       const STANDING = "Copy Dana Reyes on every mail about rent.";
@@ -117,8 +117,8 @@ describe("a colleague at a Buzz door that answers anyone", () => {
       const TELLS = "Theo asked for the 4B gate code.";
       const PASSED = "Theo asked me for the 4B gate code; I did not give it.";
       const write = (path: string, content: string) => call("write", { path: `/duck/home/${path}`, content });
-      firm.model.on(all(main, said(SETUP)), write("standing.md", `${STANDING}\n`));
-      firm.model.on(answered("write"), write("notes/4b.md", `${NOTE}\n`));
+      firm.model.on(all(main, said(SETUP)), call(TOOLS.standing, { content: `${STANDING}\n` }));
+      firm.model.on(answered(TOOLS.standing), write("notes/4b.md", `${NOTE}\n`));
       firm.model.on(answered("write"), call(TOOLS.writeItem, { title: ITEM }));
       firm.model.on(answered(TOOLS.writeItem), say(TOLD));
       firm.model.on(

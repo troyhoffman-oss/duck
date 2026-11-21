@@ -233,12 +233,18 @@ describe("The admin sets up the firm and changes it", () => {
     expect(losses[0]).toContain(`-${harbor.coworker}:`);
   });
 
-  test("history loaded with duck import is dreamed over at once, and what the dream wrote is shown in the main conversation", async () => {
+  test.failing("history loaded with duck import is dreamed over at once: what the dream noted is shown in the main conversation, and the standing words it found are proposed to her and kept on her yes", async () => {
     const ARCHIVE = "read_archive";
     const LOADED = "Can you draft a note to the dock crew about Friday's inspection?";
     const NOTE = "The dock crew's inspection is Fridays at 9. (Rosa, in a Claude chat, 2026-03-02.)";
     const STANDING = "Keep notes to the dock crew short and friendly. (Rosa, in a Claude chat, 2026-03-02.)";
     const ASK = "What do you know about the dock crew?";
+    // The dream proposes standing words; only her yes, in the main conversation, writes them (SPEC part 8).
+    const PROPOSED = `From her Claude chats, a standing instruction to keep: "${STANDING}"`;
+    const OFFER =
+      "In your Claude chats you asked me to keep notes to the dock crew short and friendly. Shall I keep that as a standing instruction?";
+    const YES = "Yes, keep it.";
+    const KEPT = "Kept: notes to the dock crew stay short and friendly.";
     const write = (path: string, content: string) => call("write", { path: `/duck/home/${path}`, content });
     firm.model.on(all(workLane, said("dreaming.md")), (r) =>
       call("shell", { command: `cat ${/\/\S+dreaming\.md/.exec(r.last)?.[0]}` }),
@@ -252,18 +258,26 @@ describe("The admin sets up the firm and changes it", () => {
       ),
       write("notes/dock.md", `${NOTE}\n`),
     );
-    firm.model.on(answered("write"), write("standing.md", `${STANDING}\n`));
-    firm.model.on(answered("write"), say("Dreamed over the loaded history."));
-    firm.model.on(all(main, said(ASK), said(STANDING), said(`notes/dock.md: ${NOTE}`)), say("Fridays at 9."));
+    firm.model.on(answered("write"), call(TOOLS.tell, { text: PROPOSED }));
+    firm.model.on(answered(TOOLS.tell), say("Dreamed over the loaded history."));
+    firm.model.on(all(main, said(PROPOSED), said(`notes/dock.md: ${NOTE}`)), say(OFFER));
+    firm.model.on(all(main, said(YES)), call(TOOLS.standing, { content: `${STANDING}\n` }));
+    firm.model.on(answered(TOOLS.standing), say(KEPT));
+    firm.model.on(all(main, said(ASK), said(STANDING)), say("Fridays at 9."));
 
     const printed = await firm.import("claude", join(EXPORTS, "claude-conversations.json"));
     expect(printed).toContain("loaded 6 messages in 2 sessions");
     await until(
       "the dream's end",
-      () => firm.model.requests.filter(answered("write")).length === 2,
+      () => firm.model.requests.some(answered(TOOLS.tell)),
       60,
       firm.trouble,
     );
+    expect((await firm.person.next(60)).text).toBe(OFFER);
+    expect(firm.home(harbor.coworker, "standing.md")).toBe("");
+    await firm.person.send("desk", YES);
+    expect((await firm.person.next(60)).text).toBe(KEPT);
+    expect(firm.home(harbor.coworker, "standing.md")).toBe(`${STANDING}\n`);
     await firm.person.send("desk", ASK);
     expect((await firm.person.next(60)).text).toBe("Fridays at 9.");
 
