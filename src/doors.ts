@@ -180,8 +180,8 @@ export function doorTo(c: Coworker, ask = false) {
  * there; in a call, to the speech model to say, or for an ask, to ask, which the archive keeps as it is said.
  * With `team`, what a team coworker says on its own goes to its team's channel instead, at its buzz door (SPEC
  * part 14). It returns the door, the archive's id of the message where it is kept now, and `delivered`: when
- * the try the door took ended, or null when it took none. A delivery the door does not take after three tries is logged as not delivered,
- * and the door is broken.
+ * the try the door took ended, or null when it took none. A delivery the door does not take after three tries
+ * is logged as not delivered, and the door is broken.
  */
 export function deliver(c: Coworker, said: string, since: number, ask = false, team = false) {
   const channel = team ? factsOf(c.setup, c.name).channel : undefined;

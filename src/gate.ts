@@ -1008,7 +1008,8 @@ async function readReply(c: Coworker, event: number): Promise<Read> {
       "select id, at, way, text from messages where door = ? and way in ('in', 'out') and id > ? and id < ? order by id",
     )
     .all(reply.door, since, reply.id);
-  // In a call, what the coworker said after a question's first words, up to the person's next line, is its message.
+  // In a call, what the coworker said from a question's first words up to the person's next line is its
+  // message.
   const rows = spoken
     ? all.reduce<typeof all>((kept, m) => {
         const last = kept.at(-1);
