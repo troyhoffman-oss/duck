@@ -283,7 +283,18 @@ describe("a person claims the coworker made for them, and nothing of it shows in
       const times = async () => (await firm.logs()).split(told).length - 1;
       const before = await times();
       const role = (to: string) =>
-        buzz.publish("rosa", buzz.sign("rosa", 9032, [["p", duck()], ["role", to]], ""));
+        buzz.publish(
+          "rosa",
+          buzz.sign(
+            "rosa",
+            9032,
+            [
+              ["p", duck()],
+              ["role", to],
+            ],
+            "",
+          ),
+        );
       await role("member");
       // An admin's request has duck read the member list twice: for the request, and for the card it publishes.
       expect(await buzz.askDuck("rosa", duck(), "set model calls per job 40")).toBe(LIMITED);
