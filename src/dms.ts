@@ -5,6 +5,7 @@ import { connect, type Event } from "./buzz";
 import { type Item, shown } from "./list";
 import { monthCosts, monthOf } from "./model-relay";
 import {
+  type Answers,
   adminFile,
   container,
   factsOf,
@@ -437,7 +438,7 @@ async function setFor(setup: Setup, duck: ReturnType<typeof connect>, writer: st
 export const SETTINGS_TOOL = {
   name: "settings",
   description:
-    "Changes when you work and write to your person, as they tell you to: `paused` pauses you or starts you again, `quiet` is their quiet hours as HH:MM-HH:MM in their time zone or none, `messages_per_hour` is how many messages you send them an hour outside those hours, from 1 to 60, and `zone` is their time zone, such as America/New_York. Give only what they changed. It answers with what is set now, or why nothing changed.",
+    'Changes when you work and write to your person, and whom you answer, as they tell you to: `paused` pauses you or starts you again, `quiet` is their quiet hours as HH:MM-HH:MM in their time zone or none, `messages_per_hour` is how many messages you send them an hour outside those hours, from 1 to 60, `zone` is their time zone, such as America/New_York, and `answers` is who in Buzz may ask you for work besides them: the names of those people as Buzz shows them, ["anyone"] for anyone, or [] for only them. Give only what they changed. Letting more people ask you waits for their yes. It answers with what is set now, or why nothing changed.',
   inputSchema: {
     type: "object",
     properties: {
@@ -445,6 +446,7 @@ export const SETTINGS_TOOL = {
       quiet: { type: "string" },
       messages_per_hour: { type: "integer" },
       zone: { type: "string" },
+      answers: { type: "array", items: { type: "string" } },
     },
   },
 };
@@ -452,11 +454,47 @@ const NOT_A_SETTING =
   "That is not a setting duck takes: quiet hours are HH:MM-HH:MM or none, and messages an hour a whole number from 1 to 60, so nothing changed.";
 
 /**
- * Changes coworker `name`'s settings as its person told it, `input` as `SETTINGS_TOOL` takes it, by the same
- * fixed words the plugin writes, and publishes them where duck's channels are on. Returns duck's answers.
+ * Whom `given`, the names of `SETTINGS_TOOL`'s `answers`, names (SPEC part 14): anyone, only the person, or
+ * each person by their Buzz key, found once now as `member` finds it, with the name they were named by. A name
+ * that is nobody's or more than one person's throws, naming it.
+ */
+export async function answersFrom(setup: Setup, given: string[]): Promise<Answers> {
+  if (given.length === 0) return "person";
+  if (given.length === 1 && given[0]?.trim().toLowerCase() === "anyone") return "anyone";
+  const named = await Promise.all(
+    given.map(async (name) => ({ name: name.trim(), key: await member(setup, name) })),
+  );
+  return named.filter((a, i) => named.findIndex((b) => b.key === a.key) === i);
+}
+
+/** Whether `next` lets someone ask whom `now` does not (SPEC part 14), which waits for the person's yes. */
+export function widens(now: Answers, next: Answers) {
+  if (next === "person" || now === "anyone") return false;
+  if (next === "anyone" || now === "person") return true;
+  return next.some((a) => !now.some((b) => b.key === a.key));
+}
+
+/**
+ * Whom `answers` names, worded for the person; with `keyed`, each named person as duck's asks name someone,
+ * by name and the start of their Buzz key.
+ */
+const whom = (answers: Answers, keyed = false) =>
+  answers === "anyone"
+    ? "anyone in Buzz"
+    : answers === "person"
+      ? "only you"
+      : `you and ${answers.map((a) => (keyed ? `"${a.name}" (Buzz key ${a.key.slice(0, 8)})` : a.name)).join(", ")}`;
+
+/** Whom `answers` names, as a held change of it shows it to the person: each person by name and key's start. */
+export const shownAnswers = (answers: Answers) => whom(answers, true);
+
+/**
+ * Changes coworker `name`'s settings as its person told it, `input` as `SETTINGS_TOOL` takes it with its
+ * `answers` found already (`answersFrom`): each other setting by the same fixed words the plugin writes, and
+ * publishes them where duck's channels are on. Returns duck's answers.
  */
 export function tellSettings(setup: Setup, name: string, input: Record<string, unknown>) {
-  const { paused, quiet, messages_per_hour: perHour, zone } = input;
+  const { paused, quiet, messages_per_hour: perHour, zone, answers: who } = input;
   const told = [
     paused !== undefined && `${paused ? "pause" : "resume"} ${name}`,
     quiet !== undefined && `set ${name} quiet ${quiet}`,
@@ -467,8 +505,16 @@ export function tellSettings(setup: Setup, name: string, input: Record<string, u
     const set = SETTING.exec(line);
     return set ? settle(setup, set) : NOT_A_SETTING;
   });
+  if (who !== undefined) answers.push(setAnswers(setup, name, who as Answers));
   listed(name);
   return answers.join(" ") || NOT_A_SETTING;
+}
+
+/** Sets whom coworker `name` answers besides its person, unless the firm locks it, and returns duck's answer. */
+function setAnswers(setup: Setup, name: string, answers: Answers) {
+  if (setup.settings.locked?.includes("answers")) return LOCKED;
+  write(settingsFile(setup, name), `${JSON.stringify({ ...settingsOf(setup, name), answers }, null, 2)}\n`);
+  return `Done: that coworker answers ${whom(answers)} now.`;
 }
 
 /**

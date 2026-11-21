@@ -15,8 +15,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive, told } from "./archive";
-import { listChanged, SETTINGS_TOOL, tellSettings } from "./dms";
-import { act, doorTo, rootOf, saved } from "./doors";
+import { answersFrom, listChanged, SETTINGS_TOOL, shownAnswers, tellSettings, widens } from "./dms";
+import { act, doorTo, reopen, rootOf, saved } from "./doors";
 import { add, broken, mark, othersIn, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
 import { LIST_TOOLS, type Link, link, linkedTo, logged, useList } from "./list";
@@ -25,6 +25,8 @@ import { STANDING_TOOL, writeStanding } from "./notes";
 import { ask, quietSince, TELL, tell } from "./outbox";
 import type { Coworker } from "./run";
 import {
+  type Answers,
+  answersOf,
   doorsOf,
   FILES,
   fileOf,
@@ -569,7 +571,8 @@ const UNHELD = "(The coworker sent a message here whose words duck does not hold
  * Runs the Buzz command `input` gives as `coworker` (SPEC part 9), in a folder of its own that no coworker
  * reaches: each of its `files` is copied in under its name, and each file the CLI writes there is saved among
  * the coworker's as a plug's is. Each file in and out is added to `moved`. A message it sends from session `s`
- * is kept as that session's word in its thread, so a reply there comes back to `s` (SPEC part 11).
+ * is kept as that session's word in its thread, with whom it mentioned and none of its words, so a reply there
+ * comes back to `s` (SPEC part 11).
  */
 async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: Moved[]) {
   const args = (input.args as unknown[]).map(String);
@@ -603,7 +606,13 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
           })
         : sent;
       const at = `${option("--channel")}/${root}`;
-      const id = s ? add(c.db, "buzz:reply", `sent ${sent}`, null, null, s, at) : null;
+      // Whom it mentioned, so a reply of one it asked there is known as what comes back to it (SPEC part 14).
+      const mentioned = args.flatMap((a, i) =>
+        a === "--mention" ? [args[i + 1] ?? ""] : a.startsWith("--mention=") ? [a.slice(10)] : [],
+      );
+      const id = s
+        ? add(c.db, "buzz:reply", `sent ${sent}`, JSON.stringify({ mentioned }), null, s, at)
+        : null;
       if (id !== null) mark(c.db, [id], "done");
       // One where the person talks to it, known by their own messages there, is a message to them (SPEC part 9).
       const theirs = "select 1 from inbox where source = 'buzz' and payload ->> '$.channel' = ?";
@@ -845,8 +854,10 @@ const resume = (db: Database, id: number, s: string, what: Json) =>
  * call's exact effect. Each of its inputs `files` is a file, copied as it is now among the files the person
  * was sent, which the question carries and a yes sends. The question goes once the run ends, through quiet
  * hours if the person's own message started it. In a session someone else wrote in, an others run or a team
- * coworker's request, it says someone else asked, and who (SPEC parts 11 and 14). A box's reason `why` is
- * given the person under its first line, and the coworker.
+ * coworker's request, or from a run that began with someone else's words in any session, the person's own
+ * conversation among them, it says someone else asked, and who (SPEC parts 11 and 14). A box's reason `why` is
+ * given the person under its first line, and the coworker. Where the input as it is held does not read
+ * plainly, `reads` gives each entry as the question shows it; the call holds the input itself.
  */
 function hold(
   c: Coworker,
@@ -856,11 +867,11 @@ function hold(
   files: string[],
   s: string | undefined,
   why?: string,
+  reads: (input: Json) => Json = (i) => i,
 ) {
   const urgent = personAt(c, s) !== null;
-  const asker = othersIn(c.db, s as string)
-    ? `Someone other than you${othersWho(c.db, s as string)} asked for this. `
-    : "";
+  const who = othersWho(c.db, s as string);
+  const asker = othersIn(c.db, s as string) || who ? `Someone other than you${who} asked for this. ` : "";
   for (const key of files) {
     const copies = [input[key]].flat().map((path) => {
       const [at, copy] = [fileIn(c.setup, c.name, String(path)), `held/${randomUUID()}`];
@@ -870,7 +881,7 @@ function hold(
     });
     input = { ...input, [key]: Array.isArray(input[key]) ? copies : copies[0] };
   }
-  const effect = Object.entries(input).map(
+  const effect = Object.entries(reads(input)).map(
     ([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`,
   );
   const lines = [...(why ? [why] : []), ...effect];
@@ -1102,6 +1113,17 @@ export function answered(c: Coworker, read: Read, event: number) {
   };
 }
 
+/**
+ * Changes `c`'s settings as `input`, `SETTINGS_TOOL`'s with whom it answers found already, says, and returns
+ * duck's answer. duck's answers are worded for the person, as the plugin shows them, so the coworker is told
+ * whose they are. Where whom it answers changed, its Buzz door looks again at whom it admits.
+ */
+function changeSettings(c: Coworker, input: Json) {
+  const said = tellSettings(c.setup, c.name, input);
+  if (input.answers !== undefined) reopen(c);
+  return `duck's answer, worded for ${personOf(c.setup, c.name).name}: ${said}`;
+}
+
 /** Runs ask `id`'s held call once, exactly as it was held, logs it, and tells the session that made it what came of it. */
 async function runHeld(c: Coworker, id: number) {
   const row = c.db.query<{ held: string }, [number]>("select held from outbox where id = ?").get(id);
@@ -1115,7 +1137,9 @@ async function runHeld(c: Coworker, id: number) {
   const started = performance.now();
   const moved: Moved[] = [];
   const result = await (held.plug === "duck"
-    ? useBuzz(c, held.input, held.session, moved)
+    ? held.tool === "settings"
+      ? Promise.resolve(words(changeSettings(c, held.input)))
+      : useBuzz(c, held.input, held.session, moved)
     : session(c.setup, c.name, held.plug).then((send) =>
         callPlug(c.setup, c.name, held.plug, send, held.tool, held.input, held.files ?? [], moved),
       )
@@ -1202,7 +1226,7 @@ function wrote(c: Coworker, s: string | undefined, item: number, fresh: boolean)
   if (!s) return;
   if (fresh && othersIn(c.db, s)) {
     const person = personOf(c.setup, c.name).name;
-    logged(c.db, item, `Asked for by someone other than ${person}${othersWho(c.db, s)}.`);
+    logged(c.db, item, `Asked for by someone other than ${person}${othersWho(c.db, s, true)}.`);
   }
   const kept = runOf(c, s);
   kept.item = item;
@@ -1306,12 +1330,21 @@ async function call(c: Coworker, params: Json, lane: string) {
       result = words(useTimers(db, personOf(setup, coworker).zone, name, input));
     else if (mine === ARCHIVE_TOOL) result = words(readArchive(db, personOf(setup, coworker).name, input));
     else if (mine === STANDING_TOOL) result = words(writeStanding(c.home, input.content));
-    else if (mine === SETTINGS_TOOL)
-      // duck's answers are worded for the person, as the plugin shows them, so the coworker is told whose they are.
+    else if (mine === SETTINGS_TOOL) {
+      // Whom it answers is found by name once, now. Letting more people ask waits for the person's yes; letting
+      // fewer does not (SPEC part 14).
+      const given = input.answers as unknown[] | undefined;
+      const told = given ? { ...input, answers: await answersFrom(setup, given.map(String)) } : input;
+      const wider =
+        given !== undefined &&
+        !setup.settings.locked?.includes("answers") &&
+        widens(answersOf(setup, coworker), told.answers as Answers);
+      if (wider) state = "ask first";
+      const reads = (i: Json) => ({ ...i, answers: shownAnswers(i.answers as Answers) });
       result = words(
-        `duck's answer, worded for ${personOf(setup, coworker).name}: ${tellSettings(setup, coworker, input)}`,
+        wider ? hold(c, "duck", "settings", told, [], s, undefined, reads) : changeSettings(c, told),
       );
-    else if (mine === BUZZ) {
+    } else if (mine === BUZZ) {
       // Arguments it may not run, and files that are not the coworker's, are refused before the call is held.
       outcome = "refused";
       cliArgs((input.args as unknown[]).map(String));

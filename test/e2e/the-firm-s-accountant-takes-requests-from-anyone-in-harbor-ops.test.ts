@@ -381,7 +381,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect(beyond(WHO)).toEqual([]);
   });
 
-  test.failing("Finch's reply in a thread Theo started, where tally wrote with buzz before it answered him, is Finch's request: its run has no job, timer or plug tools, and tally's answer reaches Finch", async () => {
+  test("Finch's reply in a thread Theo started, where tally wrote with buzz before it answered him, is Finch's request: its run has no job, timer or plug tools, and tally's answer reaches Finch", async () => {
     const [THEO, CHECKING, DUE] = [
       "When is the 4B elevator inspection?",
       "Checking the elevator records now.",
@@ -421,7 +421,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect(beyond(WHO)).toEqual([]);
   });
 
-  test.failing("Rosa tells tally only Ana may ask it now: Theo's next mention gets no answer and no eyes, and Ana's still does", async () => {
+  test("Rosa tells tally only Ana may ask it now: Theo's next mention gets no answer and no eyes, and Ana's still does", async () => {
     const LIMIT = "From now on only Ana may ask you for work.";
     const LIMITED = "Done: only Ana may ask me now.";
     const THEO = "Can you pull the 4B ledger for me?";
@@ -439,5 +439,92 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect(await buzz.thread(theo, key)).toEqual([]);
     expect(await buzz.reactionsOf(theo, key)).toEqual([]);
     expect(firm.model.requests.filter(said(THEO))).toEqual([]);
+  });
+
+  test("Rosa lets Theo ask tally again, then anyone in Buzz: each waits for her yes, the question names Theo by his name and the start of his Buzz key, she hears tally's confirmation once while its Buzz door starts again, and Theo's next mention is answered", async () => {
+    const OUTCOME = '"answer":"yes"';
+    const LIMITED = "Done: only Ana may ask me now.";
+    const [ADD, ADD_ASKED, ADD_YES, ADDED] = [
+      "Theo may ask you for work too.",
+      "duck asks your yes before Theo may ask me.",
+      "Yes, add Theo.",
+      "Done: Ana and Theo may ask me now.",
+    ];
+    const [OPEN, OPEN_ASKED, OPEN_YES, OPENED] = [
+      "Anyone in Buzz may ask you for work again.",
+      "duck asks your yes before anyone may ask me.",
+      "Yes, let anyone ask.",
+      "Done: anyone in Buzz may ask me again.",
+    ];
+    const THEO = "Can you pull the 4B ledger for November?";
+    const LEDGER = "The November 4B ledger total is $2,480.";
+    const EVERY = { times: Number.POSITIVE_INFINITY };
+    firm.model.on(all(main(tally), said(ADD)), call("settings", { answers: ["Ana", "Theo"] }));
+    firm.model.on(all(main(tally), said(OPEN)), call("settings", { answers: ["anyone"] }));
+    firm.model.on(all(tally, answered("settings")), say(ADD_ASKED));
+    firm.model.on(all(tally, answered("settings")), say(OPEN_ASKED));
+    firm.model.on(all(reading, said(ADD_YES)), say("yes"));
+    firm.model.on(all(reading, said(OPEN_YES)), say("yes"));
+    // Her yes and what came of it reach her conversation in one run or in two.
+    firm.model.on(all(main(tally), said(OUTCOME)), say(ADDED));
+    firm.model.on(all(main(tally), said(OUTCOME)), say(OPENED));
+    firm.model.on(all(main(tally), said(ADD_YES)), say("Noted."), EVERY);
+    firm.model.on(all(main(tally), said(OPEN_YES)), say("Noted."), EVERY);
+    firm.model.on(all(tally, said(THEO)), say(LEDGER));
+
+    await buzz.write("rosa", "dm", ADD, { to: key });
+    const question = await buzz.inDm("rosa", key, "Your yes is needed for duck's settings", 60);
+    // Each named person as duck's asks name someone: no JSON and no whole key.
+    expect(question.content).toContain(`"Ana" (Buzz key ${buzz.keys.ana.slice(0, 8)})`);
+    expect(question.content).toContain(`"Theo" (Buzz key ${buzz.keys.theo.slice(0, 8)})`);
+    expect(question.content).not.toContain(buzz.keys.theo);
+    expect(question.content).not.toContain("{");
+    await buzz.inDm("rosa", key, ADD_ASKED, 60);
+    const { id: yes } = await buzz.write("rosa", "dm", ADD_YES, { to: key });
+    // What she sees on her yes while the door starts again, as it changes.
+    const seen: string[][] = [];
+    const look = async () => {
+      const now = await buzz.reactionsOf(yes, key);
+      if (JSON.stringify(now) !== JSON.stringify(seen.at(-1))) seen.push(now);
+      return now;
+    };
+    await until(
+      `"${ADDED}" in her DM`,
+      async () => {
+        await look();
+        return (await buzz.dmOf("rosa", key)).some((m) => m.content === ADDED);
+      },
+      90,
+    );
+    await until("no reaction left on her yes", async () => (await look()).length === 0, 60);
+    console.log(`the reactions on her yes, as they changed: ${JSON.stringify(seen)}`);
+    const { id: theo } = await buzz.write("theo", "harbor-ops", THEO, { to: key });
+    await buzz.inThread(theo, LEDGER, 90, key);
+
+    await buzz.write("rosa", "dm", OPEN, { to: key });
+    await buzz.inDm("rosa", key, "answers: anyone in Buzz", 60);
+    await buzz.inDm("rosa", key, OPEN_ASKED, 60);
+    await buzz.write("rosa", "dm", OPEN_YES, { to: key });
+    await buzz.inDm("rosa", key, OPENED, 90);
+    const dm = (await buzz.dmOf("rosa", key)).map((m) => m.content);
+    const once = [LIMITED, ADD_ASKED, ADDED, OPEN_ASKED, OPENED];
+    expect(once.map((t) => dm.filter((m) => m === t).length)).toEqual(once.map(() => 1));
+  });
+
+  test("what tally writes for Ana's request is kept in its version history as the run ends", async () => {
+    const ASK = "Note that the 4B boiler's warranty runs to March 2027.";
+    const NOTE = "4B boiler: warranty runs to March 2027 (Ana, in harbor-ops).";
+    firm.model.on(
+      all(tally, said(ASK)),
+      call("write", { path: "/duck/home/notes/4b-boiler.md", content: `${NOTE}\n` }),
+    );
+    firm.model.on(all(tally, answered("write")), say("Noted."));
+
+    const { id } = await buzz.write("ana", "harbor-ops", ASK, { to: key });
+    await buzz.inThread(id, "Noted.", 90, key);
+    // Kept before the answer is posted.
+    const history = `${firm.folder}/storage/${team.coworker}/history`;
+    const kept = Bun.spawnSync(["git", `--git-dir=${history}`, "show", "HEAD:notes/4b-boiler.md"]);
+    expect(kept.stdout.toString()).toBe(`${NOTE}\n`);
   });
 });

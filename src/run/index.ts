@@ -6,6 +6,7 @@ import { AGENT, cutHeld, JOB, lapse, OTHERS, readIn, WORK } from "../gate";
 import {
   aboutSession,
   add,
+  asking,
   attach,
   type Event,
   itemSession,
@@ -19,7 +20,18 @@ import { AT_ONCE, checkerText, ended, endRef, type Job, moved, resume, take, wor
 import { gained, openItems, useList } from "../list";
 import { history, memory, upTo } from "../notes";
 import { answeredBy, due, openAsks, type Row, settle, tells } from "../outbox";
-import { container, doorsOf, duckAddress, HOME, isTeam, jobCalls, ms, personOf, type Setup } from "../setup";
+import {
+  answersOf,
+  container,
+  doorsOf,
+  duckAddress,
+  HOME,
+  isTeam,
+  jobCalls,
+  ms,
+  personOf,
+  type Setup,
+} from "../setup";
 import { GOOSE_PORT } from "../setup/install";
 import { line, logLine, screen } from "../sorter";
 import { dreaming, tick } from "../timers";
@@ -61,11 +73,12 @@ export function startCoworker(setup: Setup, name: string) {
   const stopping = new AbortController();
   const { signal } = stopping;
   const doors = Object.keys(doorsOf(setup, name));
-  /** The sources of what others write at the doors that answer them, and with the doors, all the doors take. */
-  const asked = Object.entries(doorsOf(setup, name))
-    .filter(([, d]) => d.answers)
-    .map(([door]) => `${door}:others`);
-  const atDoors = [...doors, ...asked];
+  /**
+   * The sources of what others write at the doors that answer them, read at each look, since its person may
+   * change whom it answers; and with the doors, all the doors take.
+   */
+  const asked = () => (doors.includes("buzz") && answersOf(setup, name) !== "person" ? ["buzz:others"] : []);
+  const atDoors = () => [...doors, ...asked()];
   const person = personOf(setup, name);
   /** Whether it is a team coworker (SPEC part 14). */
   const team = isTeam(setup, name);
@@ -82,15 +95,14 @@ export function startCoworker(setup: Setup, name: string) {
   const workAt: At = { cwd: HOME, mcpServers: gateAt(WORK) };
   /** Where a team coworker's request that an agent made works: as the work lane does, with the plugs' `others` states. */
   const agentAt: At = { cwd: HOME, mcpServers: gateAt(AGENT) };
-  /** Whether someone other than the person wrote event `e` at a door: a request, or a reply to the coworker. */
-  const written = (e: Event | null): e is Event => !!e && /:(others|reply)$/.test(e.source);
   /**
-   * Where a team coworker's run of `events` works (SPEC part 14): where an agent wrote one of them at a door,
-   * as its event names the person whose agent it is, at an agent's request's address, else at the work lane's.
+   * Where a team coworker's run of `events` works (SPEC part 14): where an agent asking it wrote one of them
+   * (`asking`), as its event names the person whose agent it is, at an agent's request's address, else at the work lane's.
    */
   const teamAt = (events: (Event | null)[]) =>
     events.some(
-      (e) => written(e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
+      (e) =>
+        asking(db, e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
     )
       ? agentAt
       : workAt;
@@ -491,8 +503,8 @@ export function startCoworker(setup: Setup, name: string) {
   const workLane = lane("work lane", () => {
     clearTimeout(gapping);
     if (paused()) return;
-    attach(db, atDoors);
-    const events = waiting(db, atDoors, session, true, true);
+    attach(db, atDoors());
+    const events = waiting(db, atDoors(), session, true, true);
     if (events.length === 0 && pause?.to) {
       pause = undefined;
       wake();
@@ -520,7 +532,7 @@ export function startCoworker(setup: Setup, name: string) {
       : "";
     return () =>
       runIn(s, batch, team ? teamAt(batch) : workAt, caught + cameIn(batch), true, (_, run) => {
-        attach(db, atDoors);
+        attach(db, atDoors());
         keep(run);
       });
   });
@@ -529,27 +541,29 @@ export function startCoworker(setup: Setup, name: string) {
    * The others lane (SPEC part 11): what others write at a door that answers them, one run at a time, each
    * thread in a session of its own that has the gate's others tools and none of goose's extensions, so no
    * shell and no file tools. A team coworker's is its requests (SPEC part 14): each thread's session works in
-   * its home with its own memory, list and tools, as the work lane does. What a run ends on is posted in its
-   * thread. An event that goes on a thread, or an ask's or a job's outcome, resumes the thread's session.
+   * its home with its own memory, list and tools, as the work lane does, and each run is kept in the version
+   * history as the work lane's is. What a run ends on is posted where the latest of those who asked in the
+   * thread wrote. An event that goes on a thread, or an ask's or a job's outcome, resumes the thread's session.
    */
   const othersLane = lane("others lane", () => {
     if (paused()) return;
     const of = (e: Event) =>
       e.session ?? (e.about === null ? undefined : aboutSession(db, e.source, e.about));
     const key = (e: Event) => of(e) ?? e.about;
-    const events = waiting(db, asked, undefined, false, true);
+    const events = waiting(db, asked(), undefined, false, true);
     const first = events[0];
     if (!first) return;
     const [s, k] = [of(first), key(first)];
     const batch = events.filter((e) => key(e) === k);
     const note = `Note from duck: this run answers someone other than ${person.name}. What you end it on goes to them where they wrote.\n\n`;
-    // Who it answers: each who wrote in the batch at a door, a request or a reply, or where none did, as a job's
-    // or an ask's end, who last did in the thread. An agent's event names the person whose agent it is (SPEC
+    // Who it answers: each who asks in the batch (`asking`), with a request or a reply, or where none does, as a
+    // job's or an ask's end, or the reply of one it asked, who last did in the thread. An agent's event names the person whose agent it is (SPEC
     // part 14).
-    const writers = batch.filter(written);
+    const writers = batch.filter((e) => asking(db, e));
     const askers = writers.length > 0 ? writers : s ? [othersIn(db, s)] : [];
     return () =>
-      runIn(s, batch, team ? teamAt(askers) : othersAt, note + cameIn(batch), team, async (s) => {
+      runIn(s, batch, team ? teamAt(askers) : othersAt, note + cameIn(batch), team, async (s, run) => {
+        keep(run);
         const [answer, where] = [await lastSaid(s), othersIn(db, s)];
         if (answer && where) void answerOthers(coworker, where, answer);
       });
@@ -674,7 +688,7 @@ export function startCoworker(setup: Setup, name: string) {
   function wake() {
     const rest = rested.promise;
     if (signal.aborted) return rest;
-    attach(db, atDoors);
+    attach(db, atDoors());
     if (waiting(db, doors, session).length > 0 || dueNow().rows.some((r) => r.kind === "tell")) {
       clearTimeout(timer);
       if (compacting !== null) goose.notify("session/cancel", { sessionId: session });

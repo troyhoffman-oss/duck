@@ -7,6 +7,7 @@ import { cutSignIns, hasSignIn, readIn, signIn } from "./gate";
 import { aboutSession, add, broken, type Event, has, lastEvent, mark as state, waiting } from "./inbox";
 import type { Coworker } from "./run";
 import {
+  answersOf,
   claimed,
   type Door,
   doorsOf,
@@ -15,8 +16,8 @@ import {
   fileOf,
   HOME,
   isTeam,
+  mayAsk,
   ownerOf,
-  type Setup,
   secret,
 } from "./setup";
 import { buzzKey, signs } from "./setup/coworkers";
@@ -52,8 +53,9 @@ type Written = {
  * Takes what was written at an http or buzz `door`, sent with the door's key. At a buzz door only what the
  * owner wrote is the person's message; anything else is an event that says who wrote it and where. In a
  * thread the coworker wrote in, or a DM, it goes on in the session that last wrote or was answered there;
- * elsewhere it is outside words on the work lane, or at a door that answers others, the start of an others
- * run. Either keeps the place it was written and is about its thread. At a buzz door the answer to the
+ * elsewhere, from one who may ask (`mayAsk`), it is a request, the start of an others run, which keeps the
+ * place it was written and is about its thread; from anyone else it is outside words on the work lane, with
+ * no place to answer and no thread. At a buzz door the answer to the
  * person's message ends when the runs it woke or steered have, and what they said has gone out.
  */
 export async function take(c: Coworker, door: string, request: Request) {
@@ -76,8 +78,12 @@ export async function take(c: Coworker, door: string, request: Request) {
     // buzz-acp names no message to answer under for an agent's that starts no thread and mentions only agents
     // (resolve_reply_anchor in its queue.rs), so it is answered under that message, which starts the thread.
     const anchored = body.place && { ...body.place, ...(!reply && !dm && { reply: body.id }) };
+    // buzz-acp's gate also admits the team coworkers whose replies must reach this one, so whether it is a
+    // request is decided here, from the same setting.
     const [place, thread] =
-      set.answers || wrote ? [anchored, `${channel}/${root ?? body.id}`] : [undefined, null];
+      mayAsk(c.setup, c.name, key, owner) || wrote
+        ? [anchored, `${channel}/${root ?? body.id}`]
+        : [undefined, null];
     const text = cutSignIns(c.setup, c.name, body.text);
     const payload = JSON.stringify({ from, key, where, ...(owner && { owner }), text, ...place });
     add(c.db, `${door}:${wrote ? "reply" : "others"}`, body.id, payload, null, wrote ?? null, thread);
@@ -288,15 +294,15 @@ async function tried(what: string, send: () => Promise<void>) {
 }
 
 /**
- * Posts `text`, what an others run ended on, as a reply where `e`, someone else's event at a buzz door, was
- * written. Where its writer is an agent it mentions them, since an agent's buzz-acp hands it only what mentions
+ * Posts `text`, what an others run ended on, as a reply where `e`, someone else's event at a buzz door, a
+ * request or a reply, was written. Where its writer is an agent it mentions them, since an agent's buzz-acp hands it only what mentions
  * it. A person is not: Buzz's CLI refuses to mention anyone not in the channel (`missing_members` in its
  * messages.rs), and a person may write in an open channel without joining it. It is tried three times, 5 s
  * apart, apart from what goes to the person, so it never holds that up, and then logged as not posted. An event
  * Buzz gave no channel for is logged and not answered.
  */
 export async function answerOthers(c: Coworker, e: Event, text: string) {
-  const door = e.source.replace(/:others$/, "");
+  const door = e.source.replace(/:(others|reply)$/, "");
   const set = doorsOf(c.setup, c.name)[door] as Door;
   const what = `the answer to ${e.ref} at ${c.name}.${door}`;
   const { channel, key, owner } = JSON.parse(e.payload ?? "{}") as Record<string, string | undefined>;
@@ -399,11 +405,10 @@ function reopened(c: Coworker) {
 }
 
 /**
- * Starts buzz-acp again at each buzz door of coworker `c` whose gate admits the firm's team coworkers, that is
- * each door that does not answer by its own `answers`, with whom it admits now. buzz-acp is ended with SIGTERM:
- * it stops reading at once, gives the turn under way up to 30 s to end and then cuts it, and is started once it
- * has exited. Only buzz-acp starts again; the coworker, its goose and its runs go on. Duck does this when the
- * firm's claimed team coworkers change.
+ * Has each buzz door of coworker `c` look again at whom its gate admits, and start buzz-acp again where that
+ * changed. buzz-acp is ended with SIGTERM: it stops reading at once, gives the turn under way up to 30 s to end
+ * and then cuts it, and is started once it has exited. Only buzz-acp starts again; the coworker, its goose and
+ * its runs go on. Duck does this when the claimed coworkers or whom `c` answers change.
  */
 export function reopen(c: Coworker) {
   const next = reopening.get(c);
@@ -411,30 +416,30 @@ export function reopen(c: Coworker) {
   next?.resolve(null);
 }
 
-/** The Buzz keys of the firm's claimed team coworkers but `but` (SPEC part 14). */
-export const teamKeys = (setup: Setup, but?: string) =>
-  claimed(setup)
-    .filter((n) => n !== but && isTeam(setup, n))
-    .map((n) => buzzKey(setup, n));
-
 /**
- * Whom buzz-acp's gate admits at buzz door `set` of `c`, as its environment gives it: whom the door answers,
- * where it answers anyone, or else its owner and agents the owner also owns, and the firm's other claimed team
- * coworkers (SPEC part 14), so the answer of one that the coworker asked reaches it.
+ * Whom buzz-acp's gate admits at the buzz door of `c`, as its environment gives it (SPEC part 14). Where it
+ * answers anyone, anyone. Otherwise its owner and the agents its owner also owns, which buzz-acp admits itself,
+ * and in an allowlist: the people it answers, the claimed coworkers of those people, and the firm's other
+ * claimed team coworkers, so the answer of one that `c` asked reaches it. An agent duck did not make is not
+ * among them, since buzz-acp knows an agent by its key.
  */
-function admits(c: Coworker, set: Door) {
-  if (set.answers) return { BUZZ_ACP_RESPOND_TO: set.answers };
-  const teams = teamKeys(c.setup, c.name);
-  return teams.length > 0
-    ? { BUZZ_ACP_RESPOND_TO: "allowlist", BUZZ_ACP_RESPOND_TO_ALLOWLIST: teams.join(",") }
+function admits(c: Coworker) {
+  const answers = answersOf(c.setup, c.name);
+  if (answers === "anyone") return { BUZZ_ACP_RESPOND_TO: "anyone" };
+  const people = answers === "person" ? [] : answers.map((a) => a.key);
+  const agents = claimed(c.setup)
+    .filter((n) => n !== c.name && (isTeam(c.setup, n) || people.includes(ownerOf(c.setup, n))))
+    .map((n) => buzzKey(c.setup, n));
+  const keys = [...new Set([...people, ...agents])];
+  return keys.length > 0
+    ? { BUZZ_ACP_RESPOND_TO: "allowlist", BUZZ_ACP_RESPOND_TO_ALLOWLIST: keys.join(",") }
     : { BUZZ_ACP_RESPOND_TO: "owner-only" };
 }
 
 /**
  * Starts buzz-acp at each buzz door of `c`. It hands each Buzz message for the coworker to `duck buzz` as an
- * ACP prompt: in a DM, from the owner or an agent the owner also owns, and where it is mentioned, from them,
- * from the firm's team coworkers, or at a door that answers anyone from anyone, as buzz-acp's gate admits in
- * its owner-only, allowlist and anyone modes (see `admits`). When it needs a mention stays at Buzz's default.
+ * ACP prompt: in a DM, from the owner or an agent the owner also owns, and where it is mentioned, from whom
+ * buzz-acp's gate admits in its owner-only, allowlist and anyone modes (see `admits`). When it needs a mention stays at Buzz's default.
  * At each text door it opens Photon's stream, at each email door the mail service's, at each Telegram door it
  * polls the bot's updates, and at a voice door it joins the person's calls with the coworker. buzz-acp stops
  * when it cannot reach its relay after a few tries, and a stream can end, so each is kept going until the
@@ -457,6 +462,7 @@ export function listen(c: Coworker) {
     const what = `buzz-acp at ${c.name}.${door}`;
     return keep(c, door, what, async () => {
       for (;;) {
+        const gate = admits(c);
         // buzz-acp reads from 5 s before it starts, so what the person wrote while it was not running would be
         // missed. It reads from their latest message here instead, which it hands on again and duck has taken
         // already, and at most 15 minutes back.
@@ -469,7 +475,7 @@ export function listen(c: Coworker) {
             BUZZ_ACP_AGENT_ARGS: `${Bun.main},buzz,http://127.0.0.1:${port}/doors/${c.name}/${door}`,
             // The coworker's own conversation is its context, so buzz-acp sends none of the channel's.
             BUZZ_ACP_CONTEXT_MESSAGE_LIMIT: "0",
-            ...admits(c, set),
+            ...gate,
             // A turn stays open while the person's runs go on, and a busy agent gets only its own place's
             // events, so the events of other places go to the pool's other agents meanwhile.
             BUZZ_ACP_AGENTS: "4",
@@ -479,11 +485,18 @@ export function listen(c: Coworker) {
           stderr: "inherit",
           signal: c.signal,
         });
-        const exited = await (set.answers ? acp.exited : Promise.race([acp.exited, reopened(c)]));
-        if (exited !== null) throw new Error(`it exited ${exited}`);
-        console.error(`${what} starts again, since the firm's team coworkers changed`);
-        acp.kill();
-        await acp.exited;
+        // However this is left, the buzz-acp running ends first, so two never run on one key.
+        try {
+          for (;;) {
+            const exited = await Promise.race([acp.exited, reopened(c)]);
+            if (exited !== null) throw new Error(`it exited ${exited}`);
+            if (JSON.stringify(admits(c)) !== JSON.stringify(gate)) break;
+          }
+          console.error(`${what} starts again, since whom it admits changed`);
+        } finally {
+          acp.kill();
+          await acp.exited;
+        }
       }
     });
   });
