@@ -18,6 +18,7 @@
     "verify": "bun test/verify.ts"
   },
   "dependencies": {
+    "@evan/opus": "1.0.3",
     "@grpc/grpc-js": "1.14.7",
     "@noble/curves": "2.0.1",
     "@photon-ai/advanced-imessage": "2.5.0",

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import pkg from "../../package.json";
 import { FROM_CONTAINERS, freePort, type Reach } from "./reach";
+import { type Heard, listener, opus, spoken } from "./speech";
 
 /** Buzz's relay at commit 44e97e9, as duck's buzz-acp and CLI are, and the stores it runs on, each at its multi-platform digest. */
 const IMAGES = {
@@ -96,14 +97,16 @@ export type Writer = "rosa" | "theo" | "ana" | "heron";
  * open a DM with it. The relay is published on a free port under the address duck's containers reach it at,
  * by `reach`, and each writer's Buzz CLI runs in a container so it reaches the relay at that same address.
  * Everything is named for and carries the label duck.kit=<name>, which duck's install never touches, and goes
- * when the test ends, passed or failed.
+ * when the test ends, passed or failed. With `ttl`, a call lasts that many seconds on the relay, not its hour.
  */
 export async function startBuzz({
   name = `duck-kit-${randomBytes(3).toString("hex")}`,
   reach = FROM_CONTAINERS,
+  ttl,
 }: {
   name?: string;
   reach?: Reach;
+  ttl?: number;
 } = {}) {
   const folder = mkdtempSync(join(tmpdir(), `${name}-`));
   mkdirSync(join(folder, "files"));
@@ -184,6 +187,7 @@ export async function startBuzz({
         BUZZ_S3_SECRET_KEY: s3.password,
         BUZZ_S3_ADDRESSING_STYLE: "path",
         BUZZ_MEDIA_BASE_URL: `http://${reach.host}:${port}/media`,
+        ...(ttl === undefined ? {} : { BUZZ_EPHEMERAL_TTL_OVERRIDE: String(ttl) }),
       }),
       IMAGES.relay,
     );
@@ -401,6 +405,173 @@ export async function startBuzz({
       }
     }
 
+    /**
+     * `who` starts a call in `parent`, a DM or channel they are in, as Buzz's phone app does (buzz-app
+     * docs/huddles.md): a private stream channel that carries it for the relay's call time, then the start
+     * (kind 48100) in `parent`, signed by that channel's maker, then their sound socket on the relay, signed in
+     * as them, at protocol version 2. They speak a line as its tone (./speech) in Opus frames of 20 ms, hear
+     * each frame the others send, decoded and told apart by its tone, and see who joins and leaves.
+     */
+    async function startCall(who: Writer, parent: string) {
+      const backing = randomUUID();
+      const made = signed(
+        secrets[who],
+        9007,
+        [
+          ["h", backing],
+          ["name", `huddle-${backing.slice(0, 8)}`],
+          ["visibility", "private"],
+          ["channel_type", "stream"],
+          ["about", `Buzz Huddle (buzz.huddles/v1)\nparent:${parent}`],
+          ["ttl", String(ttl ?? 3600)],
+        ],
+        "",
+      );
+      await publish(who, made);
+      const started = JSON.stringify({ ephemeral_channel_id: backing });
+      await publish(who, signed(secrets[who], 48100, [["h", parent]], started));
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/huddle/${backing}/audio`, {
+        headers: { host: new URL(url).host },
+      });
+      ws.binaryType = "arraybuffer";
+      /** Who is in the call by their index in it, each with what decodes their sound. */
+      const peers = new Map<number, { key: string; hear: ReturnType<typeof listener> }>();
+      const heard: { from: string; tone: Heard; at: number }[] = [];
+      const left: { key: string; at: number }[] = [];
+      const joined = Promise.withResolvers<void>();
+      ws.onmessage = (m) => {
+        if (typeof m.data !== "string") {
+          // The relay puts the sender's index before its 8-byte header and the Opus packet.
+          const frame = new Uint8Array(m.data as ArrayBuffer);
+          const peer = peers.get(frame[0] as number);
+          const tone = peer?.hear(frame.subarray(9));
+          if (peer && tone && tone !== "silence") heard.push({ from: peer.key, tone, at: performance.now() });
+          return;
+        }
+        const said = JSON.parse(m.data) as {
+          type: string;
+          challenge?: string;
+          peer_index?: number;
+          pubkey?: string;
+          peers?: { peer_index: number; pubkey: string }[];
+        };
+        if (said.type === "challenge") {
+          const tags = [
+            ["relay", url],
+            ["challenge", String(said.challenge)],
+          ];
+          const auth = { event: signed(secrets[who], 22242, tags, ""), parent_channel_id: parent };
+          ws.send(JSON.stringify({ type: "auth", ...auth, protocol_version: 2 }));
+        } else if (said.type === "joined") {
+          for (const p of [...(said.peers ?? []), { peer_index: said.peer_index, pubkey: said.pubkey }])
+            if (p.peer_index !== undefined && p.pubkey && !peers.has(p.peer_index))
+              peers.set(p.peer_index, { key: p.pubkey, hear: listener() });
+          joined.resolve();
+        } else if (said.type === "left" && said.peer_index !== undefined) {
+          peers.delete(said.peer_index);
+          left.push({ key: String(said.pubkey), at: Date.now() });
+        } else if (said.type === "error") joined.reject(new Error(`the relay refused the call: ${m.data}`));
+      };
+      ws.onclose = () => joined.reject(new Error("the relay closed the call's socket before it was joined"));
+      await Promise.race([
+        joined.promise,
+        Bun.sleep(30_000).then(() => Promise.reject(new Error("waited 30 s to join the call"))),
+      ]);
+      let seq = 0;
+      /** Sends Opus packet `packet` as `who`'s next frame: its number, its time at 48 kHz, its level, no flags. */
+      const send = (packet: Uint8Array, level: number) => {
+        const frame = new Uint8Array(8 + packet.length);
+        const view = new DataView(frame.buffer);
+        view.setUint16(0, seq & 0xffff);
+        view.setUint32(2, (seq * 960) >>> 0);
+        view.setInt8(6, level);
+        frame.set(packet, 8);
+        seq += 1;
+        ws.send(frame);
+      };
+      const inCall = () => [...peers.values()].map((p) => p.key);
+      const waitFor = (what: string, ok: () => boolean, seconds: number) =>
+        settled(
+          what,
+          async () => {
+            if (!ok()) throw new Error("not yet");
+          },
+          seconds,
+        );
+      return {
+        parent,
+        /** The channel that carries the call, and when the relay ends it on its own, in ms since 1970. */
+        backing,
+        ends: (made.created_at + (ttl ?? 3600)) * 1000,
+        /** The keys in the call now, `who`'s among them. */
+        inCall,
+        /** Waits until key `key` is in the call. */
+        joins: (key: string, seconds: number) =>
+          waitFor(`${key.slice(0, 8)} in the call`, () => inCall().includes(key), seconds),
+        /** Waits until key `key` has left the call, and returns when `who` was told, in ms since 1970. */
+        async leaves(key: string, seconds: number) {
+          await waitFor(
+            `${key.slice(0, 8)} gone from the call`,
+            () => left.some((l) => l.key === key),
+            seconds,
+          );
+          return left.find((l) => l.key === key)?.at as number;
+        },
+        /** Says `text` as its tone, then 300 ms of silence. Returns when its sound ended. */
+        async say(text: string) {
+          let ended = 0;
+          for (const [i, packet] of opus(spoken(text)).entries()) {
+            if (i > 0) await Bun.sleep(20);
+            send(packet, -20);
+            ended = performance.now();
+          }
+          for (const packet of opus(new Int16Array(15 * 480))) {
+            await Bun.sleep(20);
+            send(packet, -127);
+          }
+          return ended;
+        },
+        /** The tones heard from others in the call so far. */
+        heard,
+        /** When `who` first heard `tone` from another in the call after `after`, waiting up to `seconds`. */
+        async hears(tone: Heard, after: number, seconds: number) {
+          const found = () => heard.find((h) => h.tone === tone && h.at > after);
+          await waitFor(`${tone} heard in the call`, () => found() !== undefined, seconds);
+          return found()?.at as number;
+        },
+        /** Hangs up: leaves the call and closes the socket, as the phone does. */
+        hangUp() {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "leave" }));
+          ws.close();
+        },
+        /**
+         * Ends the call for everyone from Buzz while still in it: the end (kind 48103) in the parent, then the
+         * call's channel archived (kind 9002), as the phone does when it counts nobody else in the call.
+         */
+        async end() {
+          await publish(who, signed(secrets[who], 48103, [["h", parent]], started));
+          const archived = [
+            ["h", backing],
+            ["archived", "true"],
+          ];
+          await publish(who, signed(secrets[who], 9002, archived, ""));
+        },
+        [Symbol.dispose]() {
+          ws.close();
+        },
+      };
+    }
+
+    /** A private channel `who` makes with `members`, by key, as Buzz's CLI makes one. */
+    async function privateChannel(who: Writer, members: string[]) {
+      const name = `call-${randomBytes(3).toString("hex")}`;
+      const args = ["channels", "create", "--name", name, "--type", "stream", "--visibility", "private"];
+      const made = String(JSON.parse((await cli(args, undefined, who)).toString()).channel_id);
+      for (const key of members)
+        await cli(["channels", "add-member", "--channel", made, "--pubkey", key], undefined, who);
+      return made;
+    }
+
     /** First value of tag `name` on `event`. */
     const tagOf = (event: BuzzEvent, name: string) => event.tags.find((t) => t[0] === name)?.[1];
     /**
@@ -484,6 +655,9 @@ export async function startBuzz({
           .map((r: { emoji: string }) => r.emoji),
       /** harbor-ops's channel id. */
       channel,
+      /** `who` starts a call in `parent` (see `startCall`). */
+      call: startCall,
+      privateChannel,
       /** The coworker's messages in harbor-ops as `who` reads them, oldest first. */
       inHarborOps: (who: Writer = "rosa") => coworkers(["get", "--channel", channel], who),
       /** The coworker's messages in the harbor-ops thread under event `root`, oldest first. */

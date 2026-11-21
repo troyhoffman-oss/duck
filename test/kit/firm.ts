@@ -594,8 +594,9 @@ export async function startFirm(
         )?.[1] as string,
       /** Changes the setup in the firm's folder; the running system keeps what it was installed with. */
       edit,
-      /** Adds secret `name`, with a value made now, to the firm's secret store. */
-      addSecret: (name: string) => appendFileSync(join(folder, "secrets.env"), `${name}=${secret()}\n`),
+      /** Adds secret `name`, with `value` or one made now, to the firm's secret store. */
+      addSecret: (name: string, value = secret()) =>
+        appendFileSync(join(folder, "secrets.env"), `${name}=${value}\n`),
       /** Starts that unit, as systemd does when the server boots, and waits until duck is ready. */
       async boot() {
         await systemd("start");
