@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { join } from "node:path";
 import { importHistory, importMaterial } from "./archive/history";
 import { coworkersChanged, listChanged, member, personFor, publish, talk } from "./dms";
-import { face, quiet, take } from "./doors";
+import { face, quiet, reopen, take, teamKeys } from "./doors";
 import { cutSignIns, gate } from "./gate";
 import { add, openDb, type Pushed, poll, push } from "./inbox";
 import { modelRelay } from "./model-relay";
@@ -30,14 +30,18 @@ async function serve() {
   const coworkers = new Map<string, Coworker>();
   /** The coworkers whose goose has been up; one that is not holds up none of the others. */
   const up = new Set<string>();
+  /** The Buzz keys of the claimed team coworkers the running coworkers' Buzz doors were started knowing. */
+  let teams = "";
   /**
    * Stops each running coworker no longer claimed, then starts each claimed one not running and publishes its
    * profile and list: every one at start, and those stopped or claimed since when install says (SIGHUP), one
    * install after another, then tells the admins. One that fails to stop or start is logged and holds up none of
-   * the others.
+   * the others. Where the claimed team coworkers changed, each coworker that ran before starts again each Buzz
+   * door whose gate admits them (SPEC part 14).
    */
   const match = async () => {
     const now = claimed(setup);
+    const before = [...coworkers.keys()].filter((name) => now.includes(name));
     for (const [name, coworker] of coworkers)
       if (!now.includes(name)) {
         coworkers.delete(name);
@@ -58,6 +62,10 @@ async function serve() {
       } catch (e) {
         console.error(`${name} did not start: ${(e as Error).message}`);
       }
+    // By their Buzz keys, since a coworker made again under the same name has a new one.
+    const nowTeams = teamKeys(setup).sort().join();
+    if (nowTeams !== teams) for (const name of before) reopen(coworkers.get(name) as Coworker);
+    teams = nowTeams;
     coworkersChanged(coworkers);
   };
   let matching = Promise.resolve();

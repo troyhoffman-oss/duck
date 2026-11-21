@@ -16,7 +16,7 @@ import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive, told } from "./archive";
 import { listChanged, SETTINGS_TOOL, tellSettings } from "./dms";
-import { act, doorTo, saved } from "./doors";
+import { act, doorTo, rootOf, saved } from "./doors";
 import { add, broken, mark, othersIn, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
 import { LIST_TOOLS, type Link, link, linkedTo, logged, useList } from "./list";
@@ -419,13 +419,15 @@ export const plugsOf = (setup: Setup, coworker: string) =>
 
 /**
  * `tool`'s state in setup, or `*`'s where setup does not name it, as a lane sees it: a job's has nobody to
- * ask, so ask first is removed there, and an others run's is what the plug's `others` names, the rest removed.
+ * ask, so ask first is removed there, and an others run's, and a team coworker's request that an agent made
+ * (SPEC part 14), is what the plug's `others` names, the rest removed.
  * A tool removed in `tools` stays removed, and the tool the plug is polled with is the poller's alone (SPEC part 1).
  */
 function stateOf(plug: Plug, tool: string, lane: string) {
   if (tool === plug.events?.poll?.tool) return "removed";
   const state = plug.tools?.[tool] ?? plug.tools?.["*"] ?? "free";
-  if (lane === OTHERS && state !== "removed") return plug.others?.[tool] ?? plug.others?.["*"] ?? "removed";
+  if ((lane === OTHERS || lane === AGENT) && state !== "removed")
+    return plug.others?.[tool] ?? plug.others?.["*"] ?? "removed";
   return lane === JOB && state === "ask first" ? "removed" : state;
 }
 
@@ -589,7 +591,18 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
         const i = args.indexOf(flag);
         return i < 0 ? args.find((a) => a.startsWith(`${flag}=`))?.slice(flag.length + 1) : args[i + 1];
       };
-      const at = `${option("--channel")}/${option("--reply-to") ?? sent}`;
+      // A reply to it is known by its thread's root, as buzz-acp names a thread, so what it wrote under a
+      // message that is itself a reply is kept at that message's root. Where the root cannot be read it is kept
+      // at the message it replied to, which is the root when that is the thread's first message; under any
+      // other, replies to it then do not find its session.
+      const under = option("--reply-to");
+      const root = under
+        ? await rootOf(c, sent).catch((e: Error) => {
+            console.error(`the root of ${c.name}'s Buzz message ${sent} was not read: ${e.message}`);
+            return under;
+          })
+        : sent;
+      const at = `${option("--channel")}/${root}`;
       const id = s ? add(c.db, "buzz:reply", `sent ${sent}`, null, null, s, at) : null;
       if (id !== null) mark(c.db, [id], "done");
       // One where the person talks to it, known by their own messages there, is a message to them (SPEC part 9).
@@ -622,17 +635,18 @@ async function useBuzz(c: Coworker, input: Json, s: string | undefined, moved: M
 }
 
 /**
- * The gate's addresses for a work-lane session or a team coworker's request (SPEC part 14), for a job's worker
- * or checker and for an others run; the person lane's is /mcp.
+ * The gate's addresses for a work-lane session or a team coworker's request (SPEC part 14), for a team
+ * coworker's request that an agent made, which differs only in its plugs' states, for a job's worker or
+ * checker and for an others run; the person lane's is /mcp.
  */
-export const [WORK, JOB, OTHERS] = ["/mcp/work", "/mcp/job", "/mcp/others"];
+export const [WORK, AGENT, JOB, OTHERS] = ["/mcp/work", "/mcp/agent", "/mcp/job", "/mcp/others"];
 
 /**
  * duck's own tools for `coworker` on `lane`: the list's, the timers', the archive's, the jobs', `tell` on
  * the work lane (SPEC part 10), `settings` and `standing` only in its person's own runs (SPEC parts 1 and
- * 8), and `buzz` where it
- * has a buzz door. A job has none (SPEC part 6), and an
- * others run only `tell` (SPEC part 11). None answers a held call (SPEC part 9).
+ * 8), and `buzz` where it has a buzz door. A job has none (SPEC part 6), an others run only `tell` (SPEC
+ * part 11), and another coworker's request no timers and no jobs (SPEC part 14). None answers a held call
+ * (SPEC part 9).
  */
 const own = (setup: Setup, coworker: string, lane: string) =>
   lane === JOB
@@ -641,10 +655,10 @@ const own = (setup: Setup, coworker: string, lane: string) =>
       ? [TELL]
       : [
           ...LIST_TOOLS,
-          ...TIMER_TOOLS,
+          ...(lane === AGENT ? [] : TIMER_TOOLS),
           ARCHIVE_TOOL,
-          ...JOB_TOOLS,
-          ...(lane === WORK ? [TELL] : [SETTINGS_TOOL, STANDING_TOOL]),
+          ...(lane === AGENT ? [] : JOB_TOOLS),
+          ...(lane === WORK || lane === AGENT ? [TELL] : [SETTINGS_TOOL, STANDING_TOOL]),
           ...(doorsOf(setup, coworker).buzz ? [BUZZ] : []),
         ];
 

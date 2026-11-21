@@ -32,6 +32,14 @@ export const heard = (db: Database, door: string, event: number, text: string, f
     JSON.stringify(files),
   ]);
 
+/** When the person's latest message at `door` was written, as `heard` keeps it, if they wrote one there. */
+export const lastHeard = (db: Database, door: string) =>
+  db
+    .query<{ at: string | null }, [string]>(
+      "select max(at) as at from messages where way = 'in' and door = ?",
+    )
+    .get(door)?.at ?? undefined;
+
 /** Keeps a message to the person and returns its id, which its delivery carries. */
 export const told = (db: Database, door: string, session: string | null, text: string, files: string[]) =>
   Number(
