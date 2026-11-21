@@ -269,10 +269,13 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     await firm.second.nextWith(ASKING, 60);
     await firm.second.nextWith(TOLD, 120);
 
-    // It reached Finch as what tally wrote, not as Theo's own words.
+    // It reached Finch as what tally wrote, not as Theo's own words. The reply row that marks what Finch sent
+    // holds no words.
     using db = firm.db(second.coworker);
     const back = db
-      .query<{ payload: string }, []>("select payload from inbox where source = 'buzz:reply'")
+      .query<{ payload: string }, []>(
+        "select payload from inbox where source = 'buzz:reply' and payload is not null",
+      )
       .all()
       .map((e) => JSON.parse(e.payload) as { key?: string; text?: string })
       .filter((p) => p.text === ANSWER);
