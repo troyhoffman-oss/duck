@@ -66,7 +66,9 @@ export async function take(c: Coworker, door: string, request: Request) {
   // The door answers once the message is written, so a message duck failed to write is sent again.
   if (set.kind !== "buzz" || body.writer?.key === ownerOf(c.setup, c.name))
     ended = (await taken(c, door, body))?.ended;
-  else {
+  // buzz-acp hands an event on again at each start, as far back as its replay floor, and the coworker may have
+  // written in its thread since: it is taken once, whichever way it was filed the first time.
+  else if (!has(c.db, `${door}:others`, body.id) && !has(c.db, `${door}:reply`, body.id)) {
     const { name: from, key, where, owner } = body.writer ?? {};
     const { channel, root, reply, dm } = body.place ?? {};
     const at = root ? `${channel}/${root}` : dm ? `${channel}/` : null;
