@@ -17,7 +17,7 @@ const MARGIN = 30_000;
 const LIMIT = 3600;
 /** How long a hand-off waits for the transcript to pass it. */
 const HEARD = 3000;
-/** How long the speech model may take to begin saying what it is given. */
+/** How long the speech model may take to begin saying what it is given, and so the quiet before a question. */
 const BEGIN = 3000;
 /** The longest pause between the transcript's words inside one line of the person's. */
 const PAUSE = 700;
@@ -181,8 +181,8 @@ export function voiceIn(
     };
     /**
      * Has the speech model ask the person duck's question `text`, word for word, and then say only "One moment"
-     * until it is given what happened: once it has said all it was given before, so that what it says next is
-     * the question's. The question is asked once the last of that has played.
+     * until it is given what happened: once nothing has been given or said for BEGIN, so that what it says next
+     * is the question's. The question is asked once the last of that has played.
      */
     const ask = (text: string) => questions.push(text);
     /** Takes the line the person finished, as the transcript gives it, as their message. */
@@ -309,7 +309,9 @@ export function voiceIn(
         if (first !== undefined) asked(c.db, door, given, first, new Date(now).toISOString());
         question = undefined;
       } else if (quiet && question) question = undefined;
-      else if (quiet && questions.length > 0) {
+      // A question is given only once nothing has been given or said for BEGIN, so that nothing given before it
+      // waits to be said: what the speech model says next is the question's.
+      else if (questions.length > 0 && out.length === 0 && now - Math.max(lastOut, lastGiven) >= BEGIN) {
         question = { given: now, begun: false };
         say(
           `Ask ${personOf(c.setup, c.name).name} this, word for word, then wait for their answer:\n${questions.shift()}\nWhen they answer, say only "One moment" until you are given what happened.`,
