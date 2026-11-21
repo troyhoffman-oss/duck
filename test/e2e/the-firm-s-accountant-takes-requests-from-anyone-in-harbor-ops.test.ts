@@ -219,7 +219,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     expect(firm.home(team.coworker, "standing.md")).not.toContain(THEIRS);
   });
 
-  test.failing("what tally has to say on its own goes to harbor-ops, not to Rosa's DM, and Rosa's own message to tally is answered in her DM", async () => {
+  test("what tally has to say on its own goes to harbor-ops, not to Rosa's DM, and Rosa's own message to tally is answered in her DM", async () => {
     const BILL = {
       ref: "<water-4b@harbor.example>",
       payload: {
