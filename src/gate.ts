@@ -1032,7 +1032,11 @@ async function call(c: Coworker, params: Json, lane: string) {
     } else if (TIMER_TOOLS.some((t) => t === mine))
       result = words(useTimers(db, personOf(setup, coworker).zone, name, input));
     else if (mine === ARCHIVE_TOOL) result = words(readArchive(db, personOf(setup, coworker).name, input));
-    else if (mine === SETTINGS_TOOL) result = words(tellSettings(setup, coworker, input));
+    else if (mine === SETTINGS_TOOL)
+      // duck's answers are worded for the person, as the plugin shows them, so the coworker is told whose they are.
+      result = words(
+        `duck's answer, worded for ${personOf(setup, coworker).name}: ${tellSettings(setup, coworker, input)}`,
+      );
     else if (mine === BUZZ) {
       // Arguments it may not run, and files that are not the coworker's, are refused before the call is held.
       outcome = "refused";
