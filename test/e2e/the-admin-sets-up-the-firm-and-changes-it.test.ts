@@ -375,7 +375,7 @@ describe("The admin sets up the firm and changes it", () => {
     expect(await fresh.duckId()).toBe(before);
   });
 
-  test.failing("a dream proposes the standing words it finds in history loaded from before with tell, and only her yes, in her conversation, writes them with duck's own tool", async () => {
+  test("a dream proposes the standing words it finds in history loaded from before with tell, and only her yes, in her conversation, writes them with duck's own tool", async () => {
     const STANDING = "Keep notes to the dock crew short and friendly. (Rosa, in a ChatGPT chat.)";
     const PROPOSED = `From her ChatGPT chats, a standing instruction to keep: "${STANDING}"`;
     const OFFER =

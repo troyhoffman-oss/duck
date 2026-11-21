@@ -154,7 +154,7 @@ A copy holds each coworker's folder: its memory, its facts and its own Buzz key.
 
 ## Later: updating duck
 
-In `<duck>`, check out the newer commit of `main` and run `bun install --production --frozen-lockfile`. Then, in the firm's setup folder, run `duck check` and `duck install`. A change to duck's own code makes the `duck-<firm>` container new, which cuts every coworker's runs; each starts again. A change to the setup does the same.
+In `<duck>`, check out the newer commit of `main` and run `bun install --production --frozen-lockfile`. Then, in the firm's setup folder, run `duck check` and `duck install`. A change to duck's own code makes the `duck-<firm>` container new, which cuts every coworker's runs; each starts again. A change to the setup does the same. A change to how a coworker's container is made makes every coworker's `duck-<firm>-<coworker>` container new once, at the first install after it, and the install says so for each: the update that mounts each coworker's standing words read-only is one.
 
 ## When something fails
 

@@ -21,6 +21,7 @@ import { add, broken, mark, othersIn, othersWho, type Pushed, sessionItem } from
 import { JOB_TOOLS, useJobs } from "./jobs";
 import { LIST_TOOLS, type Link, link, linkedTo, logged, useList } from "./list";
 import { modelRelay } from "./model-relay";
+import { STANDING_TOOL, writeStanding } from "./notes";
 import { ask, quietSince, TELL, tell } from "./outbox";
 import type { Coworker } from "./run";
 import {
@@ -385,7 +386,8 @@ export const [WORK, JOB, OTHERS] = ["/mcp/work", "/mcp/job", "/mcp/others"];
 
 /**
  * duck's own tools for `coworker` on `lane`: the list's, the timers', the archive's, the jobs', `tell` on
- * the work lane (SPEC part 10), `settings` only in its person's own runs (SPEC part 1), and `buzz` where it
+ * the work lane (SPEC part 10), `settings` and `standing` only in its person's own runs (SPEC parts 1 and
+ * 8), and `buzz` where it
  * has a buzz door. A job has none (SPEC part 6), and an
  * others run only `tell` (SPEC part 11). None answers a held call (SPEC part 9).
  */
@@ -399,7 +401,7 @@ const own = (setup: Setup, coworker: string, lane: string) =>
           ...TIMER_TOOLS,
           ARCHIVE_TOOL,
           ...JOB_TOOLS,
-          lane === WORK ? TELL : SETTINGS_TOOL,
+          ...(lane === WORK ? [TELL] : [SETTINGS_TOOL, STANDING_TOOL]),
           ...(doorsOf(setup, coworker).buzz ? [BUZZ] : []),
         ];
 
@@ -1038,6 +1040,7 @@ async function call(c: Coworker, params: Json, lane: string) {
     } else if (TIMER_TOOLS.some((t) => t === mine))
       result = words(useTimers(db, personOf(setup, coworker).zone, name, input));
     else if (mine === ARCHIVE_TOOL) result = words(readArchive(db, personOf(setup, coworker).name, input));
+    else if (mine === STANDING_TOOL) result = words(writeStanding(c.home, input.content));
     else if (mine === SETTINGS_TOOL)
       // duck's answers are worded for the person, as the plugin shows them, so the coworker is told whose they are.
       result = words(

@@ -57,3 +57,26 @@ export function history(folder: string, home: string) {
     git(...at, "commit", "--quiet", "--message", `run ${run}`);
   };
 }
+
+/** duck's own tool that writes the standing words, which only the main conversation has (SPEC part 8). */
+export const STANDING_TOOL = {
+  name: "standing",
+  description:
+    "Writes your person's standing words, their own instructions to you: `content` is the whole of standing.md as it is to be, every line you keep with the one you add or change. Only your conversation with your person has it, and standing.md is read-only to your file tools.",
+  inputSchema: {
+    type: "object",
+    properties: { content: { type: "string" } },
+    required: ["content"],
+  },
+};
+
+/**
+ * Writes `content` as the standing words in `home`, in place: the coworker's container holds the one file
+ * read-only over its own path, and sees what is written there only while it stays the same file.
+ */
+export function writeStanding(home: string, content: unknown) {
+  if (typeof content !== "string")
+    return "Nothing was written: `content` is the whole of standing.md, as text.";
+  writeFileSync(join(home, "standing.md"), content);
+  return "standing.md holds them now; the next run is shown them.";
+}
