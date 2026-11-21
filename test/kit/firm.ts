@@ -23,6 +23,7 @@ import { scriptedModel } from "./model";
 import { startPerson } from "./person";
 import { listTool, type Plug, type PlugEvent, type PlugTool, startPlug } from "./plug";
 import { bothReach, FROM_CONTAINERS, freePort, type Reach, Trouble } from "./reach";
+import { type Signin, startSignin } from "./signin";
 import type { TextLine } from "./text";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -85,6 +86,14 @@ const MAIL_TOOLS: Record<string, PlugTool> = {
   },
 };
 
+/** The tools of the plug that wants each person's sign-in. */
+const FILES_TOOLS: Record<string, PlugTool> = {
+  list_files: {
+    description: "Lists the files in the person's drive.",
+    answer: () => [{ name: "4B lease.pdf" }, { name: "4B renewal.docx" }],
+  },
+};
+
 /** The most model calls of a job's run in a test's firm: a few, so a test reaches it (SPEC part 6). */
 export const JOB_CALLS = 4;
 
@@ -120,6 +129,7 @@ type Setup = {
       others?: Record<string, string>;
       events?: { poll?: { every: string } };
       boxes?: string[];
+      signin?: Record<string, unknown>;
     }
   >;
 };
@@ -193,6 +203,8 @@ async function writeSetup(
     others?: Record<string, string>;
     /** Whether harbor's calendar answers its list inside a wrapper, with calendar-value.ts as its box. */
     wrapped?: boolean;
+    /** A plug for everyone that wants each person's sign-in at a service, and that service's setup. */
+    files?: { address: string; signin: Record<string, unknown> };
   },
 ) {
   const setup = Bun.YAML.parse(await Bun.file(join(HARBOR, "duck.yaml")).text()) as Setup;
@@ -237,6 +249,8 @@ async function writeSetup(
   calendar.address = given.calendar;
   calendar.events.poll.every = times.poll;
   if (given.wrapped) calendar.boxes = ["calendar-value.ts"];
+  if (given.files)
+    setup.plugs.files = { address: given.files.address, coworkers: "everyone", signin: given.files.signin };
   writeFileSync(join(folder, "duck.yaml"), Bun.YAML.stringify(setup, null, 2));
   const boxes = Object.values(setup.plugs).flatMap((p) => p.boxes ?? []);
   for (const file of [setup.sign, setup.sorter.file, ...boxes])
@@ -265,7 +279,9 @@ async function writeSetup(
  * test runs. With `empty`, the firm is installed with its coworker made and not yet claimed, as a new firm's first install is.
  * With `buzz` and `second`, the second person's coworker is claimed with their own tag and joins harbor-ops. With
  * `buzz` and `team`, the firm has a team coworker made for harbor's person with harbor-ops as its channel,
- * claimed by her, calling plugs with a key of its own, and in harbor-ops.
+ * claimed by her, calling plugs with a key of its own, and in harbor-ops. With `signin`, every coworker is
+ * given a plug named files that wants each person's sign-in at a stand-in service, the firm's app there
+ * with a client id and a secret, and duck's page hosted at the service.
  */
 export async function startFirm(
   given: Partial<Times> & {
@@ -284,6 +300,7 @@ export async function startFirm(
     backup?: string;
     empty?: boolean;
     team?: boolean;
+    signin?: boolean;
   } = {},
 ) {
   const times = { ...DEFAULTS, ...given };
@@ -307,6 +324,7 @@ export async function startFirm(
     HARBOR_BACKUP_KEY: secret(),
     HARBOR_BACKUP_SECRET: secret(),
     HARBOR_BACKUP_PASSWORD: secret(),
+    HARBOR_FILES_SECRET: secret(),
     ...given.text?.secrets,
     ...given.email?.secrets,
   };
@@ -338,6 +356,18 @@ export async function startFirm(
     trouble,
   });
   const bucket = startBucket({ name: "backup", key: secrets.HARBOR_BACKUP_KEY, reach: bothReach() });
+  // The person's browser and duck's container both reach the service; only duck reaches the plug.
+  const service: Signin | undefined = given.signin
+    ? startSignin({
+        reach: bothReach(),
+        client: "harbor-files",
+        secret: secrets.HARBOR_FILES_SECRET,
+        trouble,
+      })
+    : undefined;
+  const drive = service
+    ? startPlug({ name: "files", tools: FILES_TOOLS, reach, keys: service.valid, trouble })
+    : undefined;
   // Duck has a door's answer to delivery `<coworker>-<message>` once no question the message carries lacks the
   // time its delivery ended (SPEC part 9).
   const heard = (id: string) => {
@@ -408,6 +438,8 @@ export async function startFirm(
     person.stop();
     theirs.stop();
     bucket.stop();
+    service?.stop();
+    drive?.stop();
   }
 
   try {
@@ -435,6 +467,20 @@ export async function startFirm(
       signed: given.signed,
       others: given.others,
       wrapped: given.wrapped,
+      files:
+        service && drive
+          ? {
+              address: drive.url,
+              signin: {
+                authorize: service.authorize,
+                token: service.token,
+                client: service.client,
+                key: "HARBOR_FILES_SECRET",
+                scopes: ["files.read", "offline_access"],
+                page: service.page,
+              },
+            }
+          : undefined,
     });
 
     const duck = await duckCommand();
@@ -520,6 +566,9 @@ export async function startFirm(
       model,
       mail,
       calendar: Object.assign(calendar, { rows }),
+      /** The service the files plug wants each person's sign-in at, and the plug, where the firm has them. */
+      signin: service as Signin,
+      files: drive as Plug,
       person,
       /** The second person's side of their coworker's desk door, where the firm has them. */
       second: theirs,
@@ -538,7 +587,8 @@ export async function startFirm(
           theirs.check();
         } finally {
           model.clear();
-          for (const plug of [mail, calendar, ...added]) plug.clear();
+          for (const plug of [mail, calendar, ...added, ...(drive ? [drive] : [])]) plug.clear();
+          service?.clear();
           person.clear();
           theirs.clear();
           trouble.clear();

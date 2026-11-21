@@ -124,7 +124,7 @@ export async function telegramIn(c: Coworker, door: string, set: Door) {
           const text = typeof got === "string" ? [words, got].filter(Boolean).join("\n\n") : words;
           const files = got && typeof got !== "string" ? [got] : [];
           const at = new Date(m.date * 1000).toISOString();
-          if (taken(c, door, { id: String(m.message_id), text, files, at })) typing();
+          if (await taken(c, door, { id: String(m.message_id), text, files, at })) typing();
         } else if (m && !strangers.has(`${m.from?.id}/${m.chat.id}`)) {
           strangers.add(`${m.from?.id}/${m.chat.id}`);
           console.error(`${what} dropped a message not its person's, or not in their private chat`);

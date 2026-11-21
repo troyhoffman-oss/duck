@@ -3,8 +3,8 @@ import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-ai/advanced-imessage/grpc";
 import { heard, told } from "./archive";
-import { readIn } from "./gate";
-import { aboutSession, add, broken, type Event, lastEvent, mark as state, waiting } from "./inbox";
+import { cutSignIns, hasSignIn, readIn, signIn } from "./gate";
+import { aboutSession, add, broken, type Event, has, lastEvent, mark as state, waiting } from "./inbox";
 import type { Coworker } from "./run";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
 import { buzzKey } from "./setup/coworkers";
@@ -49,8 +49,10 @@ export async function take(c: Coworker, door: string, request: Request) {
   if (request.headers.get("authorization") !== `Bearer ${keyOf(c, set)}`)
     return new Response("wrong key", { status: 401 });
   const body = (await request.json()) as Written;
-  let ended: Promise<unknown> | null = null;
-  if (set.kind !== "buzz" || body.writer?.key === ownerOf(c.setup, c.name)) ended = taken(c, door, body);
+  let ended: Promise<unknown> | undefined;
+  // The door answers once the message is written, so a message duck failed to write is sent again.
+  if (set.kind !== "buzz" || body.writer?.key === ownerOf(c.setup, c.name))
+    ended = (await taken(c, door, body))?.ended;
   else {
     const { name: from, key, where } = body.writer ?? {};
     const { channel, root, dm } = body.place ?? {};
@@ -58,7 +60,8 @@ export async function take(c: Coworker, door: string, request: Request) {
     const wrote = at === null ? undefined : aboutSession(c.db, `${door}:reply`, at, !root);
     const [place, thread] =
       set.answers || wrote ? [body.place, `${channel}/${root ?? body.id}`] : [undefined, null];
-    const payload = JSON.stringify({ from, key, where, text: body.text, ...place });
+    const text = cutSignIns(c.setup, c.name, body.text);
+    const payload = JSON.stringify({ from, key, where, text, ...place });
     add(c.db, `${door}:${wrote ? "reply" : "others"}`, body.id, payload, null, wrote ?? null, thread);
     c.wake();
   }
@@ -90,14 +93,46 @@ export function saved(folder: string, name: string, bytes: Buffer) {
   return at;
 }
 
+/** Each coworker's last message waiting on a sign-in trade under way, so each taken after it is written after it. */
+const trading = new Map<string, Promise<unknown>>();
+/** The messages waiting there, by coworker, door and id, so one delivered again meanwhile is not traded twice. */
+const waitingOn = new Map<string, Promise<unknown>>();
+
+/**
+ * Takes what the person wrote at `door`, as `written` does. A message that holds a sign-in string is written
+ * once duck has traded each code in it, with the line duck put in its place (SPEC part 9), and while a trade
+ * is under way for the coworker every message is written after it, in the order taken; a message taken
+ * already is never traded. Any other message is written at once. It settles once the message is written, so
+ * a door confirms or passes only what was.
+ */
+export function taken(c: Coworker, door: string, body: Written) {
+  const before = trading.get(c.name);
+  if (!before && !hasSignIn(body.text)) return written(c, door, body);
+  const key = `${c.name}/${door}/${body.id}`;
+  // One delivered again while it waits settles as taken already once the first is written, and fails with it.
+  const waiting = waitingOn.get(key);
+  if (waiting) return waiting.then(() => null);
+  if (has(c.db, door, body.id)) return null;
+  const turn = (before ?? Promise.resolve())
+    .then(async () =>
+      written(c, door, { ...body, text: hasSignIn(body.text) ? await signIn(c, body.text) : body.text }),
+    )
+    .finally(() => waitingOn.delete(key));
+  waitingOn.set(key, turn);
+  const last = turn.catch(() => {});
+  trading.set(c.name, last);
+  void last.then(() => trading.get(c.name) === last && trading.delete(c.name));
+  return turn;
+}
+
 /**
  * Writes what the person wrote at `door` as an inbox event, with their files where the coworker reads them
  * and cannot change them, and wakes the coworker. A buzz door's message keeps its place as the payload. At a
  * door but email or voice, where no ask goes, it is held as `reading` until duck has read what it answers of
- * the questions it asked them (SPEC part 9). It returns when the runs the message wakes or steers have ended
- * and what they said has gone out, or null for a message already taken.
+ * the questions it asked them (SPEC part 9). It returns `ended`, which settles when the runs the message wakes
+ * or steers have ended and what they said has gone out, or null for a message already taken.
  */
-export function taken(c: Coworker, door: string, body: Written) {
+function written(c: Coworker, door: string, body: Written) {
   const reads = askDoors(c).includes(door);
   const event = c.db.transaction(() => {
     const event = add(c.db, door, body.id, body.place ? JSON.stringify(body.place) : null);
@@ -112,7 +147,7 @@ export function taken(c: Coworker, door: string, body: Written) {
     return event;
   })();
   if (event === null) return null;
-  return (reads ? readIn(c, event) : Promise.resolve()).then(() => c.wake()).then(() => c.sending);
+  return { ended: (reads ? readIn(c, event) : Promise.resolve()).then(() => c.wake()).then(() => c.sending) };
 }
 
 /** The doors of `c` an ask may go to: all its person's doors but email and voice, since neither answers an ask. */
@@ -321,7 +356,12 @@ export function listen(c: Coworker) {
     if (set.kind === "text") return textIn(c, door, set);
     if (set.kind === "email") return mailIn(c, door, set);
     if (set.kind === "telegram") return telegramIn(c, door, set);
-    if (set.kind === "voice") return voiceIn(c, door, set, (id, text) => taken(c, door, { id, text }));
+    if (set.kind === "voice")
+      return voiceIn(c, door, set, (id, text) =>
+        (async () => taken(c, door, { id, text }))().catch((e: Error) =>
+          console.error(`the voice door ${c.name}.${door} did not keep line ${id}: ${e.message}`),
+        ),
+      );
     if (set.kind !== "buzz") return undefined;
     return keep(c, door, `buzz-acp at ${c.name}.${door}`, async () => {
       const acp = Bun.spawn(["buzz-acp"], {
@@ -560,10 +600,10 @@ async function textIn(c: Coworker, door: string, set: Door) {
         // Apple marks where each attachment sits in the text with an object replacement character.
         const text = (e.message.content.text ?? "").replaceAll(String.fromCodePoint(0xfffc), "").trim();
         const at = e.message.dateCreated.toISOString();
-        const ended = taken(c, door, { id: e.message.guid, text, files: await Promise.all(files), at });
-        if (!ended || c.signal.aborted) continue;
+        const kept = await taken(c, door, { id: e.message.guid, text, files: await Promise.all(files), at });
+        if (!kept || c.signal.aborted) continue;
         best("mark a text read", () => im.chats.markRead(chat));
-        hold(ended);
+        hold(kept.ended);
       }
       throw new Error("Photon ended its stream");
     } finally {
@@ -750,7 +790,8 @@ async function mailIn(c: Coworker, door: string, set: Door) {
     const shown = attached.filter((a) => a.content_disposition === "inline" && a.content_id).map(name);
     if (from !== person || m.from.split("@").length !== 2 || ![spf, dmarc].includes("pass")) {
       const files = attached.map(name);
-      const payload = { from: m.from, text: words, files, shown_in_body: shown, checks: { spf, dmarc } };
+      const text = cutSignIns(c.setup, c.name, words);
+      const payload = { from: m.from, text, files, shown_in_body: shown, checks: { spf, dmarc } };
       if (add(c.db, `${door}:others`, id, JSON.stringify(payload), null, null, m.thread_id)) void c.wake();
       return;
     }
@@ -762,7 +803,7 @@ async function mailIn(c: Coworker, door: string, set: Door) {
       const data = Buffer.from(await got.arrayBuffer()).toString("base64");
       return { name: name(a), type: a.content_type ?? "", data };
     });
-    taken(c, door, { id, text, files: await Promise.all(files) });
+    await taken(c, door, { id, text, files: await Promise.all(files) });
   };
   // One mail at a time, in the order the service gave them.
   const next = (id: string) => {

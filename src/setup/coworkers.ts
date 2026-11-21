@@ -9,6 +9,7 @@ import {
   factsFile,
   factsOf,
   keysFile,
+  keysOf,
   lacking,
   made,
   plugKeys,
@@ -24,6 +25,15 @@ export function write(path: string, text: string, mode = 0o644) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(`${path}.new`, text, { mode });
   renameSync(`${path}.new`, path);
+}
+
+/** Sets each name in `kept` in coworker `coworker`'s file of keys and sign-ins, and takes out each set to null. */
+export function keep(setup: Setup, coworker: string, kept: Record<string, string | null>) {
+  const all = { ...keysOf(setup, coworker), ...kept };
+  const lines = Object.entries(all).flatMap(([name, value]) =>
+    value === null ? [] : [`${name}=${value}\n`],
+  );
+  write(keysFile(setup, coworker), lines.join(""), 0o600);
 }
 
 export const writeFacts = (setup: Setup, coworker: string, facts: Facts) =>

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { importHistory, importMaterial } from "./archive/history";
 import { coworkersChanged, listChanged, member, personFor, publish, talk } from "./dms";
 import { face, quiet, take } from "./doors";
-import { gate } from "./gate";
+import { cutSignIns, gate } from "./gate";
 import { add, openDb, type Pushed, poll, push } from "./inbox";
 import { modelRelay } from "./model-relay";
 import { type Coworker, startCoworker } from "./run";
@@ -82,7 +82,8 @@ async function serve() {
   };
   /**
    * Writes plug `plug`'s event to the inbox of each of its coworkers, or where it names a person, of that
-   * person's, and wakes them. A source may give a ref or what an event is about as a number.
+   * person's, and wakes them. A source may give a ref or what an event is about as a number. A sign-in string in
+   * it is cut out, unused, as no event is a person's own message at their own door (SPEC part 9).
    */
   const arrive = (plug: string, { ref, about, payload, person }: Pushed) => {
     const given = setup.plugs?.[plug];
@@ -91,8 +92,12 @@ async function serve() {
         given && gives(given, c.name) && (person === undefined || factsOf(setup, c.name).handle === person),
     );
     if (to.length === 0) console.error(`plug ${plug}'s event ${ref} for ${person} reaches no coworker`);
-    const [r, a, p] = [String(ref), about == null ? null : String(about), JSON.stringify(payload ?? null)];
-    const added = to.filter((c) => add(c.db, plug, r, p, null, null, a) !== null);
+    const [r, a] = [String(ref), about == null ? null : String(about)];
+    const cut = (c: Coworker) => (_: string, v: unknown) =>
+      typeof v === "string" ? cutSignIns(setup, c.name, v) : v;
+    const added = to.filter(
+      (c) => add(c.db, plug, r, JSON.stringify(payload ?? null, cut(c)), null, null, a) !== null,
+    );
     for (const c of added) c.wake();
     return { reached: to.length, added: added.length };
   };

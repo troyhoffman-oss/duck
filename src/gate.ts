@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
@@ -30,6 +30,7 @@ import {
   fileOf,
   gives,
   HOME,
+  keysOf,
   type Person,
   type Plug,
   personal,
@@ -37,6 +38,7 @@ import {
   type Setup,
   secret,
 } from "./setup";
+import { keep } from "./setup/coworkers";
 import { TIMER_TOOLS, useTimers } from "./timers";
 
 type Json = Record<string, unknown>;
@@ -91,12 +93,221 @@ export function fields(result: Result): unknown {
 /** The most bytes a file through the gate may have (SPEC part 9). */
 const LIMIT = 25_000_000;
 
+/** How long a link's state is good: a day, so a link read the next morning still signs in. */
+const LINK_LIFE = 24 * 3_600_000;
+
+/** The string duck's page shows a person to send their coworker: the link's state and the service's code. */
+const SIGNIN = /duck-sign-in:([A-Za-z0-9_-]{22}):([A-Za-z0-9_-]+)/g;
+
+/** A person's sign-in at a plug's service, as duck keeps it: its access token, refresh token and end. */
+type SignIn = { access: string; refresh?: string; until?: number };
+
+/** Thrown where a coworker's person has not connected plug `plug`, which wants their sign-in. */
+export class NotConnected extends Error {
+  constructor(readonly plug: string) {
+    super(`its person has not connected plug ${plug}`);
+  }
+}
+
+/** Writes coworker `coworker`'s sign-ins and links `kept`, taking out each link that has run out. */
+function keepSignIns(setup: Setup, coworker: string, kept: Record<string, string | null>) {
+  const lapsed = Object.entries(keysOf(setup, coworker))
+    .filter(([name, value]) => name.startsWith("LINK_") && JSON.parse(value).until < Date.now())
+    .map(([name]) => [name, null]);
+  keep(setup, coworker, { ...Object.fromEntries(lapsed), ...kept });
+}
+
 /**
- * A session of its own with `plug` over MCP's streamable HTTP for `coworker`, at the plug's address with its
- * headers, each with its coworker's person and the secrets it names: a function that sends one request in it
- * and returns the result, with the `instructions` the plug gives of itself, if any.
+ * The link that signs coworker `coworker`'s person in to plug `name`'s service: its authorize address with the
+ * firm's app, duck's page, the scopes, a state good once for a day and the S256 challenge of a verifier that
+ * stays in the coworker's file of keys and sign-ins.
  */
-export async function session(setup: Setup, plug: Plug, coworker: string) {
+function linkFor(setup: Setup, coworker: string, name: string) {
+  const signin = setup.plugs?.[name]?.signin as NonNullable<Plug["signin"]>;
+  const [state, verifier] = [randomBytes(16).toString("base64url"), randomBytes(32).toString("base64url")];
+  keepSignIns(setup, coworker, {
+    [`LINK_${state}`]: JSON.stringify({ plug: name, verifier, until: Date.now() + LINK_LIFE }),
+  });
+  const link = new URL(signin.authorize);
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  for (const [key, value] of Object.entries({
+    client_id: signin.client,
+    response_type: "code",
+    redirect_uri: signin.page,
+    scope: signin.scopes.join(" "),
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  }))
+    link.searchParams.set(key, value);
+  return link.href;
+}
+
+/** A service's refusal of a sign-in: its own words, and whether it said the grant itself is gone. */
+type Refused = { words: string; gone: boolean };
+
+/** The account an OpenID id_token names, by its email or else its username: read for a line, never trusted. */
+function accountOf(token: unknown) {
+  try {
+    const claims = JSON.parse(Buffer.from(String(token).split(".")[1] ?? "", "base64url").toString());
+    const account = claims.email ?? claims.preferred_username;
+    return typeof account === "string" ? account : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Asks plug `name`'s token address for a sign-in with `grant`, as the firm's app with its client secret: the
+ * sign-in, keeping `before`'s refresh token where the service gives no new one, with the account its id_token
+ * names, if any, or the service's refusal. One that cannot be reached throws.
+ */
+async function tokenFor(
+  setup: Setup,
+  name: string,
+  grant: Record<string, string>,
+  before?: SignIn,
+): Promise<{ signedIn: SignIn; account?: string } | Refused> {
+  const signin = setup.plugs?.[name]?.signin as NonNullable<Plug["signin"]>;
+  const answer = await fetch(signin.token, {
+    method: "POST",
+    headers: { accept: "application/json" },
+    body: new URLSearchParams({
+      ...grant,
+      client_id: signin.client,
+      ...(signin.key && { client_secret: secret(setup, signin.key) }),
+    }),
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+  });
+  const got = (await answer.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!answer.ok || typeof got.access_token !== "string")
+    // OAuth's invalid_grant says the code or refresh token itself is gone; a service that is down says no such thing.
+    return {
+      words: String(got.error_description ?? got.error ?? `it answered HTTP ${answer.status}`),
+      gone: got.error === "invalid_grant",
+    };
+  const signedIn: SignIn = {
+    access: got.access_token,
+    refresh: typeof got.refresh_token === "string" ? got.refresh_token : before?.refresh,
+    until: typeof got.expires_in === "number" ? Date.now() + got.expires_in * 1000 : undefined,
+  };
+  return { signedIn, account: accountOf(got.id_token) };
+}
+
+/** The renewal of each coworker's sign-in to each plug under way, so a sign-in is renewed once at a time. */
+const renewing = new Map<string, Promise<string>>();
+
+/**
+ * The access token coworker `coworker`'s person signed in to plug `name` with: renewed with its refresh token,
+ * once, where it has run out or the plug refused it as `refused`. A renewal the service refuses because the
+ * grant is gone drops the sign-in; any other failure keeps it and fails the call. Throws NotConnected where
+ * there is none.
+ */
+async function bearer(setup: Setup, coworker: string, name: string, refused?: string): Promise<string> {
+  const kept = keysOf(setup, coworker)[`SIGNIN_${name}`];
+  if (!kept) throw new NotConnected(name);
+  const signedIn = JSON.parse(kept) as SignIn;
+  const ranOut = signedIn.until !== undefined && signedIn.until < Date.now() + 60_000;
+  if (!ranOut && signedIn.access !== refused) return signedIn.access;
+  const key = `${coworker} ${name}`;
+  const going = renewing.get(key);
+  if (going) return going;
+  const renewal = (async () => {
+    const renewed = signedIn.refresh
+      ? await tokenFor(
+          setup,
+          name,
+          { grant_type: "refresh_token", refresh_token: signedIn.refresh },
+          signedIn,
+        )
+      : { words: "it gave no refresh token", gone: true };
+    if ("words" in renewed) {
+      const fate = renewed.gone ? "dropped" : "kept";
+      console.error(
+        `${coworker}'s sign-in to plug ${name} was not renewed, and is ${fate}: ${renewed.words}`,
+      );
+      if (!renewed.gone)
+        throw new Error(`${name}'s service did not renew the sign-in, in its words: ${renewed.words}`);
+      keepSignIns(setup, coworker, { [`SIGNIN_${name}`]: null });
+      throw new NotConnected(name);
+    }
+    keepSignIns(setup, coworker, { [`SIGNIN_${name}`]: JSON.stringify(renewed.signedIn) });
+    return renewed.signedIn.access;
+  })().finally(() => renewing.delete(key));
+  renewing.set(key, renewal);
+  return renewal;
+}
+
+/**
+ * Trades the code of each sign-in string in `text`, which coworker `c`'s person wrote at a door, for their
+ * sign-in to the plug its link's state is open for, and returns `text` with a plain line of what came of it in
+ * the place of each, so neither the archive nor the model ever holds a code. A good trade spends the state and
+ * every other open link to that plug, and its line names the account where the service says which; a refused
+ * one leaves the state good.
+ */
+export async function signIn(c: Coworker, text: string) {
+  const { setup, name: coworker } = c;
+  const person = personOf(setup, coworker).name;
+  const trade = async (state: string, code: string) => {
+    const kept = keysOf(setup, coworker)[`LINK_${state}`];
+    const open = kept ? (JSON.parse(kept) as { plug: string; verifier: string; until: number }) : undefined;
+    const live = open && open.until > Date.now() ? open : undefined;
+    const signin = live && plugsOf(setup, coworker).find(([p]) => p === live.plug)?.[1].signin;
+    if (!open || !signin)
+      return `${person} sent a sign-in code that did nothing: it is not one of ${coworker}'s open sign-ins. It was made for another coworker, used already, or ran out.`;
+    const grant = {
+      grant_type: "authorization_code",
+      code: Buffer.from(code, "base64url").toString(),
+      redirect_uri: signin.page,
+      code_verifier: open.verifier,
+    };
+    const again = `Ask them to sign in again from the same link and send the new code straight away.`;
+    const got = await tokenFor(setup, open.plug, grant).catch((e: Error) => e);
+    if (got instanceof Error)
+      return `${person} sent a sign-in code for ${open.plug}, and duck could not reach the service to trade it (${got.message}). ${again}`;
+    if ("words" in got)
+      return `${person} sent a sign-in code for ${open.plug}, and the service refused it, in its words: ${got.words.replace(/\.?$/, ".")} ${again}`;
+    const spent = Object.entries(keysOf(setup, coworker))
+      .filter(([name, value]) => name.startsWith("LINK_") && JSON.parse(value).plug === open.plug)
+      .map(([name]) => [name, null]);
+    keepSignIns(setup, coworker, {
+      ...Object.fromEntries(spent),
+      [`SIGNIN_${open.plug}`]: JSON.stringify(got.signedIn),
+    });
+    const as = got.account ? ` as ${got.account}` : "";
+    return `${person} connected ${open.plug}${as}. Call ${open.plug}__connect, and its tools are listed for you.`;
+  };
+  // The message is taken whatever comes of a trade, so a failure is a line too.
+  const failed = (e: Error) => `${person} sent a sign-in code, and duck failed to trade it: ${e.message}.`;
+  let lines = text;
+  for (const [whole, state, code] of text.matchAll(SIGNIN)) {
+    const line = await trade(state as string, code as string).catch(failed);
+    // A function, so no `$` in a name or a service's words is read as a pattern that puts the code back.
+    lines = lines.replace(whole, () => `[duck: ${line}]`);
+  }
+  return lines;
+}
+
+/** Whether `text` holds a sign-in string. */
+export const hasSignIn = (text: string) => text.match(SIGNIN) !== null;
+
+/** `text`, which someone other than coworker `coworker`'s person wrote, with each sign-in string cut out, unused. */
+export const cutSignIns = (setup: Setup, coworker: string, text: string) =>
+  text.replace(
+    SIGNIN,
+    () =>
+      `[duck: a sign-in code came from someone other than ${personOf(setup, coworker).name}, and was not used.]`,
+  );
+
+/**
+ * A session of its own with plug `name` over MCP's streamable HTTP for `coworker`, at the plug's address with
+ * its headers, each with its coworker's person and the secrets it names, and where the plug wants each
+ * person's sign-in, their access token as the bearer, renewed once where the plug refuses it: a function that
+ * sends one request in it and returns the result, with the `instructions` the plug gives of itself, if any.
+ */
+export async function session(setup: Setup, coworker: string, name: string) {
+  const plug = setup.plugs?.[name] as Plug;
   const fill = (text: string) =>
     personal(setup, coworker, text).replace(/\$\{(\w+)\}/g, (_, key: string) => secret(setup, key));
   const headers: Record<string, string> = {
@@ -104,6 +315,7 @@ export async function session(setup: Setup, plug: Plug, coworker: string) {
     accept: "application/json, text/event-stream",
   };
   for (const [name, value] of Object.entries(plug.headers ?? {})) headers[name] = fill(value);
+  if (plug.signin) headers.authorization = `Bearer ${await bearer(setup, coworker, name)}`;
   const address = fill(plug.address);
   let ids = 0;
   // biome-ignore lint/suspicious/noExplicitAny: each method's result is read where it is sent
@@ -132,10 +344,17 @@ export async function session(setup: Setup, plug: Plug, coworker: string) {
       throw new Error(`the plug answered ${method} with: ${answer?.error.message ?? "no reply"}`);
     return answer.result;
   };
-  const { protocolVersion, instructions } = await send("initialize", {
+  const hello = {
     protocolVersion: PROTOCOL,
     capabilities: {},
     clientInfo: { name: "duck", version: pkg.version },
+  };
+  const { protocolVersion, instructions } = await send("initialize", hello).catch(async (e: Error) => {
+    // A token can run out before the end duck was told, or be revoked: the plug refuses it with a 401.
+    if (!plug.signin || !e.message.endsWith("HTTP 401")) throw e;
+    const refused = headers.authorization?.slice("Bearer ".length);
+    headers.authorization = `Bearer ${await bearer(setup, coworker, name, refused)}`;
+    return send("initialize", hello);
   });
   headers["mcp-protocol-version"] = protocolVersion;
   await send("notifications/initialized", {}, true);
@@ -233,9 +452,33 @@ const asPaths = (schema: Schema | undefined): Schema | undefined =>
     ),
   };
 
-/** Plug `name`'s tools not removed on `lane`, each named `<plug>__<tool>` so the gate knows where a call to it goes. */
+/**
+ * The tool a plug that wants each person's sign-in is offered as while its person has not connected it, and
+ * which, once they have, has its tools listed (SPEC part 9). A run that answers someone else is not offered it.
+ */
+const connect = (setup: Setup, coworker: string, name: string) => ({
+  name: `${name}__connect`,
+  description: `${name}'s tools wait on ${personOf(setup, coworker).name}'s own sign-in. Call this for the link to pass on to them, and once they have connected ${name}, to have its tools listed for you.`,
+  inputSchema: { type: "object", properties: {} },
+});
+
+/** What coworker `coworker` is told where its person has not connected plug `name`: on its own lanes, the link. */
+const notConnected = (setup: Setup, coworker: string, name: string, lane: string) => {
+  const person = personOf(setup, coworker).name;
+  return lane === OTHERS
+    ? `${person} has not connected ${name}, so it cannot be used here.`
+    : `${person} has not connected ${name} yet. Pass them this link, exactly as it is:\n${linkFor(setup, coworker, name)}\nOnce they sign in, the page they land on shows a code for them to send you at any door, and duck connects ${name}.`;
+};
+
+/**
+ * Plug `name`'s tools not removed on `lane`, each named `<plug>__<tool>` so the gate knows where a call to it
+ * goes, or where its person has not connected it, its connect tool.
+ */
 async function plugTools(setup: Setup, coworker: string, name: string, plug: Plug, lane: string) {
-  return (await listed(await session(setup, plug, coworker)))
+  const send = await session(setup, coworker, name).catch((e: Error) => e);
+  if (send instanceof NotConnected) return lane === OTHERS ? [] : [connect(setup, coworker, name)];
+  if (send instanceof Error) throw send;
+  return (await listed(send))
     .filter((t) => stateOf(plug, t.name, lane) !== "removed")
     .map((t) => ({ ...t, name: `${name}__${t.name}`, inputSchema: asPaths(t.inputSchema) ?? t.inputSchema }));
 }
@@ -421,8 +664,8 @@ async function toolsOf(setup: Setup, coworker: string, lane: string) {
 /** What each of `coworker`'s plugs that can be reached says of itself in MCP's `instructions`, under its name. */
 async function instructionsOf(setup: Setup, coworker: string) {
   const said = await Promise.all(
-    plugsOf(setup, coworker).map(([name, plug]) =>
-      session(setup, plug, coworker).then(
+    plugsOf(setup, coworker).map(([name]) =>
+      session(setup, coworker, name).then(
         (send) => (send.instructions ? `${name}: ${send.instructions}` : ""),
         () => "",
       ),
@@ -855,12 +1098,11 @@ async function runHeld(c: Coworker, id: number) {
     files?: string[];
     session: string;
   };
-  const plug = plugsOf(c.setup, c.name).find(([p]) => p === held.plug)?.[1] as Plug;
   const started = performance.now();
   const moved: Moved[] = [];
   const result = await (held.plug === "duck"
     ? useBuzz(c, held.input, held.session, moved)
-    : session(c.setup, plug, c.name).then((send) =>
+    : session(c.setup, c.name, held.plug).then((send) =>
         callPlug(c.setup, c.name, held.plug, send, held.tool, held.input, held.files ?? [], moved),
       )
   ).catch((e: Error) => words(e.message, true));
@@ -1009,16 +1251,25 @@ async function call(c: Coworker, params: Json, lane: string) {
   const at = name.indexOf("__");
   const plug = at > 0 ? plugsOf(setup, coworker).find(([p]) => p === name.slice(0, at))?.[1] : undefined;
   const tool = name.slice(at + 2);
+  const connecting = plug?.signin !== undefined && tool === "connect";
   let state =
-    mine === BUZZ ? buzzState(setup, input) : mine ? "free" : plug ? stateOf(plug, tool, lane) : null;
+    mine === BUZZ
+      ? buzzState(setup, input)
+      : mine || connecting
+        ? "free"
+        : plug
+          ? stateOf(plug, tool, lane)
+          : null;
   let result: Result;
   let outcome = "failed";
+  // Whether what the coworker was given of a plug's tools has changed, as connecting one changes it.
+  let changed = false;
   const moved: Moved[] = [];
   try {
     // goose passes a call's input on unchecked (crates/goose/src/agents/state_machine/ops_toolcalling.rs:413
     // at 1.59.0). A plug's schema is the one it lists in the session that makes the call, as the gate keeps no
     // copy of a plug's tools.
-    const send = plug && state !== "removed" ? await session(setup, plug, coworker) : undefined;
+    const send = plug && state !== "removed" ? await session(setup, coworker, name.slice(0, at)) : undefined;
     const schema = send ? (await listed(send)).find((t) => t.name === tool)?.inputSchema : mine?.inputSchema;
     const wrong = misfits(schema, input);
     if (wrong) {
@@ -1060,7 +1311,12 @@ async function call(c: Coworker, params: Json, lane: string) {
             : await useBuzz(c, input, s, moved);
     } else if (mine)
       result = words(useList(db, name, input, (item) => wrote(c, s, item, input.id === undefined)));
-    else if (plug && send) {
+    else if (connecting) {
+      changed = true;
+      result = words(
+        `${personOf(setup, coworker).name} has connected ${name.slice(0, at)}: its tools are listed for you now.`,
+      );
+    } else if (plug && send) {
       // A box refuses a call by throwing, as the gate does a file the coworker may not give.
       outcome = "refused";
       if (lane === OTHERS && fileInputs(schema, input).length > 0)
@@ -1087,12 +1343,15 @@ async function call(c: Coworker, params: Json, lane: string) {
     else if (state === "free") outcome = result.isError ? "error" : "ok";
     else outcome = "refused";
   } catch (error) {
-    result = words((error as Error).message, true);
+    // A plug its person has not connected, or whose sign-in was dropped, is now only its connect tool.
+    changed = error instanceof NotConnected;
+    const said = changed ? notConnected(setup, coworker, (error as NotConnected).plug, lane) : undefined;
+    result = words(said ?? (error as Error).message, !(said && connecting));
   }
   if (outcome === "ok" && plug) made(c, s, name.slice(0, at), tool, input, result);
   callStatus(db, id, result.isError ? "failed" : "completed");
   log(coworker, name, state, outcome, started, result, moved);
-  return result;
+  return { ...result, changed };
 }
 
 /**
@@ -1111,13 +1370,23 @@ export async function gate(c: Coworker, request: Request) {
     return reply({
       result: {
         protocolVersion: params.protocolVersion,
-        capabilities: { tools: {} },
+        capabilities: { tools: { listChanged: true } },
         serverInfo: { name: "duck", version: pkg.version },
         instructions: await instructionsOf(c.setup, c.name),
       },
     });
   if (m.method === "ping") return reply({ result: {} });
   if (m.method === "tools/list") return reply({ result: { tools: await toolsOf(c.setup, c.name, lane) } });
-  if (m.method === "tools/call") return reply({ result: await call(c, params, lane) });
+  if (m.method === "tools/call") {
+    const { changed, ...result } = await call(c, params, lane);
+    if (!changed) return reply({ result });
+    // goose keeps the tools it listed until the server says they changed (crates/goose/src/agents/mcp_client.rs:358
+    // at 1.59.0), which a server with no session says in the stream that answers the call.
+    const event = (message: object) =>
+      `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", ...message })}\n\n`;
+    return new Response(event({ method: "notifications/tools/list_changed" }) + event({ id: m.id, result }), {
+      headers: { "content-type": "text/event-stream" },
+    });
+  }
   return reply({ error: { code: -32601, message: `no method ${m.method}` } });
 }
