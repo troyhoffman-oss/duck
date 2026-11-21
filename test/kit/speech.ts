@@ -95,7 +95,7 @@ export type SpeechSession = {
  * line the person speaks is a tone (`lineTone`); half a second after its sound stops, the stand-in hands it
  * off and says its own acknowledgement, and gives the line's transcript in two parts, the last arriving after
  * the hand-off and ending past its offset, as a real model's can. What the door gives it to say it says after a
- * pause of 300 ms, a word every 150 ms, stopping where the person's sound cuts in, and its transcript is only
+ * pause of 600 ms, a word every 150 ms, stopping where the person's sound cuts in, and its transcript is only
  * what it said. Its times are in ms since the session opened. It reports its seconds of use every 5 s and when
  * closed.
  */
@@ -150,7 +150,7 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
     );
     const seconds = () => Math.ceil(ms() / 1000);
 
-    /** Says `text` in `tone` once what it is saying now is said, a word every 150 ms, after a pause of 300 ms. */
+    /** Says `text` in `tone` once what it is saying now is said, a word every 150 ms, after a pause of 600 ms. */
     function say(text: string, tone: number) {
       const index = (session?.spoken.push("") ?? 1) - 1;
       queue.push({ words: text.split(" "), tone, index, pause: true });
@@ -165,7 +165,7 @@ export function startSpeech({ trouble = new Trouble() }: { trouble?: Trouble } =
       if (now.pause) {
         now.pause = false;
         now.words.unshift(word);
-        saying = setTimeout(next, 300);
+        saying = setTimeout(next, 600);
         return;
       }
       const audio = toneOf(now.tone, 0.15);

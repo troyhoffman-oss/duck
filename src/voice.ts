@@ -18,7 +18,7 @@ const HEARD = 3000;
 /** The longest pause between the transcript's words inside one line of the person's. */
 const PAUSE = 700;
 /** The longest pause between the transcript's words of one thing the speech model says. */
-const BREATH = 200;
+const BREATH = 500;
 const INSTRUCTIONS = readFileSync(join(import.meta.dir, "run", "voice.md"), "utf8");
 
 /** The call each coworker is in, by its name: its voice door, and once joined, what has the coworker say words. */
