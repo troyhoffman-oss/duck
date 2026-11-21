@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createGrpcClient, type IMessageError, type MessagePart } from "@photon-ai/advanced-imessage/grpc";
 import { heard, told } from "./archive";
-import { readIn } from "./gate";
+import { cutSignIns, hasSignIn, readIn, signIn } from "./gate";
 import { aboutSession, add, broken, type Event, lastEvent, mark as state, waiting } from "./inbox";
 import type { Coworker } from "./run";
 import { type Door, doorsOf, FILES, factsOf, fileOf, HOME, ownerOf, secret } from "./setup";
@@ -58,7 +58,8 @@ export async function take(c: Coworker, door: string, request: Request) {
     const wrote = at === null ? undefined : aboutSession(c.db, `${door}:reply`, at, !root);
     const [place, thread] =
       set.answers || wrote ? [body.place, `${channel}/${root ?? body.id}`] : [undefined, null];
-    const payload = JSON.stringify({ from, key, where, text: body.text, ...place });
+    const text = cutSignIns(c.setup, c.name, body.text);
+    const payload = JSON.stringify({ from, key, where, text, ...place });
     add(c.db, `${door}:${wrote ? "reply" : "others"}`, body.id, payload, null, wrote ?? null, thread);
     c.wake();
   }
@@ -91,13 +92,22 @@ export function saved(folder: string, name: string, bytes: Buffer) {
 }
 
 /**
+ * Takes what the person wrote at `door`, as `written` does, once duck has traded each sign-in string in it, so a
+ * message that holds one is kept with the line duck put in its place (SPEC part 9).
+ */
+export const taken = (c: Coworker, door: string, body: Written) =>
+  hasSignIn(body.text)
+    ? signIn(c, body.text).then((text) => written(c, door, { ...body, text }) ?? undefined)
+    : written(c, door, body);
+
+/**
  * Writes what the person wrote at `door` as an inbox event, with their files where the coworker reads them
  * and cannot change them, and wakes the coworker. A buzz door's message keeps its place as the payload. At a
  * door but email or voice, where no ask goes, it is held as `reading` until duck has read what it answers of
  * the questions it asked them (SPEC part 9). It returns when the runs the message wakes or steers have ended
  * and what they said has gone out, or null for a message already taken.
  */
-export function taken(c: Coworker, door: string, body: Written) {
+function written(c: Coworker, door: string, body: Written) {
   const reads = askDoors(c).includes(door);
   const event = c.db.transaction(() => {
     const event = add(c.db, door, body.id, body.place ? JSON.stringify(body.place) : null);
@@ -746,7 +756,8 @@ async function mailIn(c: Coworker, door: string, set: Door) {
     const shown = attached.filter((a) => a.content_disposition === "inline" && a.content_id).map(name);
     if (from !== person || m.from.split("@").length !== 2 || ![spf, dmarc].includes("pass")) {
       const files = attached.map(name);
-      const payload = { from: m.from, text: words, files, shown_in_body: shown, checks: { spf, dmarc } };
+      const text = cutSignIns(c.setup, c.name, words);
+      const payload = { from: m.from, text, files, shown_in_body: shown, checks: { spf, dmarc } };
       if (add(c.db, `${door}:others`, id, JSON.stringify(payload), null, null, m.thread_id)) void c.wake();
       return;
     }

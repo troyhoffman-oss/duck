@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { ARCHIVE } from "./archive";
-import { boxesOf, callPlug, fields, session as plugSession } from "./gate";
+import { boxesOf, callPlug, fields, NotConnected, session as plugSession } from "./gate";
 import { JOBS } from "./jobs";
 import { LIST, logged } from "./list";
 import { OUTBOX } from "./outbox";
@@ -272,7 +272,12 @@ export function poll(setup: Setup, coworkers: ReadonlyMap<string, Coworker>, arr
     /** Since when each coworker's polls have failed, and how many in a row. */
     const down = new Map<string, { since: string; failed: number }>();
     const list = async (coworker: string) => {
-      const send = await plugSession(setup, plug, coworker);
+      const send = await plugSession(setup, coworker, name).catch((e: Error) => {
+        // A plug that wants each person's sign-in has nothing to list for one who has not connected it.
+        if (e instanceof NotConnected) return undefined;
+        throw e;
+      });
+      if (!send) return;
       const result = await callPlug(setup, coworker, name, send, p.tool, {}, [], []);
       for (const row of fields(result) as Record<string, unknown>[])
         arrive(name, {

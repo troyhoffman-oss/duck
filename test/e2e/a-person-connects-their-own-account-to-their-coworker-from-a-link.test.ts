@@ -88,7 +88,7 @@ describe("a person connects their own account to their coworker from a link", ()
   const trades = () => firm.signin.tokens.filter((t) => t.grant === "authorization_code");
   const renewals = () => firm.signin.tokens.filter((t) => t.grant === "refresh_token");
 
-  test.failing("Rosa asks for her files before she has connected them: her coworker is offered only the plug's connect tool, and calling it gives a link to pass on, to the firm's app at the service, with her page, the plug's scopes, a state and an S256 challenge", async () => {
+  test("Rosa asks for her files before she has connected them: her coworker is offered only the plug's connect tool, and calling it gives a link to pass on, to the firm's app at the service, with her page, the plug's scopes, a state and an S256 challenge", async () => {
     const ASK = "What's in my drive?";
     firm.model.on(all(wren, said(ASK)), call("files__connect"));
     firm.model.on(all(wren, answered("files__connect"), said("has not connected files")), (r) =>
@@ -119,7 +119,7 @@ describe("a person connects their own account to their coworker from a link", ()
     expect(firm.files.calls).toEqual([]);
   });
 
-  test.failing("she follows the link and signs in, and the page she lands on shows one string to copy, with one button, loading nothing and sending nothing", async () => {
+  test("she follows the link and signs in, and the page she lands on shows one string to copy, with one button, loading nothing and sending nothing", async () => {
     const landed = await firm.signin.follow(link, "rosa");
     expect(landed.startsWith(firm.signin.page)).toBe(true);
     const page = await openPage(landed);
@@ -134,7 +134,7 @@ describe("a person connects their own account to their coworker from a link", ()
     expect(page.shows).toMatch(/coworker/i);
   });
 
-  test.failing("she sends the string at her desk: duck trades it at once with the link's verifier and the app's secret, keeps the sign-in where only duck reads it, her coworker reads that she connected the plug and is told how to see its tools, and the plug gets her token", async () => {
+  test("she sends the string at her desk: duck trades it at once with the link's verifier and the app's secret, keeps the sign-in where only duck reads it, her coworker reads that she connected the plug and is told how to see its tools, and the plug gets her token", async () => {
     firm.model.on(
       all(wren, said("Rosa Alvarez connected files"), said("files__connect")),
       call("files__connect"),
@@ -157,7 +157,7 @@ describe("a person connects their own account to their coworker from a link", ()
     await keptOnlyAsSignIns([string]);
   });
 
-  test.failing("the same message delivered again changes nothing kept, and the string sent again in a new message does nothing but say so", async () => {
+  test("the same message delivered again changes nothing kept, and the string sent again in a new message does nothing but say so", async () => {
     const kept = firm.signin.grantOf("rosa");
     await firm.person.again();
     await firm.person.quiet(5);
@@ -171,7 +171,7 @@ describe("a person connects their own account to their coworker from a link", ()
     await keptOnlyAsSignIns([string]);
   });
 
-  test.failing("once her token has run out, duck renews it once without her and the plug gets the new one", async () => {
+  test("once her token has run out, duck renews it once without her and the plug gets the new one", async () => {
     const ASK = "Any new files?";
     const before = firm.signin.grantOf("rosa");
     firm.signin.expire("rosa");
@@ -191,7 +191,7 @@ describe("a person connects their own account to their coworker from a link", ()
     await keptOnlyAsSignIns([string]);
   });
 
-  test.failing("a string made for another coworker does nothing at hers but say so, and still connects the coworker it was made for", async () => {
+  test("a string made for another coworker does nothing at hers but say so, and still connects the coworker it was made for", async () => {
     const ASK = "Can you see my drive?";
     firm.model.on(all(finch, said(ASK)), call("files__connect"));
     firm.model.on(all(finch, answered("files__connect")), (r) => say(`Sign in here: ${linkIn(r.last)}`));
@@ -213,7 +213,7 @@ describe("a person connects their own account to their coworker from a link", ()
     await keptOnlyAsSignIns([string, theo]);
   });
 
-  test.failing("when renewing is refused, duck drops her sign-in and her coworker gets the not-connected answer with a fresh link, and is offered the connect tool again", async () => {
+  test("when renewing is refused, duck drops her sign-in and her coworker gets the not-connected answer with a fresh link, and is offered the connect tool again", async () => {
     const ASK = "Open the 4B lease.";
     const old = firm.signin.grantOf("rosa");
     firm.signin.revoke("rosa");
@@ -238,7 +238,7 @@ describe("a person connects their own account to their coworker from a link", ()
     await keptOnlyAsSignIns([string]);
   });
 
-  test.failing("a string for her coworker's open link in mail from someone else is never traded, and neither the archive nor the model sees it", async () => {
+  test("a string for her coworker's open link in mail from someone else is never traded, and neither the archive nor the model sees it", async () => {
     const SUBJECT = "Your drive";
     const someone = (await openPage(await firm.signin.follow(again, "someone"))).string ?? "";
     firm.model.on(all(sorter, shows(SUBJECT)), say("wake: someone writes about her drive"));
@@ -258,7 +258,7 @@ describe("a person connects their own account to their coworker from a link", ()
     await keptOnlyAsSignIns([string, someone]);
   });
 
-  test.failing("a code the service refuses leaves her link good: her coworker reads the service's own words and to sign in again, and the same link then connects her", async () => {
+  test("a code the service refuses leaves her link good: her coworker reads the service's own words and to sign in again, and the same link then connects her", async () => {
     const first = (await openPage(await firm.signin.follow(again, "rosa"))).string ?? "";
     firm.signin.spoil();
     firm.model.on(all(wren, said("The code has run out."), said("sign in again")), say("That code ran out."));
@@ -286,7 +286,7 @@ describe("a person connects their own account to their coworker from a link", ()
     await keptOnlyAsSignIns([string, first, next]);
   });
 
-  test.failing("duck check names what a plug's sign-in lacks", async () => {
+  test("duck check names what a plug's sign-in lacks", async () => {
     let whole: Record<string, unknown> = {};
     firm.edit((setup) => {
       const signin = setup.plugs.files?.signin as Record<string, unknown>;
