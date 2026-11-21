@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive, told } from "./archive";
-import { listChanged } from "./dms";
+import { listChanged, SETTINGS_TOOL, tellSettings } from "./dms";
 import { act, doorTo, saved } from "./doors";
 import { add, broken, mark, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
@@ -385,7 +385,8 @@ export const [WORK, JOB, OTHERS] = ["/mcp/work", "/mcp/job", "/mcp/others"];
 
 /**
  * duck's own tools for `coworker` on `lane`: the list's, the timers', the archive's, the jobs', `tell` on
- * the work lane (SPEC part 10), and `buzz` where it has a buzz door. A job has none (SPEC part 6), and an
+ * the work lane (SPEC part 10), `settings` only in its person's own runs (SPEC part 1), and `buzz` where it
+ * has a buzz door. A job has none (SPEC part 6), and an
  * others run only `tell` (SPEC part 11). None answers a held call (SPEC part 9).
  */
 const own = (setup: Setup, coworker: string, lane: string) =>
@@ -398,7 +399,7 @@ const own = (setup: Setup, coworker: string, lane: string) =>
           ...TIMER_TOOLS,
           ARCHIVE_TOOL,
           ...JOB_TOOLS,
-          ...(lane === WORK ? [TELL] : []),
+          lane === WORK ? TELL : SETTINGS_TOOL,
           ...(doorsOf(setup, coworker).buzz ? [BUZZ] : []),
         ];
 
@@ -1031,6 +1032,7 @@ async function call(c: Coworker, params: Json, lane: string) {
     } else if (TIMER_TOOLS.some((t) => t === mine))
       result = words(useTimers(db, personOf(setup, coworker).zone, name, input));
     else if (mine === ARCHIVE_TOOL) result = words(readArchive(db, personOf(setup, coworker).name, input));
+    else if (mine === SETTINGS_TOOL) result = words(tellSettings(setup, coworker, input));
     else if (mine === BUZZ) {
       // Arguments it may not run, and files that are not the coworker's, are refused before the call is held.
       outcome = "refused";
