@@ -17,7 +17,10 @@ const MARGIN = 30_000;
 const LIMIT = 3600;
 /** How long a hand-off waits for the transcript to pass it. */
 const HEARD = 3000;
-/** How long the speech model says nothing, with all it was given acknowledged, before a question is given it. */
+/**
+ * How long the speech model says nothing, with all it was given acknowledged, since the last of its words and
+ * of those acknowledgements, before a question is given it.
+ */
 const BEGIN = 3000;
 /** The longest pause between the transcript's words inside one line of the person's. */
 const PAUSE = 700;
@@ -136,7 +139,10 @@ export function voiceIn(
     let [unkept, answer] = [[] as Words[], [] as Words[]];
     /** What the door gave the speech model to say that it has not acknowledged. */
     const unacked = new Set<string>();
-    /** When it last sent sound or words, by the clock: the one thing timed by it, to tell when it is quiet. */
+    /**
+     * When it last sent sound or words, or acknowledged what it was given, by the clock: the one thing timed by
+     * it, to tell when it is quiet. What it acknowledged it may not have begun to say.
+     */
     let lastOut = 0;
     let own: Timer | undefined;
     /**
@@ -242,6 +248,7 @@ export function voiceIn(
         [lastSaid, lastOut] = [e.end_ms, Date.now()];
       } else if (e.type === "session.commentary.appended") {
         unacked.delete(e.client_event_id);
+        lastOut = Date.now();
         if (question && e.client_event_id === question.event) question.from = e.end_ms;
       } else if (e.type === "session.output_audio.delta") {
         out = Buffer.concat([out, Buffer.from(e.delta, "base64")]);
