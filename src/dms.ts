@@ -155,7 +155,7 @@ export function talk(setup: Setup) {
 
 /** Resolves once duck finds its key an admin on the member list, read once signed in and each minute until then. */
 async function inList(setup: Setup, duck: ReturnType<typeof connect>) {
-  const out = () => admins(setup, duck).then((all) => !all.includes(duck.me), () => true);
+  const out = () => admins(setup, duck).then((all) => !all.includes(duck.me)).catch(() => true);
   while (await duck.ready().then(out)) await Bun.sleep(60_000);
 }
 
@@ -607,5 +607,5 @@ export function personFor(setup: Setup, member: string) {
   if (asked.exitCode === 0) return asked.stdout.toString().trim();
   if (asked.exitCode === 1)
     throw new Error(asked.stderr.toString().trim() || "duck could not reach Buzz in 30 s");
-  throw new Error("the firm's duck container is not running, and only it finds members; duck install starts it");
+  throw new Error("the firm's duck container, which finds members, is not running; duck install starts it");
 }
