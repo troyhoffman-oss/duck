@@ -13,11 +13,11 @@ Each firm runs duck on its own Linux server, under rootless podman. One `duck-<f
 Put these to the admin before step 2, in plain words. The admin alone decides those marked **admin**. For the rest, propose the default shown and go on unless they object.
 
 1. **admin.** Which Linux server should duck run on, and how do you reach it? If there is none, renting one is their decision.
-2. **admin.** Which Buzz community is the firm's? What is its relay address (it starts `wss://`)? Who is its owner or an admin, with Buzz's desktop app, who can authorize duck there in step 7? duck is in Buzz only while that person is a member, so pick one who stays.
+2. **admin.** Which Buzz community is the firm's? What is its relay address (it starts `wss://`, or `ws://` on a private network)? Who is its owner, with Buzz's desktop app? Only the community's owner can make duck's key an admin (step 7), and duck stays in Buzz while its key is an admin.
 3. **admin.** How should coworkers reach the model? Either a Claude subscription login, which someone signs in to on the server once (whose account?), or an API key in Anthropic's format (whose key?). The login is the firm's account, not each person's.
 4. **admin.** Where do the firm's secrets live? In a file on the server only duck reads, or in a secret store the firm already has, from which that file is filled.
 5. **admin.** Which existing S3-compatible storage bucket should every coworker be copied to each night, and who holds its access key? duck encrypts the copies with a password. The admin must keep that password in a second place off the server: without it the copies cannot be read, and without a bucket a dead server loses every coworker.
-6. **admin.** Where should the firm's private setup repo live, such as a private repository the firm owns?
+6. **admin.** Where should the firm's private setup repo live, such as a private repository the firm owns? A private repository on the server itself is enough to start. Then the setup repo and the secret store file exist only on that server and are not in the nightly copies, so the admin keeps a copy of both elsewhere.
 7. **admin.** Who gets the first coworker? Their name in Buzz, and the coworker's name.
 8. The firm's short name. Default: one lowercase word, since it names the firm's containers and its folder in the bucket.
 9. The firm's time zone, such as `America/Chicago`. Default: the admin's own.
@@ -44,6 +44,7 @@ duck runs as an ordinary Linux account, not as root. Install what follows from t
 
 - systemd, with lingering on, so the firm's containers start after a reboot: `loginctl enable-linger <account>` (run as an administrator). Work as that account in a login of its own, such as over ssh, since `duck install` runs `systemctl --user`, which needs the account's own user session; `su` gives none.
 - rootless podman, with the netavark network backend: `duck install` makes each coworker's network with `--opt isolate=true`, and duck reaches each coworker's container by its name. duck pins no podman version.
+- nftables, which netavark needs for a coworker's network.
 - bun 1.4.4, the version `package.json` names in `packageManager`.
 - restic 0.20.0, the version `package.json` pins; `duck backup` and `duck restore` run it on the server.
 - git.
@@ -51,7 +52,7 @@ duck runs as an ordinary Linux account, not as root. Install what follows from t
 
 Nothing needs to reach the server from outside for a coworker that talks in Buzz: duck reaches Buzz, the model and the bucket outward.
 
-Check, as that account: `loginctl show-user $USER --property Linger --value` prints `yes`; `systemctl --user is-system-running` prints a state and no bus error; `podman info --format '{{.Host.NetworkBackend}}'` prints `netavark`; `bun --version` prints `1.4.4`; `restic version` names 0.20.0.
+Check, as that account: `loginctl show-user $USER --property Linger --value` prints `yes`; `systemctl --user is-system-running` prints a state and no bus error; `podman info --format '{{.Host.NetworkBackend}}'` prints `netavark`; after `podman network create --opt isolate=true duck-try`, `podman run --rm --network duck-try docker.io/library/debian:trixie-slim true` exits 0, and `podman network rm duck-try` then removes the network; `bun --version` prints `1.4.4`; `restic version` names 0.20.0.
 
 ## 3. Get duck
 
@@ -67,13 +68,13 @@ Make the firm's private repo, and in it a setup folder holding copies of `exampl
 - `sorter.md`: rewrite harbor's lines about Wren, Rosa and apartments for the firm. Keep the four lines that start `` - `noise`: ``, `` - `urgent`: ``, `` - `wake`: `` and `` - `addresses AI`: ``; `duck check` needs all four, even with the sorter off.
 - `sign.md`: the firm's own words on how work is done there.
 
-Set `sorter.mode` to `off` unless the firm has a decisions API, in which case `observe`, with its `address`, `key` and `model`. With it `off`, delete harbor's `sorter.address`, `sorter.key`, `sorter.model` and `sorter.request`: `duck check` asks the secret store for any `key` the setup names, used or not. Make the storage folder and the secret store file, both owned by duck's account, the file with mode 600. Commit the setup folder and push it to the firm's private remote with the admin's own access.
+Set `sorter.mode` to `off` unless the firm has a decisions API, in which case `observe`, with its `address`, `key` and `model`. With it `off`, delete harbor's `sorter.address`, `sorter.key`, `sorter.model` and `sorter.request`: `duck check` asks the secret store for any `key` the setup names, used or not. Make the storage folder and the secret store file, both owned by duck's account, the file with mode 600. Commit the setup folder and, where the repo has a remote, push it there with the admin's own access.
 
-Check: the repo holds the setup and no secret, and `git status` in it is clean and up to date with its remote.
+Check: the repo holds the setup and no secret, and `git status` in it is clean and, where it has a remote, up to date with it.
 
 ## 5. Fill the secret store
 
-The secret store is the file `secrets.file` names, one `NAME=value` line per secret, exactly so: no quotes, no `export`, no spaces around `=`, Unix line ends; duck takes everything after the `=` as the value. It holds the backup's key, secret and password, the model key on the API-key route, the sorter's key if it has one, each plug's keys and its `events.push` key, and each door's `key` and, on a text or email door, `auth`. A plug address or header that says `${NAME_{person}}` needs one line per person, with `{person}` replaced by their handle. Have the admin put the values in the file themselves. A firm with a secret store of its own fills the file from it by its own means; duck reads only the file. No value may pass through your output or a command line.
+The secret store is the file `secrets.file` names, one `NAME=value` line per secret, exactly so: no quotes, no `export`, no spaces around `=`, Unix line ends; duck takes everything after the `=` as the value. It holds the backup's key, secret and password, the model key on the API-key route, the sorter's key if it has one, each plug's keys and its `events.push` key, and each door's `key` and, on a text or email door, `auth`. A plug address or header that says `${NAME_{person}}` needs one line per person, with `{person}` replaced by their handle. Have the admin put the values in the file themselves. Or leave the file step 4 made empty, with mode 600, tell the admin its path and the exact names it needs, and have someone the admin trusts fill it; you never see a value. A firm with a secret store of its own fills the file from it by its own means; duck reads only the file. No value may pass through your output or a command line.
 
 Check: `duck check` prints no line that starts `the secret store`. It asks for a person's plug keys only once their coworker is claimed; `duck make` for a person asks for them first (step 9).
 
@@ -105,15 +106,19 @@ Check: `duck install` exits 0 and its last line is `duck: started`. `podman ps -
 
 A coworker's name is lowercase letters, digits and dashes, from a letter. Its handle is the person's one word, letters, digits and underscores, unique in the firm.
 
-**With duck's channels on.** Run `duck make <coworker> <handle> "<their name in Buzz>"`. A name that is not exactly one person's in Buzz is refused; give their 64-character Buzz key instead. A make is also refused, naming the secret, while a plug the coworker gets lacks that person's key in the secret store. duck prints `duck made coworker <coworker>; its Buzz key is <key>` and offers the coworker to the person in duck's channel. With duck's plugin, in Buzz's desktop app (the phone app cannot), they claim it themselves:
+**With duck's channels on.** Run `duck make <coworker> <handle> "<their name in Buzz>"`. A name that is not exactly one person's in Buzz is refused; give their 64-character Buzz key instead. A make is also refused, naming the secret, while a plug the coworker gets lacks that person's key in the secret store. duck prints `duck made coworker <coworker>; its Buzz key is <key>` and offers the coworker to the person in duck's channel. They install duck's plugin in Buzz's desktop app (the phone app cannot), once:
+
+> open Settings, then Plugins, then Manage plugins, and press Add; put this repo's address in Git or GitHub repository and `plugin` in Folder (optional), press Find, keep Enable plugin on and press Install plugin
+
+Then they claim it themselves:
 
 > open Agents, press New agent (and Create a new agent if it asks), choose duck as the harness, name it, press Create agent and then Let’s go
 
-duck claims it for them, and a systemd unit runs `duck install` on the server. No admin needs to be there. How a person installs the plugin is not built yet (see the end of this file), so until it is, the person claims it without the plugin, as below.
+duck claims it for them, and a systemd unit runs `duck install` on the server. No admin needs to be there.
 
 A person who lives in another time zone than the firm's sets theirs once they have claimed the coworker, in the plugin's Preferences tab; duck installs again on its own. Without the plugin, or while duck's channels are off, every coworker is in the firm's zone.
 
-**Without the plugin, or with duck's channels off.** With duck's channels off, run `duck make <coworker> <handle>`. Give the person the key `duck make` printed and these steps, in Buzz's desktop app (the phone app cannot):
+**For a person with no plugin, or with duck's channels off.** With duck's channels off, run `duck make <coworker> <handle>`. Give the person the key `duck make` printed and these steps, in Buzz's desktop app (the phone app cannot):
 
 > open Settings, then Security, then Authorize external identity (Security is under Buzz in Settings' list), put the key in Application public key (hex), press Authorize identity and then Authorize this key, then press Copy ownership proof and send the proof to your admin
 
@@ -125,9 +130,9 @@ Check: the install ends with the lines `<coworker>: started` and `duck: kept` (a
 
 ## 10. The plugin
 
-duck's plugin is `plugin/manifest.json` and `plugin/plugin.js` in this repo, the same files for every firm. In Buzz's desktop app it adds duck as a harness in New agent, which claims a coworker; a To-dos and a Preferences tab on the coworker's page; and, for the community's owners and admins, a Coworkers card in Settings. It talks with duck only in duck's channel, which Buzz lists nowhere. Without it, as on Buzz's phone app, a person claims a coworker only through an admin's `duck claim`, and cannot pause it, set its quiet hours, messages an hour or their time zone, rename it, change its picture or remove it. How a person installs it is not built yet, so a setup today skips this step.
+duck's plugin is `plugin/manifest.json` and `plugin/plugin.js` in this repo, the same files for every firm. In Buzz's desktop app it adds duck as a harness in New agent, which claims a coworker; a To-dos and a Preferences tab on the coworker's page; and, for the community's owners and admins, a Coworkers card in Settings. It talks with duck only in duck's channel, which Buzz lists nowhere. Without it, as on Buzz's phone app, a person claims a coworker only through an admin's `duck claim`, and cannot pause it, set its quiet hours, messages an hour or their time zone, rename it, change its picture or remove it. A person installs it as step 9 says.
 
-Check: none; the claim in step 9 works without it.
+Check: in the person's Buzz desktop app, Settings, then Plugins, then Manage plugins lists duck, and New agent offers duck as a harness.
 
 ## 11. The first conversation
 
@@ -171,7 +176,7 @@ In `<duck>`, check out the newer commit of `main` and run `bun install --product
 - `duck update`: there are no named releases; update by checkout as above.
 - Nightly copies kept on the server itself: the copies go only to the bucket, which the setup must name.
 - A recommended server size: duck has not measured one.
-- The invitation each person gets, which would install Buzz with the plugin: not built, and this repo does not say how a person installs the plugin. Its screens have been driven only through a stand-in for Buzz, never seen on a real desktop.
+- The invitation each person gets, which would install Buzz with the plugin.
 - The office plug, for Microsoft 365 and Google Workspace mail, calendar and files, and the link that connects a person's mail.
 - A coworker offered to everyone, an admin confirming a claim, and a person creating a coworker of their own.
 - The first conversation's set questions: how they want to work, their voice, history and their mail link.
