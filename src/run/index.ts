@@ -8,7 +8,6 @@ import {
   add,
   asking,
   attach,
-  broken,
   type Event,
   itemSession,
   lastSession,
@@ -363,9 +362,8 @@ export function startCoworker(setup: Setup, name: string) {
    * hands nothing or the coworker stops, and then `rest`. A run that throws is set aside and the lane goes on:
    * its keys are `held` for a pause that doubles from 2 s to 5 min while it keeps failing (as a door that stops
    * waits, `longer`), and `next` hands it again once that ends, or at once with something new for it: a new
-   * event in its session or thread. A run that goes through clears it. One that fails twice in a row is told
-   * once, as a door that does not come back is, but in the person lane, whose own run would tell it. `going`
-   * settles when the lane rests.
+   * event in its session or thread. A run that goes through clears it. Each failure is logged, and no one is
+   * told. `going` settles when the lane rests.
    */
   function lane(what: string, next: () => Next | undefined, rest = () => {}) {
     let busy: ReturnType<typeof Promise.withResolvers<void>> | undefined;
@@ -384,14 +382,8 @@ export function startCoworker(setup: Setup, name: string) {
             for (const key of n.keys) aside.set(key, { due, wait, since });
             const because = (error as Error).message;
             console.error(
-              `${name}'s ${what} set aside ${n.label}: ${because}; it is tried again from ${new Date(due).toISOString()}, or at once with something new for it`,
+              `${name}'s ${what} set aside ${n.label}, failing since ${since}: ${because}; it is tried again from ${new Date(due).toISOString()}, or at once with something new for it`,
             );
-            if (before && what !== "person lane")
-              broken(coworker, `${what} ${n.label} failing since ${since}`, {
-                lane: what,
-                failing: n.label,
-                because,
-              });
           }
       } catch (error) {
         console.error(`${name}'s ${what} stopped: ${(error as Error).message}`);
