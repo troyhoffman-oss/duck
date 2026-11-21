@@ -267,12 +267,7 @@ describe("The admin sets up the firm and changes it", () => {
 
     const printed = await firm.import("claude", join(EXPORTS, "claude-conversations.json"));
     expect(printed).toContain("loaded 6 messages in 2 sessions");
-    await until(
-      "the dream's end",
-      () => firm.model.requests.some(answered(TOOLS.tell)),
-      60,
-      firm.trouble,
-    );
+    await until("the dream's end", () => firm.model.requests.some(answered(TOOLS.tell)), 60, firm.trouble);
     expect((await firm.person.next(60)).text).toBe(OFFER);
     expect(firm.home(harbor.coworker, "standing.md")).toBe("");
     await firm.person.send("desk", YES);
