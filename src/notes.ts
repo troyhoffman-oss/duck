@@ -75,7 +75,8 @@ export const STANDING_TOOL = {
  * read-only over its own path, and sees what is written there only while it stays the same file.
  */
 export function writeStanding(home: string, content: unknown) {
-  if (typeof content !== "string") return "Nothing was written: `content` is the whole of standing.md, as text.";
+  if (typeof content !== "string")
+    return "Nothing was written: `content` is the whole of standing.md, as text.";
   writeFileSync(join(home, "standing.md"), content);
   return "standing.md holds them now; the next run is shown them.";
 }
