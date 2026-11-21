@@ -427,10 +427,21 @@ describe("the Buzz door", () => {
         "Before I take my note down: shall I tell Theo first?",
         "Yes, go on.",
       ];
-      let root = "";
-      firm.model.on(all(main, said(CLEAN)), () =>
+      // Her message's id is known once Buzz's CLI has sent it, which can be after the coworker's run asks the
+      // model, so the reply waits for it.
+      const sent = Promise.withResolvers<string>();
+      firm.model.on(all(main, said(CLEAN)), async () =>
         call(TOOLS.buzz, {
-          args: ["messages", "send", "--channel", buzz.channel, "--reply-to", root, "--content", "-"],
+          args: [
+            "messages",
+            "send",
+            "--channel",
+            buzz.channel,
+            "--reply-to",
+            await sent.promise,
+            "--content",
+            "-",
+          ],
           input: BEFORE,
         }),
       );
@@ -444,7 +455,8 @@ describe("the Buzz door", () => {
       firm.model.on(reading, say("neither"), { times: Number.POSITIVE_INFINITY });
       firm.model.on(all(main, said(YES)), say("Noted."));
 
-      root = (await buzz.write("rosa", "harbor-ops", CLEAN)).id;
+      const root = (await buzz.write("rosa", "harbor-ops", CLEAN)).id;
+      sent.resolve(root);
       let question = "";
       for (let waited = 0; !question; waited++) {
         if (waited === 120) throw new Error("waited 60 s for the question in the thread");

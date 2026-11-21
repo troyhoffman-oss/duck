@@ -75,6 +75,22 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
       .map((l) => l.text);
   };
 
+  /** The tools a request another coworker makes is not given: the jobs' and the timers'. */
+  const UNGIVEN = [TOOLS.startJob, "jobs", "note_job", "stop_job", TOOLS.setTimer, TOOLS.removeTimer];
+  /** What tally's run of request `text` was given that a coworker's request is not: in this firm, no plug tool. */
+  const beyond = (text: string) => {
+    const run = firm.model.requests.find(all(tally, said(text)));
+    if (!run) throw new Error(`tally had no run of "${text}"`);
+    const plugs = run.tools.filter((t) => /(^|__)mail__/.test(t) && !t.endsWith("__connect"));
+    return [...UNGIVEN.filter((name) => run.has(name)), ...plugs];
+  };
+  /** Finch's message to tally in harbor-ops, under event `reply` if given. */
+  const toTally = (input: string, reply?: string) => {
+    const under = reply ? ["--reply-to", reply] : [];
+    const to = ["--channel", buzz.channel, ...under, "--mention", key];
+    return call(TOOLS.buzz, { args: ["messages", "send", ...to, "--content", "-"], input });
+  };
+
   test("Theo mentions tally in harbor-ops and gets its answer in his thread, from a run with its own notes, list and tools, and his second question there goes on from the first", async () => {
     const ASK = "What did we pay for the 4B boiler repair?";
     const ANSWER = "The 4B boiler repair was $640, paid on November 3.";
@@ -291,21 +307,6 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
 
   // Before the step on who may ask, which fails until that is built and leaves Theo's request there unanswered.
   test("a request Finch makes of tally, in a thread Finch starts, in a thread Theo started, or under what tally posted on its own, is given no job or timer tools and of the plugs only what their `others` states give", async () => {
-    const UNGIVEN = [TOOLS.startJob, "jobs", "note_job", "stop_job", TOOLS.setTimer, TOOLS.removeTimer];
-    /** What tally's run of request `text` was given that a coworker's request is not: in this firm, no plug tool. */
-    const beyond = (text: string) => {
-      const run = firm.model.requests.find(all(tally, said(text)));
-      if (!run) throw new Error(`tally had no run of "${text}"`);
-      const plugs = run.tools.filter((t) => /(^|__)mail__/.test(t) && !t.endsWith("__connect"));
-      return [...UNGIVEN.filter((name) => run.has(name)), ...plugs];
-    };
-    /** Finch's message to tally in harbor-ops, under event `reply` if given. */
-    const toTally = (input: string, reply?: string) => {
-      const under = reply ? ["--reply-to", reply] : [];
-      const to = ["--channel", buzz.channel, ...under, "--mention", key];
-      return call(TOOLS.buzz, { args: ["messages", "send", ...to, "--content", "-"], input });
-    };
-
     // A thread Finch starts.
     const [ASK, QUESTION, ANSWER] = [
       "Ask tally what the 4B water bill came to.",
@@ -377,6 +378,46 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     await firm.second.send("desk", ASKED);
     await firm.second.nextWith("I've asked tally under its post.", 60);
     await until(`tally's run of "${WHO}"`, async () => firm.model.requests.some(all(tally, said(WHO))), 90);
+    expect(beyond(WHO)).toEqual([]);
+  });
+
+  test.failing("Finch's reply in a thread Theo started, where tally wrote with buzz before it answered him, is Finch's request: its run has no job, timer or plug tools, and tally's answer reaches Finch", async () => {
+    const [THEO, CHECKING, DUE] = [
+      "When is the 4B elevator inspection?",
+      "Checking the elevator records now.",
+      "The 4B elevator inspection is on December 4.",
+    ];
+    const [ASK, WHO, ANSWER] = [
+      "In Theo's elevator thread, ask tally who does the inspection.",
+      "@tally who does the 4B elevator inspection?",
+      "Harbor Lift does the 4B elevator inspection.",
+    ];
+    // His message's id is known once Buzz's CLI has sent it, which can be after tally's run asks the model.
+    const written = Promise.withResolvers<string>();
+    const args = async () => [
+      "messages",
+      "send",
+      "--channel",
+      buzz.channel,
+      "--reply-to",
+      await written.promise,
+    ];
+    firm.model.on(all(tally, said(THEO)), async () =>
+      call(TOOLS.buzz, { args: [...(await args()), "--content", "-"], input: CHECKING }),
+    );
+    firm.model.on(all(tally, answered(TOOLS.buzz)), say(DUE));
+    firm.model.on(all(main(finch), said(ASK)), async () => toTally(WHO, await written.promise));
+    firm.model.on(all(finch, answered(TOOLS.buzz)), say("I've asked tally in Theo's thread."));
+    firm.model.on(all(tally, said(WHO)), say(ANSWER));
+    firm.model.on(all(finch, said(ANSWER)), say(`tally says: ${ANSWER}`));
+
+    const root = (await buzz.write("theo", "harbor-ops", THEO, { to: key })).id;
+    written.resolve(root);
+    await buzz.inThread(root, DUE, 90, key);
+    // Both are in his thread. Buzz times an event to the second, so two written in one second list in either order.
+    expect((await buzz.thread(root, key)).map((m) => m.content).sort()).toEqual([CHECKING, DUE].sort());
+    await firm.second.send("desk", ASK);
+    await firm.second.nextWith(`tally says: ${ANSWER}`, 120);
     expect(beyond(WHO)).toEqual([]);
   });
 
