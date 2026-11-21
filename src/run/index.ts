@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { called, callStatus, cutShort, lastShown, lastTold, runEnded, runStarted, said } from "../archive";
 import { answerOthers, deliver, doorTo, listen } from "../doors";
-import { cutHeld, JOB, lapse, OTHERS, readIn, WORK } from "../gate";
+import { AGENT, cutHeld, JOB, lapse, OTHERS, readIn, WORK } from "../gate";
 import {
   aboutSession,
   add,
@@ -80,6 +80,20 @@ export function startCoworker(setup: Setup, name: string) {
   mkdirSync(join(own, "goose", "others"), { recursive: true });
   const [mcpServers, jobServers] = [gateAt("/mcp"), gateAt(JOB)];
   const workAt: At = { cwd: HOME, mcpServers: gateAt(WORK) };
+  /** Where a team coworker's request that an agent made works: as the work lane does, with the plugs' `others` states. */
+  const agentAt: At = { cwd: HOME, mcpServers: gateAt(AGENT) };
+  /** Whether someone other than the person wrote event `e` at a door: a request, or a reply to the coworker. */
+  const written = (e: Event | null): e is Event => !!e && /:(others|reply)$/.test(e.source);
+  /**
+   * Where a team coworker's run of `events` works (SPEC part 14): where an agent wrote one of them at a door,
+   * as its event names the person whose agent it is, at an agent's request's address, else at the work lane's.
+   */
+  const teamAt = (events: (Event | null)[]) =>
+    events.some(
+      (e) => written(e) && (JSON.parse(e.payload ?? "{}") as { owner?: string } | null)?.owner !== undefined,
+    )
+      ? agentAt
+      : workAt;
   const idle = ms(setup.compaction.idle);
   let session = lastSession(db, doors);
   let runId: string | null = null;
@@ -471,7 +485,8 @@ export function startCoworker(setup: Setup, name: string) {
    * is urgent (SPEC part 4). Pending events for one session go to one run: a run cut short starts again in its
    * session, an event on an item goes on in the item's session, and the rest start a fresh one. While paused it
    * takes nothing, so the sorter is not asked either; after a resume each run is told it is catching up, and
-   * once nothing is left the catch-up's tells may go.
+   * once nothing is left the catch-up's tells may go. A team coworker's run of what another agent wrote, as a
+   * reply under what it posted, works where another coworker's request does (SPEC part 14).
    */
   const workLane = lane("work lane", () => {
     clearTimeout(gapping);
@@ -504,7 +519,7 @@ export function startCoworker(setup: Setup, name: string) {
       ? `Note from duck: ${person.name} paused you from ${pause.from} until ${pause.to}, so some of what came in meanwhile is stale; do what still matters. ${person.name} hears about this catch-up once, in one message for all of it.\n\n`
       : "";
     return () =>
-      runIn(s, batch, workAt, caught + cameIn(batch), true, (_, run) => {
+      runIn(s, batch, team ? teamAt(batch) : workAt, caught + cameIn(batch), true, (_, run) => {
         attach(db, atDoors);
         keep(run);
       });
@@ -528,8 +543,13 @@ export function startCoworker(setup: Setup, name: string) {
     const [s, k] = [of(first), key(first)];
     const batch = events.filter((e) => key(e) === k);
     const note = `Note from duck: this run answers someone other than ${person.name}. What you end it on goes to them where they wrote.\n\n`;
+    // Who it answers: each who wrote in the batch at a door, a request or a reply, or where none did, as a job's
+    // or an ask's end, who last did in the thread. An agent's event names the person whose agent it is (SPEC
+    // part 14).
+    const writers = batch.filter(written);
+    const askers = writers.length > 0 ? writers : s ? [othersIn(db, s)] : [];
     return () =>
-      runIn(s, batch, team ? workAt : othersAt, note + cameIn(batch), team, async (s) => {
+      runIn(s, batch, team ? teamAt(askers) : othersAt, note + cameIn(batch), team, async (s) => {
         const [answer, where] = [await lastSaid(s), othersIn(db, s)];
         if (answer && where) void answerOthers(coworker, where, answer);
       });

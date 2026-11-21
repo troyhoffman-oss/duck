@@ -182,7 +182,8 @@ export const othersIn = (db: Database, s: string) =>
 
 /**
  * Who wrote the events from others that the latest run in session `s` began with, as the person is told: each
- * by the name they give in Buzz, if any, and the start of the key the relay bears out, in brackets; or nothing.
+ * by the name they give in Buzz, if any, the start of the key the relay bears out, and for an agent, the start
+ * of its owner's key, in brackets; or nothing.
  */
 export function othersWho(db: Database, s: string) {
   const who = db
@@ -192,10 +193,15 @@ export function othersWho(db: Database, s: string) {
     )
     .all(s)
     .map((e) => {
-      const { from = "", key = "" } = JSON.parse(e.payload) as { from?: string; key?: string };
+      const {
+        from = "",
+        key = "",
+        owner,
+      } = JSON.parse(e.payload) as { from?: string; key?: string; owner?: string };
       // buzz-acp gives a writer as "<name> (npub: <npub>, hex: <key>)", or with no name "<npub> (hex: <key>)".
       const name = /^(.*) \(npub: /.exec(from)?.[1];
-      return `${name ? `"${name}", ` : ""}Buzz key ${key.slice(0, 8)}`;
+      const whose = owner ? `, the agent of Buzz key ${owner.slice(0, 8)}` : "";
+      return `${name ? `"${name}", ` : ""}Buzz key ${key.slice(0, 8)}${whose}`;
     });
   return who.length > 0 ? ` (${[...new Set(who)].join("; ")})` : "";
 }

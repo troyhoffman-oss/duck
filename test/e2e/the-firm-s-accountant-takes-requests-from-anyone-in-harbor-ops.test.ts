@@ -251,7 +251,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     await buzz.inDm("rosa", key, ANSWER, 60);
   });
 
-  test.failing("Theo's coworker Finch asks tally in harbor-ops on its own, tally's answer comes back to Finch as someone else's words, Theo hears it from Finch, and tally's item says Finch asked for Theo", async () => {
+  test("Theo's coworker Finch asks tally in harbor-ops on its own, tally's answer comes back to Finch as someone else's words, Theo hears it from Finch, and tally's item says Finch asked for Theo", async () => {
     const ASK = "Ask tally whether the 4B deposit came in.";
     const QUESTION = "@tally did the 4B deposit come in?";
     const ASKING = "I've asked tally in harbor-ops.";
@@ -290,7 +290,7 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
   });
 
   // Before the step on who may ask, which fails until that is built and leaves Theo's request there unanswered.
-  test.failing("a request Finch makes of tally, in a thread Finch starts, in a thread Theo started, or under what tally posted on its own, is given no job or timer tools and of the plugs only what their `others` states give", async () => {
+  test("a request Finch makes of tally, in a thread Finch starts, in a thread Theo started, or under what tally posted on its own, is given no job or timer tools and of the plugs only what their `others` states give", async () => {
     const UNGIVEN = [TOOLS.startJob, "jobs", "note_job", "stop_job", TOOLS.setTimer, TOOLS.removeTimer];
     /** What tally's run of request `text` was given that a coworker's request is not: in this firm, no plug tool. */
     const beyond = (text: string) => {
