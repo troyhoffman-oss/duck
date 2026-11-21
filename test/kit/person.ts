@@ -50,6 +50,8 @@ export function startPerson({
   const taken = new Set<string>();
   let duck: { address: string; coworker: string } | null = null;
   let sent = 0;
+  /** The last message written, as it was sent, and where. */
+  let last: { door: string; body: string } | null = null;
 
   const server = Bun.serve({
     hostname: reach.bind,
@@ -103,14 +105,20 @@ export function startPerson({
     },
     /** Writes `text`, with `files`, at door `door`, saying it was written `at` where given. Returns duck's answer. */
     async send(door: string, text: string, files: File[] = [], at?: string) {
+      last = { door, body: JSON.stringify({ id: `person-${++sent}`, text, files: files.map(toDoor), at }) };
+      return this.again();
+    },
+    /** Sends the last message again exactly as it was, with its id, as a door that delivers twice does. */
+    async again() {
       if (!duck) throw new Error("the person has no duck to write to yet");
-      const response = await fetch(`${duck.address}/doors/${duck.coworker}/${door}`, {
+      if (!last) throw new Error("the person has written nothing to send again");
+      const response = await fetch(`${duck.address}/doors/${duck.coworker}/${last.door}`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-        body: JSON.stringify({ id: `person-${++sent}`, text, files: files.map(toDoor), at }),
+        body: last.body,
       });
       if (response.status !== 202)
-        throw new Error(`duck answered the person's message at ${door} with ${response.status}`);
+        throw new Error(`duck answered the person's message at ${last.door} with ${response.status}`);
       return response;
     },
     /**

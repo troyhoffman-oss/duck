@@ -19,6 +19,7 @@ export {
 } from "./model";
 export { loadPlugin } from "./plugin-host";
 export { until } from "./reach";
+export { openPage, SIGNIN_STRING, type Signin } from "./signin";
 export { type Speech, type SpeechSession, startSpeech } from "./speech";
 export { type BotMessage, startTelegram, type Telegram } from "./telegram";
 export { type Mark, startText, type Text, type TextLine } from "./text";

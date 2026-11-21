@@ -32,7 +32,8 @@ export type PlugCall = { tool: string; input: Json; at: number; headers: Headers
 /**
  * A plug: an MCP server over streamable HTTP at `url`, with the tools the test declares. It records every
  * call, can hold a tool's calls until the test releases them, and pushes events to duck as a source that
- * can push does. With `keys`, a request must carry one of them as a bearer token.
+ * can push does. With `keys`, a request must carry one of them as a bearer token: those given, or those the
+ * function gives at the time, as a plug that takes each person's sign-in does.
  */
 export function startPlug({
   name,
@@ -44,7 +45,7 @@ export function startPlug({
   name: string;
   tools: Record<string, PlugTool>;
   reach?: Reach;
-  keys?: string[];
+  keys?: string[] | (() => string[]);
   trouble?: Trouble;
 }) {
   const calls: PlugCall[] = [];
@@ -86,7 +87,8 @@ export function startPlug({
     idleTimeout: 0,
     async fetch(request) {
       if (new URL(request.url).pathname !== "/mcp") return new Response("not found", { status: 404 });
-      if (keys !== undefined && !keys.some((k) => request.headers.get("authorization") === `Bearer ${k}`))
+      const taken = typeof keys === "function" ? keys() : keys;
+      if (taken !== undefined && !taken.some((k) => request.headers.get("authorization") === `Bearer ${k}`))
         return new Response("wrong key", { status: 401 });
       // Stateless, so each request gets a server of its own, as the SDK asks.
       const transport = new WebStandardStreamableHTTPServerTransport({
