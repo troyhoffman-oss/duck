@@ -520,7 +520,9 @@ export function startCoworker(setup: Setup, name: string) {
     const batch = events.filter((e) => key(e) === k);
     const note = `Note from duck: this run answers someone other than ${person.name}. What you end it on goes to them where they wrote.\n\n`;
     return () =>
-      runIn(s, batch, team ? workAt : othersAt, note + cameIn(batch), team, async (s) => {
+      runIn(s, batch, team ? workAt : othersAt, note + cameIn(batch), team, async (s, run) => {
+        // A team coworker's request writes its notes, which the version history keeps as any run's.
+        keep(run);
         const [answer, where] = [await lastSaid(s), othersIn(db, s)];
         if (answer && where) void answerOthers(coworker, where, answer);
       });

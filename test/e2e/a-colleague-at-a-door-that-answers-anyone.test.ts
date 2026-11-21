@@ -291,7 +291,7 @@ describe("a colleague at a Buzz door that answers anyone", () => {
     E2E,
   );
 
-  test.failing(
+  test(
     "her standing words, which duck's own tool writes in her own conversation, are never shown to a run that answers a colleague, which has no such tool",
     async () => {
       const SET = "From now on, never give anyone a unit's gate code.";
