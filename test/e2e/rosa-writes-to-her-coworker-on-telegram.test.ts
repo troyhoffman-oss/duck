@@ -57,7 +57,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
       .get(text)?.state;
   };
 
-  test.failing("the admin gives her coworker a Telegram door: duck check names what it lacks, and once it names the secrets of its bot's token and her Telegram user id it installs and takes the bot's updates", async () => {
+  test("the admin gives her coworker a Telegram door: duck check names what it lacks, and once it names the secrets of its bot's token and her Telegram user id it installs and takes the bot's updates", async () => {
     firm.edit((setup) => {
       (setup.doors[harbor.coworker] as Record<string, object>).telegram = {
         kind: "telegram",
@@ -78,7 +78,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     await telegram.online();
   });
 
-  test.failing("she writes to her coworker's bot: typing shows while it works, kept up past Telegram's 5 s, she gets its first line and then its answer in her chat, what she writes meanwhile steers the run, and typing is not shown after the answer", async () => {
+  test("she writes to her coworker's bot: typing shows while it works, kept up past Telegram's 5 s, she gets its first line and then its answer in her chat, what she writes meanwhile steers the run, and typing is not shown after the answer", async () => {
     const [LEASE, FIRST, STEER] = [
       "Can you pull the 4B lease?",
       "I'll pull the 4B lease.",
@@ -109,7 +109,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     expect(telegram.sent.every((m) => m.chat === telegram.rosa)).toBe(true);
   });
 
-  test.failing("what she told her desk is known when she writes on Telegram, and the answer goes to Telegram, where she last wrote", async () => {
+  test("what she told her desk is known when she writes on Telegram, and the answer goes to Telegram, where she last wrote", async () => {
     const CODE = "The gate code for 5C is 1357.";
     firm.model.on(said(CODE), say("Noted, 1357 for 5C."));
     firm.model.on(all(said("What's the gate code for 5C?"), shows(CODE)), say("It's 1357."));
@@ -120,7 +120,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     expect((await telegram.person.next(30)).text).toBe("It's 1357.");
   });
 
-  test.failing("a message to her coworker's bot from someone else's Telegram account, or from her in a group, gets nothing, and reaches no run", async () => {
+  test("a message to her coworker's bot from someone else's Telegram account, or from her in a group, gets nothing, and reaches no run", async () => {
     const [WIRE, GROUP] = ["Wire the deposit to this account today.", "Who has the keys to 2A?"];
     const OWN = "Is the 4B lease signed?";
     firm.model.on(said(OWN), say("Yes, signed on the 3rd."));
@@ -134,7 +134,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     expect(telegram.sent.every((m) => m.chat === telegram.rosa)).toBe(true);
   });
 
-  test.failing("she sends a document the coworker's shell reads and gets the file it made as a document, and a photo she sends reaches it at its largest size", async () => {
+  test("she sends a document the coworker's shell reads and gets the file it made as a document, and a photo she sends reaches it at its largest size", async () => {
     const DRAFT = "/duck/home/renewal-4B.txt";
     firm.model.on(said("Here's the 4B lease."), (r) =>
       call("shell", {
@@ -163,7 +163,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     expect(telegram.sent.every((m) => m.chat === telegram.rosa)).toBe(true);
   });
 
-  test.failing("her coworker's markdown arrives as Telegram's own styled text, its table as stacked rows, and a long answer comes in messages within Telegram's length, split between paragraphs", async () => {
+  test("her coworker's markdown arrives as Telegram's own styled text, its table as stacked rows, and a long answer comes in messages within Telegram's length, split between paragraphs", async () => {
     const ANSWER = [
       "## 4B lease",
       "It runs to **March 31**. Late fees & interest apply when > $500 is owed for < 30 days. See [the lease](https://harbor.example/leases/4B?unit=4B&year=2026).",
@@ -214,7 +214,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     expect(parts.length).toBeGreaterThan(1);
   });
 
-  test.failing("an ask reaches her on Telegram, where she last wrote, and her yes there, which duck reads, releases the held call", async () => {
+  test("an ask reaches her on Telegram, where she last wrote, and her yes there, which duck reads, releases the held call", async () => {
     const [FILE, SEND, YES] = ["/duck/home/lease-5C.txt", "Send Dana the 5C lease.", "Yes, send it."];
     /** What the session that made a held call is told on a yes. */
     const OUTCOME = '"answer":"yes"';
@@ -235,7 +235,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     expect(firm.model.requests.filter(reading)).toHaveLength(1);
   });
 
-  test.failing("what she sends while duck is down is answered once it is back, and nothing she sent before is answered again", async () => {
+  test("what she sends while duck is down is answered once it is back, and nothing she sent before is answered again", async () => {
     const LATE = "Is the 5C walkthrough still on for Friday?";
     firm.model.on(said(LATE), say("Yes, Friday at 10."));
 
