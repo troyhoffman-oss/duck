@@ -65,7 +65,7 @@ const LIMITED = "Done: a job's run is cut off at that many model calls from its 
 const NOT_ADMIN = "Only an owner or admin of this community sets that, so nothing changed.";
 
 const NOT_LISTED = (key: string) =>
-  `duck's Buzz key ${key} is not an admin on the community's member list, so duck's channels are off; to make it one, ${ADMIN_STEP}`;
+  `duck's Buzz key ${key} is not an admin on the community's member list, so the plugin shows nothing from duck; to make it one, ${ADMIN_STEP}`;
 
 /** First value of tag `name` on `event`, or "". */
 const tagOf = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1] ?? "";
@@ -156,10 +156,23 @@ export function talk(setup: Setup) {
   ).catch((e: Error) => console.error(`duck's profile: ${e.message}`));
 }
 
-/** Resolves once duck finds its key an admin on the member list, read once signed in and each minute until then. */
+/**
+ * Resolves once duck finds its key an admin on the member list, read once signed in and each minute until then;
+ * a read that fails is logged when its reason is new.
+ */
 async function inList(setup: Setup, duck: ReturnType<typeof connect>) {
-  const out = (all: string[]) => !all.includes(duck.me);
-  while (await duck.ready().then(() => admins(setup, duck).then(out, () => true))) await Bun.sleep(60_000);
+  let failed = "";
+  const out = (all: string[]) => {
+    failed = "";
+    return !all.includes(duck.me);
+  };
+  const said = (e: Error) => {
+    if (e.message !== failed)
+      console.error(`duck could not read the member list, so it tries again: ${e.message}`);
+    failed = e.message;
+    return true;
+  };
+  while (await duck.ready().then(() => admins(setup, duck).then(out, said))) await Bun.sleep(60_000);
 }
 
 /** Whether duck has said it is off the member list since it last found itself on it. */
@@ -298,7 +311,9 @@ async function relayKey(relay: string) {
     headers: { accept: "application/nostr+json" },
     signal: AbortSignal.timeout(10_000),
   });
-  return ((await nip11.json()) as { self: string }).self;
+  const { self } = (await nip11.json()) as { self?: string };
+  if (!self) throw new Error("the relay's NIP-11 document names no key it signs with");
+  return self;
 }
 
 /** The owners and admins of the community, by the member list its relay signs (NIP-43), as Buzz reads it. */

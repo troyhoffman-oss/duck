@@ -138,6 +138,6 @@ export function adminToDo(setup: Setup) {
   if (!setup.buzz || existsSync(adminFile(setup))) return [];
   const key = hex(schnorr.getPublicKey(Buffer.from(duckKey(setup), "hex")));
   return [
-    `still to do: duck's Buzz key is ${key}; ${ADMIN_STEP}. The running duck finds it within a minute; until then duck's channels are off, and coworkers are made with no member and claimed with duck make and duck claim`,
+    `still to do: duck's Buzz key is ${key}; ${ADMIN_STEP}. A running duck that is not in yet finds it within a minute. Until it does, the plugin shows nothing from duck, and coworkers are made with no member and claimed with duck make and duck claim`,
   ];
 }
