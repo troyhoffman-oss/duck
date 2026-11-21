@@ -302,8 +302,8 @@ describe("the firm's accountant takes requests from anyone in harbor-ops", () =>
     /** Finch's message to tally in harbor-ops, under event `reply` if given. */
     const toTally = (input: string, reply?: string) => {
       const under = reply ? ["--reply-to", reply] : [];
-      const args = ["messages", "send", "--channel", buzz.channel, ...under, "--mention", key, "--content", "-"];
-      return call(TOOLS.buzz, { args, input });
+      const to = ["--channel", buzz.channel, ...under, "--mention", key];
+      return call(TOOLS.buzz, { args: ["messages", "send", ...to, "--content", "-"], input });
     };
 
     // A thread Finch starts.
