@@ -1040,7 +1040,7 @@ async function call(c: Coworker, params: Json, lane: string) {
     } else if (TIMER_TOOLS.some((t) => t === mine))
       result = words(useTimers(db, personOf(setup, coworker).zone, name, input));
     else if (mine === ARCHIVE_TOOL) result = words(readArchive(db, personOf(setup, coworker).name, input));
-    else if (mine === STANDING_TOOL) result = words(writeStanding(c.home, String(input.content)));
+    else if (mine === STANDING_TOOL) result = words(writeStanding(c.home, input.content));
     else if (mine === SETTINGS_TOOL)
       // duck's answers are worded for the person, as the plugin shows them, so the coworker is told whose they are.
       result = words(
