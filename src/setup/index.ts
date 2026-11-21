@@ -15,8 +15,7 @@ import { questions } from "../sorter";
  * is the speech model's live API, `model` and `voice` what it speaks with and `key` names the secret of its key.
  * At a `telegram` door, `address` is the Bot API's, `key` names the secret of the bot's token and `auth` the
  * person's own Telegram user id. Every claimed coworker has a `buzz` door, which duck makes, at the setup's
- * relay; it answers anyone who mentions the coworker where its `answers` is `anyone`, as a team coworker's
- * does, and otherwise only its owner.
+ * relay; whom it answers besides the owner is the coworker's `answers` setting (`answersOf`).
  */
 export type Door = {
   kind: string;
@@ -25,7 +24,6 @@ export type Door = {
   auth?: string;
   line?: string;
   mailbox?: string;
-  answers?: string;
   model?: string;
   voice?: string;
 };
@@ -111,9 +109,15 @@ export type Settings = {
   one_message_per?: string;
   /** Its person's time zone; the firm's is the default. */
   zone?: string;
+  /**
+   * Whom it answers besides its person (SPEC parts 1 and 14): only its person, anyone in the firm's Buzz, or
+   * the people named, each by their Buzz key, kept when it was set, with the name they were named by.
+   */
+  answers?: Answers;
   jobs?: { calls?: number };
 };
-export const SETTINGS = ["paused", "quiet", "one_message_per", "zone"] as const;
+export type Answers = "person" | "anyone" | { name: string; key: string }[];
+export const SETTINGS = ["paused", "quiet", "one_message_per", "zone", "answers"] as const;
 
 /** The states a tool can have in setup (SPEC part 9). */
 const TOOL_STATES = ["free", "ask first", "removed"];
@@ -165,7 +169,12 @@ export type Setup = {
    */
   jobs?: { calls?: number };
   /** The firm's default for each coworker's settings (SPEC part 1, Settings). */
-  settings: { quiet: [string, string]; one_message_per?: string; answers?: string; locked?: string[] };
+  settings: {
+    quiet: [string, string];
+    one_message_per?: string;
+    answers?: "person" | "anyone";
+    locked?: string[];
+  };
   /**
    * The firm's Buzz relay, where each claimed coworker has its buzz door, and the states of the commands of
    * Buzz's CLI that its `buzz` tool runs, named by their leading words, with `*` for the rest (SPEC part 9).
@@ -217,6 +226,27 @@ export function setting<K extends (typeof SETTINGS)[number]>(setup: Setup, cowor
   const own = settingsOf(setup, coworker);
   const firm: Settings = { paused: false, ...setup.settings, zone: setup.zone };
   return setup.settings.locked?.includes(key) || !(key in own) ? firm[key] : own[key];
+}
+
+/**
+ * Whom coworker `coworker` answers besides its person, the one place that says so (SPEC parts 1 and 14). It
+ * starts as the setup gives it, anyone for a team coworker, and from its person's first change holds what they
+ * set, unless the firm locks it. Settings duck cannot read, or a list it cannot use, answer its person only.
+ */
+export function answersOf(setup: Setup, coworker: string): Answers {
+  const start = isTeam(setup, coworker) || setup.settings.answers === "anyone" ? "anyone" : "person";
+  try {
+    const own = settingsOf(setup, coworker).answers;
+    if (own === undefined || setup.settings.locked?.includes("answers")) return start;
+    if (own === "person" || own === "anyone") return own;
+    const usable =
+      Array.isArray(own) &&
+      own.length > 0 &&
+      own.every((a) => typeof a?.name === "string" && /^[0-9a-f]{64}$/.test(String(a?.key)));
+    return usable ? own : "person";
+  } catch {
+    return "person";
+  }
 }
 
 export const factsOf = (setup: Setup, coworker: string): Facts =>
@@ -277,7 +307,7 @@ export const isTeam = (setup: Setup, coworker: string) => factsOf(setup, coworke
 
 /**
  * Coworker `coworker`'s doors: those the setup names for it, and its buzz door where the firm has a relay,
- * which answers anyone where the setup says so or the coworker is a team coworker (SPEC part 14).
+ * which answers whom `answersOf` names besides its person.
  */
 export const doorsOf = (setup: Setup, coworker: string): Record<string, Door> => ({
   ...setup.doors?.[coworker],
@@ -286,7 +316,6 @@ export const doorsOf = (setup: Setup, coworker: string): Record<string, Door> =>
       kind: "buzz",
       address: setup.buzz.relay,
       key: "BUZZ_KEY",
-      ...((setup.settings.answers === "anyone" || isTeam(setup, coworker)) && { answers: "anyone" }),
     },
   }),
 });

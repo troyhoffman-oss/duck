@@ -172,13 +172,21 @@ export const aboutSession = (db: Database, source: string, about: string, under 
     )
     .get(source, about, under ? 1 : 0)?.session ?? undefined;
 
-/** The latest event in session `s` that someone other than the person wrote at a buzz door: who, and where. */
-export const othersIn = (db: Database, s: string) =>
-  db
-    .query<Event, [string]>(
-      "select * from inbox where session = ? and source like '%:others' order by id desc limit 1",
-    )
-    .get(s);
+/**
+ * Whether someone other than the person wrote event `e` at a door: a request, or a reply to what the coworker
+ * wrote, which holds their words; the record of what the coworker itself wrote there holds none.
+ */
+export const written = (e: Event | null | undefined): e is Event =>
+  !!e && /:(others|reply)$/.test(e.source) && e.payload !== null;
+
+/**
+ * In session `s`, where someone other than the person asked, the latest event one of them wrote at a door, a
+ * request or a reply: who, and where; or null.
+ */
+export function othersIn(db: Database, s: string) {
+  const events = db.query<Event, [string]>("select * from inbox where session = ? order by id desc").all(s);
+  return events.some((e) => e.source.endsWith(":others")) ? (events.find(written) ?? null) : null;
+}
 
 /**
  * Who wrote the events from others that the latest run in session `s` began with, as the person is told: each

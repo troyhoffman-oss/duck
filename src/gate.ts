@@ -15,8 +15,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { ARCHIVE_TOOL, called, callStatus, openRun, readArchive, told } from "./archive";
-import { listChanged, SETTINGS_TOOL, tellSettings } from "./dms";
-import { act, doorTo, rootOf, saved } from "./doors";
+import { answersFrom, listChanged, SETTINGS_TOOL, tellSettings, widens } from "./dms";
+import { act, doorTo, reopen, rootOf, saved } from "./doors";
 import { add, broken, mark, othersIn, othersWho, type Pushed, sessionItem } from "./inbox";
 import { JOB_TOOLS, useJobs } from "./jobs";
 import { LIST_TOOLS, type Link, link, linkedTo, logged, useList } from "./list";
@@ -25,6 +25,8 @@ import { STANDING_TOOL, writeStanding } from "./notes";
 import { ask, quietSince, TELL, tell } from "./outbox";
 import type { Coworker } from "./run";
 import {
+  type Answers,
+  answersOf,
   doorsOf,
   FILES,
   fileOf,
@@ -1102,6 +1104,17 @@ export function answered(c: Coworker, read: Read, event: number) {
   };
 }
 
+/**
+ * Changes `c`'s settings as `input`, `SETTINGS_TOOL`'s with whom it answers found already, says, and returns
+ * duck's answer. duck's answers are worded for the person, as the plugin shows them, so the coworker is told
+ * whose they are. Where whom it answers changed, its Buzz door looks again at whom it admits.
+ */
+function changeSettings(c: Coworker, input: Json) {
+  const said = tellSettings(c.setup, c.name, input);
+  if (input.answers !== undefined) reopen(c);
+  return `duck's answer, worded for ${personOf(c.setup, c.name).name}: ${said}`;
+}
+
 /** Runs ask `id`'s held call once, exactly as it was held, logs it, and tells the session that made it what came of it. */
 async function runHeld(c: Coworker, id: number) {
   const row = c.db.query<{ held: string }, [number]>("select held from outbox where id = ?").get(id);
@@ -1115,7 +1128,9 @@ async function runHeld(c: Coworker, id: number) {
   const started = performance.now();
   const moved: Moved[] = [];
   const result = await (held.plug === "duck"
-    ? useBuzz(c, held.input, held.session, moved)
+    ? held.tool === "settings"
+      ? Promise.resolve(words(changeSettings(c, held.input)))
+      : useBuzz(c, held.input, held.session, moved)
     : session(c.setup, c.name, held.plug).then((send) =>
         callPlug(c.setup, c.name, held.plug, send, held.tool, held.input, held.files ?? [], moved),
       )
@@ -1306,11 +1321,18 @@ async function call(c: Coworker, params: Json, lane: string) {
       result = words(useTimers(db, personOf(setup, coworker).zone, name, input));
     else if (mine === ARCHIVE_TOOL) result = words(readArchive(db, personOf(setup, coworker).name, input));
     else if (mine === STANDING_TOOL) result = words(writeStanding(c.home, input.content));
-    else if (mine === SETTINGS_TOOL)
-      // duck's answers are worded for the person, as the plugin shows them, so the coworker is told whose they are.
-      result = words(
-        `duck's answer, worded for ${personOf(setup, coworker).name}: ${tellSettings(setup, coworker, input)}`,
-      );
+    else if (mine === SETTINGS_TOOL) {
+      // Whom it answers is found by name once, now. Letting more people ask waits for the person's yes; letting
+      // fewer does not (SPEC part 14).
+      const given = input.answers as unknown[] | undefined;
+      const told = given ? { ...input, answers: await answersFrom(setup, given.map(String)) } : input;
+      const wider =
+        given !== undefined &&
+        !setup.settings.locked?.includes("answers") &&
+        widens(answersOf(setup, coworker), told.answers as Answers);
+      if (wider) state = "ask first";
+      result = words(wider ? hold(c, "duck", "settings", told, [], s) : changeSettings(c, told));
+    }
     else if (mine === BUZZ) {
       // Arguments it may not run, and files that are not the coworker's, are refused before the call is held.
       outcome = "refused";
