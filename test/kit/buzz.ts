@@ -73,21 +73,26 @@ export function authTag(owner: Uint8Array, agent: string) {
 }
 
 /**
- * What a firm needs of a test's Buzz: the relay's address, the person's tag for the coworker's key, which
- * `duck claim` takes, the owner's grant of the admin role, and once the coworker is made, a way to meet it there.
- */
-export type BuzzForFirm = {
-  url: string;
-  tagFor: (agent: string) => string;
-  makeAdmin: (key: string) => Promise<void>;
-  meet: (agent: string) => Promise<void>;
-};
-
-/**
  * Who writes in a test's Buzz: harbor's person, Theo and Ana, people at the firm, and Heron, another agent she
  * owns.
  */
 export type Writer = "rosa" | "theo" | "ana" | "heron";
+
+/**
+ * What a firm needs of a test's Buzz: the relay's address, the person's tag for the coworker's key, which
+ * `duck claim` takes, and another writer's, the owner's grant of the admin role, once the coworker is made, a
+ * way to meet it there, and for another coworker, to add it to harbor-ops; the person's key and harbor-ops's id.
+ */
+export type BuzzForFirm = {
+  url: string;
+  tagFor: (agent: string) => string;
+  proof: (who: Writer, agent: string) => string;
+  makeAdmin: (key: string) => Promise<void>;
+  meet: (agent: string) => Promise<void>;
+  joinHarborOps: (agent: string) => Promise<void>;
+  keys: { rosa: string };
+  channel: string;
+};
 
 /**
  * A throwaway Buzz relay for one test, rootless, with its database, cache and media store, and on it, with
@@ -249,6 +254,15 @@ export async function startBuzz({
       await cli(["channels", "add-member", "--channel", channel, "--pubkey", agent]);
       dm = String(JSON.parse((await cli(["dms", "open", "--pubkey", agent])).toString()).dm_id);
       dms.set(`rosa ${agent}`, dm);
+    }
+    /** The emoji key `from` has on message `event` now. */
+    const reactionsOf = async (event: string, from: string): Promise<string[]> =>
+      JSON.parse((await cli(["reactions", "get", "--event", event])).toString())
+        .reactions.filter((r: { pubkeys: string[] }) => r.pubkeys.includes(from))
+        .map((r: { emoji: string }) => r.emoji);
+    /** The person adds agent `agent` to harbor-ops, as she adds any agent to a channel in Buzz. */
+    async function joinHarborOps(agent: string) {
+      await cli(["channels", "add-member", "--channel", channel, "--pubkey", agent]);
     }
 
     const seen = new Map<string, number>();
@@ -649,26 +663,45 @@ export async function startBuzz({
       /** `who`'s DM with key `to` (see `dmWith`). */
       dmWith,
       /** The emoji the coworker has on message `event` now. */
-      reactions: async (event: string): Promise<string[]> =>
-        JSON.parse((await cli(["reactions", "get", "--event", event])).toString())
-          .reactions.filter((r: { pubkeys: string[] }) => r.pubkeys.includes(keys.wren))
-          .map((r: { emoji: string }) => r.emoji),
+      reactions: (event: string) => reactionsOf(event, keys.wren),
+      reactionsOf,
       /** harbor-ops's channel id. */
       channel,
+      joinHarborOps,
       /** `who` starts a call in `parent` (see `startCall`). */
       call: startCall,
       privateChannel,
-      /** The coworker's messages in harbor-ops as `who` reads them, oldest first. */
-      inHarborOps: (who: Writer = "rosa") => coworkers(["get", "--channel", channel], who),
-      /** The coworker's messages in the harbor-ops thread under event `root`, oldest first. */
-      thread: (root: string) => coworkers(["thread", "--channel", channel, "--event", root]),
-      /** The coworker's message `text` in the harbor-ops thread under `root`, waiting up to `seconds` for it. */
-      inThread: (root: string, text: string, seconds: number) =>
+      /** The coworker's messages, or key `from`'s, in harbor-ops as `who` reads them, oldest first. */
+      inHarborOps: (who: Writer = "rosa", from = keys.wren) =>
+        coworkers(["get", "--channel", channel], who, from),
+      /** The coworker's messages, or key `from`'s, in the harbor-ops thread under event `root`, oldest first. */
+      thread: (root: string, from = keys.wren) =>
+        coworkers(["thread", "--channel", channel, "--event", root], "rosa", from),
+      /**
+       * The coworker's message `text`, or key `from`'s, in the harbor-ops thread under `root`, waiting up to
+       * `seconds` for it.
+       */
+      inThread: (root: string, text: string, seconds: number, from = keys.wren) =>
         settled(
           `the coworker's "${text}" in the thread`,
           async () => {
-            const said = (await coworkers(["thread", "--channel", channel, "--event", root])).find(
-              (m) => m.content === text,
+            const said = (
+              await coworkers(["thread", "--channel", channel, "--event", root], "rosa", from)
+            ).find((m) => m.content === text);
+            if (!said) throw new Error("not yet");
+            return said;
+          },
+          seconds,
+        ),
+      /**
+       * The message of key `from` in `who`'s DM with it whose words hold `text`, waiting up to `seconds` for it.
+       */
+      inDm: (who: Writer, from: string, text: string, seconds: number) =>
+        settled(
+          `"${text}" in the DM`,
+          async () => {
+            const said = (await coworkers(["get", "--channel", await dmWith(who, from)], who, from)).find(
+              (m) => m.content.includes(text),
             );
             if (!said) throw new Error("not yet");
             return said;

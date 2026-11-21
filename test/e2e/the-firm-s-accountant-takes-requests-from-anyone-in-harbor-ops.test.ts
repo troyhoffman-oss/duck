@@ -1,0 +1,304 @@
+import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import {
+  all,
+  answered,
+  type Buzz,
+  call,
+  E2E,
+  type Firm,
+  held,
+  idIn,
+  jobRun,
+  loadPlugin,
+  reading,
+  said,
+  say,
+  second,
+  shows,
+  sorter,
+  startBuzz,
+  startFirm,
+  TOOLS,
+  team,
+} from "../kit";
+import type { When } from "../kit/model";
+
+setDefaultTimeout(E2E);
+
+/** A run of coworker `name`: its harness names it. */
+const of = (name: string): When => shows(`You are ${name},`);
+const tally = of(team.coworker);
+const finch = of(second.coworker);
+/** A run in `who`'s main conversation: it has the list, and only a run outside it has `tell` (SPEC part 10). */
+const main = (who: When): When => all(who, (r) => r.has(TOOLS.writeItem) && !r.has(TOOLS.tell));
+
+const MAIL = {
+  to: "dana.reyes@harbor.example",
+  subject: "4B renewal terms",
+  body: "Hi Dana, the renewal for 4B is $1,900 a month from January 1.",
+};
+
+/** Waits up to `seconds` for `check` to hold, asking again every 250 ms. */
+async function until(what: string, check: () => Promise<boolean>, seconds: number) {
+  for (const end = Date.now() + seconds * 1000; !(await check()); await Bun.sleep(250))
+    if (Date.now() > end) throw new Error(`waited ${seconds} s for ${what}`);
+}
+
+// A team coworker (SPEC part 14): tally, the firm's accountant, made for Rosa with harbor-ops as its team's
+// channel. Theo and Ana are people at the firm, and Finch is Theo's own coworker. One relay and one firm for
+// every step; the steps run in order, each going on from the last.
+describe("the firm's accountant takes requests from anyone in harbor-ops", () => {
+  let buzz: Buzz;
+  let firm: Firm;
+  let key = "";
+  beforeAll(async () => {
+    buzz = await startBuzz();
+    firm = await startFirm({ buzz, second: true, team: true });
+    key = firm.teamKey;
+    await buzz.person.online(240, key);
+    await buzz.person.online(240, firm.secondKey);
+  }, E2E);
+  afterAll(async () => {
+    await firm?.[Symbol.asyncDispose]();
+    await buzz?.[Symbol.asyncDispose]();
+  }, E2E);
+  afterEach(() => firm.step(), E2E);
+
+  /** The lines code wrote on the log of tally's item titled `title` (SPEC part 7). */
+  const codeLog = (title: string) => {
+    using db = firm.db(team.coworker);
+    return db
+      .query<{ text: string }, [string]>(
+        "select log.text from log join items on items.id = log.item_id where items.title = ? and log.by = 'code'",
+      )
+      .all(title)
+      .map((l) => l.text);
+  };
+
+  test.failing("Theo mentions tally in harbor-ops and gets its answer in his thread, from a run with its own notes, list and tools, and his second question there goes on from the first", async () => {
+    const ASK = "What did we pay for the 4B boiler repair?";
+    const ANSWER = "The 4B boiler repair was $640, paid on November 3.";
+    const MORE = "Which account did it come out of?";
+    const MORE_ANSWER = "It came out of the 4B operating account.";
+    firm.model.on(all(tally, said(ASK)), say(ANSWER));
+    firm.model.on(all(tally, said(MORE)), say(MORE_ANSWER));
+
+    const { id: root } = await buzz.write("theo", "harbor-ops", ASK, { to: key });
+    await buzz.inThread(root, ANSWER, 90, key);
+    await buzz.write("theo", "harbor-ops", MORE, { to: key, reply: root });
+    await buzz.inThread(root, MORE_ANSWER, 90, key);
+
+    // A request is not an others run: it has the coworker's list and goose's own tools.
+    const asked = firm.model.requests.find(all(tally, said(ASK)));
+    expect(["shell", TOOLS.writeItem].filter((t) => !asked?.has(t))).toEqual([]);
+    // One Buzz thread is one session: the second question's run is shown the first and its answer.
+    const more = firm.model.requests.find(all(tally, said(MORE)));
+    expect([more?.shows(ASK), more?.shows(ANSWER)]).toEqual([true, true]);
+  });
+
+  test.failing("what Theo tells tally, Ana hears when she asks in a thread of her own", async () => {
+    const TOLD = "Heads up: Bayside Heating serviced the 4B boiler on Monday.";
+    const NOTE = "4B boiler: serviced by Bayside Heating on Monday (Theo, in harbor-ops).";
+    const NOTED = "Noted.";
+    const ASK = "Who last serviced the 4B boiler?";
+    const ANSWER = "Bayside Heating serviced it on Monday.";
+    firm.model.on(
+      all(tally, said(TOLD)),
+      call("write", { path: "/duck/home/notes/4b-boiler.md", content: `${NOTE}\n` }),
+    );
+    firm.model.on(all(tally, answered("write")), say(NOTED));
+    firm.model.on(all(tally, said(ASK), shows(NOTE)), say(ANSWER));
+
+    const { id: theo } = await buzz.write("theo", "harbor-ops", TOLD, { to: key });
+    await buzz.inThread(theo, NOTED, 90, key);
+    const { id: ana } = await buzz.write("ana", "harbor-ops", ASK, { to: key });
+    await buzz.inThread(ana, ANSWER, 90, key);
+  });
+
+  test.failing("Theo's request becomes an item on tally's list that says Theo asked, and Rosa sees it in tally's To-dos", async () => {
+    const ASK = "Please reconcile the October rent roll for 4B.";
+    const TITLE = "4B: reconcile the October rent roll";
+    const ON_IT = "On it: the October rent roll for 4B is on my list.";
+    firm.model.on(all(tally, said(ASK)), call(TOOLS.writeItem, { title: TITLE }));
+    firm.model.on(all(tally, answered(TOOLS.writeItem)), say(ON_IT));
+
+    const { id: root } = await buzz.write("theo", "harbor-ops", ASK, { to: key });
+    await buzz.inThread(root, ON_IT, 90, key);
+    const asker = `"Theo", Buzz key ${buzz.keys.theo.slice(0, 8)}`;
+    expect(codeLog(TITLE).filter((l) => l.includes(asker))).toHaveLength(1);
+
+    const plugin = await loadPlugin(buzz, "rosa");
+    const shown = await plugin.tab("To-dos", key, (l) => l.includes(TITLE));
+    expect(shown.lines).toContain(TITLE);
+  });
+
+  test.failing("a long request from Ana starts a job, Theo's question meanwhile is answered before the job ends, and the job's result arrives in Ana's thread", async () => {
+    const ASK = "Please put together this year's 4B expense summary.";
+    const STARTED = "I've started on it and will post the summary here.";
+    const BRIEF = "Sum 4B's expenses this year by category. Done means: a total and the boiler's share.";
+    const REPORT =
+      "Blocked on me: nothing. Changed: nothing. Found: 4B spent $8,420 this year, $640 of it on the boiler.";
+    const RESULT = "4B spent $8,420 this year; $640 of it was the boiler repair.";
+    const QUICK = "Is the Bayside invoice for 4B paid?";
+    const PAID = "Yes, the Bayside invoice was paid on November 3.";
+    firm.model.on(all(tally, said(ASK)), call(TOOLS.writeItem, { title: "4B: this year's expense summary" }));
+    firm.model.on(all(tally, answered(TOOLS.writeItem)), (r) =>
+      call(TOOLS.startJob, {
+        item_id: idIn(r.last),
+        title: "4B expense summary",
+        brief: BRIEF,
+        check: false,
+        check_reason: "Ana reads the summary herself.",
+      }),
+    );
+    firm.model.on(all(tally, answered(TOOLS.startJob)), say(STARTED));
+    firm.model.on(all(jobRun, shows(BRIEF)), held("summary", say(REPORT)));
+    firm.model.on(all(tally, said(QUICK)), say(PAID));
+    firm.model.on(all(tally, said("$8,420")), say(RESULT));
+
+    const { id: ana } = await buzz.write("ana", "harbor-ops", ASK, { to: key });
+    await buzz.inThread(ana, STARTED, 90, key);
+    await firm.model.reached("summary");
+    const { id: theo } = await buzz.write("theo", "harbor-ops", QUICK, { to: key });
+    await buzz.inThread(theo, PAID, 90, key);
+    expect(await buzz.thread(ana, key)).toHaveLength(1);
+    firm.model.release("summary");
+    await buzz.inThread(ana, RESULT, 120, key);
+  });
+
+  test.failing("a call that needs a yes is asked of Rosa in her DM with tally, naming Theo as the one who asked, and on her yes it runs once, from tally's own mail account, and Theo hears in his thread", async () => {
+    const ASK = "Can you send Dana the 4B renewal terms?";
+    const ASKED = "I've asked Rosa before it goes.";
+    const YES = "Yes, send it.";
+    const SENT = "Rosa said yes, and the terms have gone to Dana.";
+    firm.model.on(all(tally, said(ASK)), call("send_mail", MAIL));
+    firm.model.on(all(tally, answered("send_mail")), say(ASKED));
+    firm.model.on(all(reading, said(YES)), say("yes"));
+    firm.model.on(all(main(tally), said(YES)), say("Sent."));
+    firm.model.on(all(tally, said('"answer":"yes"')), say(SENT));
+
+    const { id: root } = await buzz.write("theo", "harbor-ops", ASK, { to: key });
+    await buzz.inThread(root, ASKED, 90, key);
+    const question = await buzz.inDm("rosa", key, "Your yes is needed", 60);
+    expect(question.content).toStartWith(
+      `Someone other than you ("Theo", Buzz key ${buzz.keys.theo.slice(0, 8)}) asked for this.`,
+    );
+    expect(question.content).toContain(MAIL.to);
+    expect(firm.mail.callsTo("send_mail")).toHaveLength(0);
+
+    await buzz.write("rosa", "dm", YES, { to: key });
+    await buzz.inThread(root, SENT, 90, key);
+    const sent = firm.mail.callsTo("send_mail");
+    expect(sent.map((c) => c.input)).toEqual([MAIL]);
+    expect(sent[0]?.headers.get("authorization")).toBe(`Bearer ${firm.mailKey(team.coworker)}`);
+  });
+
+  test.failing("someone who asks tally to change its standing words does not change them, and Rosa in her DM with it does", async () => {
+    const ASK = "From now on, copy me on every mail you draft.";
+    const THEIRS = "Copy Theo on every mail you draft.";
+    const LEFT = "Rosa sets my standing instructions, so I've left them as they are.";
+    const HERS = "From now on, put the unit first in every item's title.";
+    const LINE = "Put the unit first in every item's title.";
+    const SET = "Done: the unit goes first in every title now.";
+    firm.model.on(
+      all(tally, said(ASK)),
+      call("write", { path: "/duck/home/standing.md", content: `${THEIRS}\n` }),
+    );
+    firm.model.on(all(tally, answered("write")), say(LEFT));
+    firm.model.on(all(main(tally), said(HERS)), call(TOOLS.standing, { content: `${LINE}\n` }));
+    firm.model.on(all(tally, answered(TOOLS.standing)), say(SET));
+
+    const { id: root } = await buzz.write("theo", "harbor-ops", ASK, { to: key });
+    await buzz.inThread(root, LEFT, 90, key);
+    expect(firm.home(team.coworker, "standing.md")).not.toContain(THEIRS);
+    expect(firm.model.requests.find(all(tally, said(ASK)))?.has(TOOLS.standing)).toBe(false);
+
+    await buzz.write("rosa", "dm", HERS, { to: key });
+    await buzz.inDm("rosa", key, SET, 60);
+    expect(firm.home(team.coworker, "standing.md")).toContain(LINE);
+    expect(firm.home(team.coworker, "standing.md")).not.toContain(THEIRS);
+  });
+
+  test.failing("what tally has to say on its own goes to harbor-ops, not to Rosa's DM, and Rosa's own message to tally is answered in her DM", async () => {
+    const BILL = {
+      ref: "<water-4b@harbor.example>",
+      payload: {
+        from: "Harbor Water <billing@water.harbor.example>",
+        subject: "4B water bill overdue",
+        text: "The 4B water bill of $212 was due November 10.",
+      },
+      person: team.coworker,
+    };
+    const TOLD = "The 4B water bill of $212 is overdue since November 10.";
+    const POSTED = "Team: the 4B water bill of $212 has been overdue since November 10.";
+    const ASK = "Anything else I should know about 4B?";
+    const ANSWER = "Only the water bill, which I posted in harbor-ops.";
+    firm.model.on(all(sorter, shows(BILL.payload.subject)), say("wake: an overdue bill"));
+    firm.model.on(
+      all(tally, shows(BILL.payload.subject), (r) => r.has(TOOLS.tell)),
+      call(TOOLS.tell, { text: TOLD }),
+    );
+    firm.model.on(all(tally, answered(TOOLS.tell)), say("Passed on."));
+    firm.model.on(all(main(tally), shows(TOLD)), say(POSTED));
+    firm.model.on(all(main(tally), said(ASK)), say(ANSWER));
+
+    await firm.push(BILL);
+    const inChannel = async () => (await buzz.inHarborOps("theo", key)).some((m) => m.content === POSTED);
+    await until(`"${POSTED}" in harbor-ops`, inChannel, 90);
+    expect((await buzz.dmOf("rosa", key)).map((m) => m.content)).not.toContain(POSTED);
+
+    await buzz.write("rosa", "dm", ASK, { to: key });
+    await buzz.inDm("rosa", key, ANSWER, 60);
+  });
+
+  test.failing("Theo's coworker Finch asks tally in harbor-ops on its own, tally's answer comes back to Finch as someone else's words, Theo hears it from Finch, and tally's item says Finch asked for Theo", async () => {
+    const ASK = "Ask tally whether the 4B deposit came in.";
+    const QUESTION = "@tally did the 4B deposit come in?";
+    const ASKING = "I've asked tally in harbor-ops.";
+    const TITLE = "4B: confirm the deposit came in";
+    const ANSWER = "Yes, the 4B deposit of $1,900 came in on November 2.";
+    const TOLD = "tally says the 4B deposit of $1,900 came in on November 2.";
+    const args = ["messages", "send", "--channel", buzz.channel, "--mention", key, "--content", "-"];
+    firm.model.on(all(main(finch), said(ASK)), call(TOOLS.buzz, { args, input: QUESTION }));
+    firm.model.on(all(finch, answered(TOOLS.buzz)), say(ASKING));
+    firm.model.on(all(tally, said(QUESTION)), call(TOOLS.writeItem, { title: TITLE }));
+    firm.model.on(all(tally, answered(TOOLS.writeItem)), say(ANSWER));
+    firm.model.on(all(finch, said(ANSWER)), say(TOLD));
+
+    await firm.second.send("desk", ASK);
+    await firm.second.nextWith(ASKING, 60);
+    await firm.second.nextWith(TOLD, 120);
+
+    // It reached Finch as what tally wrote, not as Theo's own words.
+    using db = firm.db(second.coworker);
+    const back = db
+      .query<{ payload: string }, []>("select payload from inbox where source = 'buzz:reply'")
+      .all()
+      .map((e) => JSON.parse(e.payload) as { key?: string; text?: string })
+      .filter((p) => p.text === ANSWER);
+    expect(back.map((p) => p.key)).toEqual([key]);
+    // The item records which coworker asked, and whose it is.
+    const [coworker, person] = [firm.secondKey.slice(0, 8), buzz.keys.theo.slice(0, 8)];
+    expect(codeLog(TITLE).filter((l) => l.includes(coworker) && l.includes(person))).toHaveLength(1);
+  });
+
+  test.failing("Rosa tells tally only Ana may ask it now: Theo's next mention gets no answer and no eyes, and Ana's still does", async () => {
+    const LIMIT = "From now on only Ana may ask you for work.";
+    const LIMITED = "Done: only Ana may ask me now.";
+    const THEO = "Can you pull the 4B ledger for me?";
+    const ANA = "Can you pull the 4B ledger for October?";
+    const LEDGER = "Here is the October 4B ledger total: $2,310.";
+    firm.model.on(all(main(tally), said(LIMIT)), call("settings", { answers: ["Ana"] }));
+    firm.model.on(all(tally, answered("settings")), say(LIMITED));
+    firm.model.on(all(tally, said(ANA)), say(LEDGER));
+
+    await buzz.write("rosa", "dm", LIMIT, { to: key });
+    await buzz.inDm("rosa", key, LIMITED, 60);
+    const { id: theo } = await buzz.write("theo", "harbor-ops", THEO, { to: key });
+    const { id: ana } = await buzz.write("ana", "harbor-ops", ANA, { to: key });
+    await buzz.inThread(ana, LEDGER, 90, key);
+    expect(await buzz.thread(theo, key)).toEqual([]);
+    expect(await buzz.reactionsOf(theo, key)).toEqual([]);
+    expect(firm.model.requests.filter(said(THEO))).toEqual([]);
+  });
+});

@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UNITS, unit } from "../../src/setup/install";
 import { type Bucket, startBucket } from "./bucket";
-import { authTag, type BuzzForFirm } from "./buzz";
+import { authTag, type BuzzForFirm, type Writer } from "./buzz";
 import { HARBOR, harbor } from "./duck";
 import type { EmailService } from "./email";
 import { scriptedModel } from "./model";
@@ -90,6 +90,9 @@ export const JOB_CALLS = 4;
 
 /** The second person and their coworker a test's firm can have, beside harbor's own. */
 export const second = { person: "theo", name: "Theo Grant", coworker: "finch" };
+
+/** The team coworker a test's firm can have: an accountant made for harbor's person, its handle its own name. */
+export const team = { coworker: "tally" };
 
 /** The parts of harbor's setup the kit points at itself. */
 type Setup = {
@@ -260,6 +263,9 @@ async function writeSetup(
  * calendar answers its list inside a wrapper and its box takes the rows out. The firm's storage bucket is the kit's, and with `backup`,
  * the nightly backup runs on that cron expression in the firm's zone; otherwise it never comes due while a
  * test runs. With `empty`, the firm is installed with its coworker made and not yet claimed, as a new firm's first install is.
+ * With `buzz` and `second`, the second person's coworker is claimed with their own tag and joins harbor-ops. With
+ * `buzz` and `team`, the firm has a team coworker made for harbor's person with harbor-ops as its channel,
+ * claimed by her, calling plugs with a key of its own, and in harbor-ops.
  */
 export async function startFirm(
   given: Partial<Times> & {
@@ -277,15 +283,19 @@ export async function startFirm(
     wrapped?: boolean;
     backup?: string;
     empty?: boolean;
+    team?: boolean;
   } = {},
 ) {
   const times = { ...DEFAULTS, ...given };
   const reach = given.reach ?? FROM_CONTAINERS;
   const trouble = new Trouble();
   const secret = () => randomBytes(18).toString("base64url");
-  /** Each person's key to harbor's mail plug, by the secret's name. */
+  /** Each person's key to harbor's mail plug, and the team coworker's own where the firm has one, by the secret's name. */
   const mailKeys: Record<string, string> = Object.fromEntries(
-    [harbor.person, second.person].map((p) => [`HARBOR_MAIL_KEY_${p}`, secret()]),
+    [harbor.person, second.person, ...(given.team ? [team.coworker] : [])].map((p) => [
+      `HARBOR_MAIL_KEY_${p}`,
+      secret(),
+    ]),
   );
   const secrets = {
     HARBOR_MODEL_KEY: secret(),
@@ -468,11 +478,28 @@ export async function startFirm(
     await given.buzz?.meet(wren);
     await run("check");
     const someone = (agent: string) => authTag(randomBytes(32), agent);
-    if (given.second) await run("claim", second.coworker, someone(finch), second.name);
+    if (given.second) {
+      const tag = given.buzz ? given.buzz.proof(second.person as Writer, finch) : someone(finch);
+      await run("claim", second.coworker, tag, second.name);
+      await given.buzz?.joinHarborOps(finch);
+    }
     if (given.empty) await run("install");
     else await run("claim", harbor.coworker, (given.buzz?.tagFor ?? someone)(wren), harbor.name);
     person.meet(address, harbor.coworker);
     theirs.meet(address, second.coworker);
+    // As an admin makes a team coworker for its person, naming its channel by its Buzz id, and she claims it and
+    // adds it to that channel in Buzz.
+    let tally = "";
+    if (given.team && given.buzz) {
+      const { keys, channel } = given.buzz;
+      tally = (
+        /its Buzz key is ([0-9a-f]{64})/.exec(
+          await run("make", team.coworker, team.coworker, keys.rosa, channel),
+        ) as string[]
+      )[1] as string;
+      await run("claim", team.coworker, given.buzz.tagFor(tally), harbor.name);
+      await given.buzz.joinHarborOps(tally);
+    }
 
     const firm = {
       name,
@@ -481,6 +508,10 @@ export async function startFirm(
       duckKey,
       /** The Buzz key of the person's coworker. */
       coworkerKey: wren,
+      /** The Buzz key of the second person's coworker, where the firm has them. */
+      secondKey: finch,
+      /** The Buzz key of the team coworker, where the firm has one. */
+      teamKey: tally,
       /** Runs `duck <command>` in the firm's folder as its admin's agent does, and returns what it printed. */
       duck: run,
       /** The key `person`'s coworker calls harbor's mail plug with. */
@@ -591,6 +622,11 @@ export async function startFirm(
       /** Coworker `coworker`'s facts, as duck keeps them in its folder. */
       facts: (coworker: string) =>
         JSON.parse(readFileSync(join(storage, coworker, "coworker.json"), "utf8")) as Record<string, string>,
+      /** The file at `path` in coworker `coworker`'s home, as its stored files hold it, or "" where there is none. */
+      home: (coworker: string, path: string) => {
+        const file = join(storage, coworker, "home", path);
+        return existsSync(file) ? readFileSync(file, "utf8") : "";
+      },
       /** The secret of the Buzz key duck made for coworker `coworker`, in hex. */
       buzzSecret: (coworker: string) =>
         /^BUZZ_KEY=([0-9a-f]{64})$/m.exec(
