@@ -248,7 +248,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     expect(firm.model.requests.filter(said(LATE))).toHaveLength(1);
   });
 
-  test.failing("a voice note she sends reaches the coworker as a file", async () => {
+  test("a voice note she sends reaches the coworker as a file", async () => {
     /** A run shown the path of the voice note she sent. */
     const voiced: When = (r) => coworkerRun(r) && /\/duck\/files\/\S+\.oga/.test(r.last);
     firm.model.on(voiced, (r) =>
@@ -261,7 +261,7 @@ describe("Rosa writes to her coworker on Telegram", () => {
     expect(firm.model.requests.findLast(answered("shell"))?.shows("the boiler in 4B")).toBe(true);
   });
 
-  test.failing("a file Telegram will not hand over still brings her words, the coworker is told it did not come and why, and her next message is answered", async () => {
+  test("a file Telegram will not hand over still brings her words, the coworker is told it did not come and why, and her next message is answered", async () => {
     const [VIDEO, NEXT] = ["Here's the walkthrough of 4B.", "Is the 4B lease signed?"];
     const TOLD = "The video didn't come through: Telegram says it is too big. Can you send a link?";
     firm.model.on(all(said(VIDEO), shows("walkthrough-4B.mp4"), shows("file is too big")), say(TOLD));

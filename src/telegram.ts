@@ -19,9 +19,16 @@ type Message = {
   date: number;
   text?: string;
   caption?: string;
-  document?: { file_id: string; file_name?: string; mime_type?: string };
-  photo?: { file_id: string }[];
+  [field: string]: unknown;
 };
+/**
+ * A file a message carries: its document, voice note, audio, video, sticker or the like, each an object with a
+ * `file_id`, or its photo, a list of sizes smallest first (core.telegram.org/bots/api#message).
+ */
+type Carried = { file_id: string; file_name?: string; mime_type?: string };
+
+/** The Bot API's answer refusing a call, as against its not being reached. */
+class Refused extends Error {}
 
 /** Each Telegram door's typing, sent again after a message goes out there, since one clears it. */
 const typists = new Map<Door, () => void>();
@@ -43,13 +50,14 @@ async function bot<T>(c: Coworker, set: Door, method: string, params: object, si
     throw new Error(`the Bot API's ${method} was not reached (${error.name})`);
   });
   const got = (await answer.json().catch(() => ({}))) as { ok?: boolean; result?: T; description?: string };
-  if (!got.ok) throw new Error(`the Bot API answered ${method} with ${answer.status}: ${got.description}`);
+  if (!got.ok) throw new Refused(`the Bot API answered ${method} with ${answer.status}: ${got.description}`);
   return got.result as T;
 }
 
 /**
- * Hands each message its person writes to Telegram door `set`'s bot in their private chat to `door`, with its
- * document or its photo at the largest size. A message from anyone else, or in a group, is dropped, and each
+ * Hands each message its person writes to Telegram door `set`'s bot in their private chat to `door`, with the
+ * file it carries, a photo at its largest size. Where the Bot API refuses to hand the file over, as it does one
+ * past 20 MB, the message is taken without it, its words saying so and why. A message from anyone else, or in a group, is dropped, and each
  * such sender and chat logged once. The bot's updates are taken by long polling, each call confirming those
  * before it once they are taken, and the poll is kept going; after a stop, Telegram gives again what was not
  * confirmed, and the inbox takes each message once. Typing shows in the chat, best effort, while a message
@@ -75,11 +83,23 @@ export async function telegramIn(c: Coworker, door: string, set: Door) {
   typists.set(set, typing);
   c.signal.addEventListener("abort", () => clearInterval(every));
   typing();
-  const file = async (id: string) => {
-    const { file_path } = await bot<{ file_path: string }>(c, set, "getFile", { file_id: id });
-    const got = await fetch(`${set.address}/file/bot${secret(c.setup, set.key)}/${file_path}`);
-    if (!got.ok) throw new Error(`its file ${basename(file_path)} could not be downloaded (${got.status})`);
-    return { name: basename(file_path), data: Buffer.from(await got.arrayBuffer()).toString("base64") };
+  /** File `f` as the door hands it on, or the words that say the Bot API would not hand it over, and why. */
+  const file = async (f: Carried) => {
+    try {
+      const { file_path } = await bot<{ file_path: string }>(c, set, "getFile", { file_id: f.file_id });
+      const got = await fetch(`${set.address}/file/bot${secret(c.setup, set.key)}/${file_path}`).catch(
+        (error: Error) => {
+          throw new Error(`the Bot API's file download was not reached (${error.name})`);
+        },
+      );
+      if (!got.ok) throw new Refused(`the Bot API answered its download with ${got.status}`);
+      const data = Buffer.from(await got.arrayBuffer()).toString("base64");
+      return { name: f.file_name ?? basename(file_path), type: f.mime_type ?? "", data };
+    } catch (error) {
+      if (!(error instanceof Refused)) throw error;
+      const name = f.file_name ? `${f.file_name} ` : "";
+      return `Telegram would not hand over the file ${name}that came with this message: ${error.message}.`;
+    }
   };
   let offset: number | undefined;
   await keep(c, door, `${what}'s poll`, async () => {
@@ -96,13 +116,15 @@ export async function telegramIn(c: Coworker, door: string, set: Door) {
       for (const u of updates) {
         const m = u.message;
         if (m && String(m.from?.id) === person && m.chat.type === "private") {
-          // The Bot API lists a photo's sizes smallest first.
-          const [d, id] = [m.document, m.document?.file_id ?? m.photo?.at(-1)?.file_id];
-          const got = id ? await file(id) : null;
-          const files = got ? [{ ...got, name: d?.file_name ?? got.name, type: d?.mime_type ?? "" }] : [];
+          const carried = (Object.values(m) as (Carried | Carried[] | undefined)[])
+            .map((v) => (Array.isArray(v) ? v.at(-1) : v))
+            .find((v) => v?.file_id);
+          const got = carried ? await file(carried) : null;
+          const words = m.text ?? m.caption ?? "";
+          const text = typeof got === "string" ? [words, got].filter(Boolean).join("\n\n") : words;
+          const files = got && typeof got !== "string" ? [got] : [];
           const at = new Date(m.date * 1000).toISOString();
-          if (taken(c, door, { id: String(m.message_id), text: m.text ?? m.caption ?? "", files, at }))
-            typing();
+          if (taken(c, door, { id: String(m.message_id), text, files, at })) typing();
         } else if (m && !strangers.has(`${m.from?.id}/${m.chat.id}`)) {
           strangers.add(`${m.from?.id}/${m.chat.id}`);
           console.error(`${what} dropped a message not its person's, or not in their private chat`);
