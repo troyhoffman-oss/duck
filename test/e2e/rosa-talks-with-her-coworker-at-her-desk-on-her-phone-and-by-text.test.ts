@@ -456,7 +456,7 @@ describe("Rosa talks with her coworker at her desk, on her phone and by text", (
 
     const probe = (u: string) =>
       `echo "${u} $(curl -gsS -m 5 -o /dev/null -w '%{http_code}' '${u}' 2>/dev/null; echo " exit $?")"`;
-    const duck = `http://${container(firm.name)}:${new URL(firm.address).port}/ready`;
+    const duck = `http://${container(firm.name)}:${new URL(firm.address).port}/ready?coworkers=${harbor.coworker}`;
     const script = [
       "ip route del unreachable 10.0.0.0/8 2>&1",
       probe(OPEN),
