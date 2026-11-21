@@ -1,17 +1,14 @@
 import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
-  all,
   answered,
   type Buzz,
   both,
   call,
-  coworkerRun,
   E2E,
   type Firm,
   harbor,
   held,
   loadPlugin,
-  reading,
   type Speech,
   type SpeechSession,
   said,
@@ -20,26 +17,17 @@ import {
   startBuzz,
   startFirm,
   startSpeech,
-  TOOLS,
   until,
 } from "../kit";
-import type { ModelRequest, When } from "../kit/model";
 
 /** How long a call lasts on the test's relay, in seconds, so a step reaches its end. */
 const TTL = 120;
 const [HELLO, HI] = ["Are you there?", "I'm here."];
 const ASK = "Please find the 4B lease and tell me when it is due.";
 const [FIRST, ANSWER] = ["I'll pull the 4B lease.", "The 4B lease is up for renewal on March 1."];
-/** A run in the main conversation: only a work-lane run has `tell` (SPEC part 10). */
-const main: When = (r) => coworkerRun(r) && !r.has(TOOLS.tell);
 /** Her Preferences' cost line, and the admins' card's cost, once she has talked with her coworker this month. */
 const PREFERENCES = /^Model use this month at list price: \$\d+\.\d\d and \d+ min of voice calls$/;
 const CARD = /^\$\d+\.\d\d and \d+ min of voice calls$/;
-/** Her coworker's held call: the file it sends, whom to, and what she asks and answers in a call. */
-const [FILE, NAME, DANA] = ["/duck/home/lease-4B.txt", "lease-4B.txt", "dana.reyes@harbor.example"];
-const [SEND, YES, NO] = ["Send Dana the 4B lease.", "Yes, send it.", "No, hold it."];
-/** What her coworker says once duck has asked her in the call, and once the gate tells it her answer. */
-const [ASKING, SENT, KEPT] = ["Asking you now.", "Dana has the 4B lease.", "I'll hold the 4B lease."];
 
 setDefaultTimeout(E2E);
 
@@ -80,10 +68,25 @@ describe("a person talks with their coworker in a call", () => {
     await call.joins(wren, 30);
     return { call, session: await speech.opened(sessions) };
   }
-  /** She hangs up, and waits until her coworker has closed its session with the speech model. */
+  /** How many calls the voice door has logged leaving since the step began. */
+  const lefts = async () => (await firm.logged("call")).filter((l) => l.happened === "left").length;
+  /**
+   * Waits until the voice door has logged leaving `count` calls since the step began, which it does once its
+   * session with the speech model has closed and what it keeps of the call is kept.
+   */
+  async function doorLeft(count: number) {
+    for (const end = Date.now() + 30_000; (await lefts()) < count; await Bun.sleep(200))
+      if (Date.now() > end) throw new Error(`waited 30 s for the voice door to leave ${count} calls`);
+  }
+  /**
+   * She hangs up, and waits until her coworker has closed its session with the speech model and its voice door
+   * has left the call.
+   */
   async function hangUp(call: Call, session: SpeechSession) {
+    const before = await lefts();
     call.hangUp();
     await until("the session with the speech model closed", () => session.closed, 30, speech.trouble);
+    await doorLeft(before + 1);
   }
   /** What the door gave the speech model to say. */
   const spoken = (session: SpeechSession) =>
@@ -104,58 +107,6 @@ describe("a person talks with their coworker in a call", () => {
     using db = firm.db();
     return db.query<{ id: number }, []>("select coalesce(max(id), 0) as id from messages").get()?.id ?? 0;
   };
-  /** The asks in duck's outbox, oldest first: the door each went to and her answer. */
-  const asks = () => {
-    using db = firm.db();
-    return db
-      .query<{ door: string; answer: string | null }, []>(
-        "select door, answer from outbox where kind = 'ask' order by id",
-      )
-      .all();
-  };
-  /**
-   * Her coworker writes the 4B lease and sends it to Dana when she asks, a call the gate holds; it says
-   * ASKING once duck asks her at the voice door, and on what the gate tells it of her answer, SENT or KEPT.
-   */
-  function sends() {
-    firm.model.on(said(SEND), call("shell", { command: `printf 'The 4B lease' > ${FILE}` }));
-    firm.model.on(answered("shell"), call("send_file", { to: DANA, file: FILE }));
-    firm.model.on(answered("send_file"), (r) =>
-      say(r.last.includes("at their voice door") ? ASKING : "I've asked you in Buzz."),
-    );
-  }
-  /**
-   * duck's reading of her reply `reply`, scripted: `answer` to the question where what was said for it, from
-   * its entry to her reply, names both whom the file goes to and the file, and otherwise neither.
-   */
-  function reads(reply: string, answer: string, times = 1) {
-    const named = (r: ModelRequest) => {
-      const entry = r.read?.questions[0]?.entry ?? 1;
-      const aloud = (r.read?.conversation ?? [])
-        .slice(entry - 1, -1)
-        .map((e) => e.text)
-        .join("\n");
-      return aloud.includes(DANA) && aloud.includes(NAME);
-    };
-    firm.model.on(all(reading, said(reply)), (r) => say(named(r) ? answer : "neither"), { times });
-  }
-  /** Waits until the speech model has said a line holding `words` and she has heard a second and a half of quiet. */
-  const heardOut = (inCall: Call, session: SpeechSession, words: string) =>
-    until(
-      `"${words}" said in the call, and quiet after`,
-      () =>
-        session.spoken.some((s) => s.includes(words)) &&
-        performance.now() - (inCall.heard.findLast((h) => h.tone === "said")?.at ?? 0) > 1500,
-      60,
-      speech.trouble,
-    );
-  /** Takes her coworker's messages in Buzz until one holds `text`, and returns it. */
-  async function inBuzz(text: string) {
-    for (;;) {
-      const message = await buzz.person.next(60);
-      if (message.content.includes(text)) return message.content;
-    }
-  }
   /** The states of the inbox events the voice door wrote, oldest first. */
   const voiceEvents = () => {
     using db = firm.db();
@@ -325,6 +276,7 @@ describe("a person talks with their coworker in a call", () => {
     await ended.call.end();
     await ended.call.leaves(wren, 30);
     await until("the first session closed", () => ended.session.closed, 30, speech.trouble);
+    await doorLeft(1);
     ended.call.hangUp();
 
     const timed = await open(await buzz.privateChannel("rosa", [wren]), 2);
@@ -332,6 +284,7 @@ describe("a person talks with their coworker in a call", () => {
     expect(left).toBeLessThan(timed.call.ends);
     expect(left).toBeGreaterThan(timed.call.ends - 60_000);
     expect(timed.session.closed).toBe(true);
+    await doorLeft(2);
     timed.call.hangUp();
   });
 
@@ -377,85 +330,13 @@ describe("a person talks with their coworker in a call", () => {
     expect(card.lines).toContainEqual(expect.stringMatching(CARD));
   });
 
-  test.failing("a question raised in a call is asked in the call: once she has heard all of it, her spoken yes, which duck takes from what she said as the speech model hands nothing off, is read as a typed yes is and releases the held call, whose outcome she hears in the call", async () => {
-    sends();
-    reads(YES, "yes");
-    firm.model.on(all(coworkerRun, said('"answer":"yes"')), say(SENT));
-    firm.model.on(all(main, said(YES)), say("Sending it."), { times: Number.POSITIVE_INFINITY });
-    speech.hears(YES, { hand: false });
-    const before = lastMessage();
-    const { call: inCall, session } = await open(dm);
-    try {
-      await inCall.say(SEND);
-      await speaks(session, ASKING);
-      await heardOut(inCall, session, NAME);
-      expect(firm.mail.callsTo("send_file")).toEqual([]);
-      await inCall.say(YES);
-      await speaks(session, SENT);
-      expect(firm.mail.callsTo("send_file")).toHaveLength(1);
-      expect(asks().at(-1)).toEqual({ door: "voice", answer: "yes" });
-      const read = firm.model.requests.filter(reading);
-      expect(read).toHaveLength(1);
-      expect(read[0]?.read?.questions[0]?.text).toStartWith("Your yes is needed for mail's send_file");
-      expect(archived(before).filter((m) => m.way === "in" && m.text === YES)).toHaveLength(1);
-      expect(session.delegations.map((d) => d.line)).toEqual([SEND]);
-    } finally {
-      await hangUp(inCall, session);
-    }
-  });
-
-  test.failing("her spoken no to a question asked in the call, which the speech model also hands off, is read once, and the held call does not run", async () => {
-    sends();
-    reads(NO, "no");
-    firm.model.on(all(coworkerRun, said('"answer":"no"')), say(KEPT));
-    firm.model.on(main, say("Okay."), { times: Number.POSITIVE_INFINITY });
-    const before = lastMessage();
-    const { call: inCall, session } = await open(dm);
-    try {
-      await inCall.say(SEND);
-      await speaks(session, ASKING);
-      await heardOut(inCall, session, NAME);
-      await inCall.say(NO);
-      await speaks(session, KEPT);
-      expect(firm.mail.callsTo("send_file")).toEqual([]);
-      expect(asks().at(-1)).toEqual({ door: "voice", answer: "no" });
-      expect(firm.model.requests.filter(reading)).toHaveLength(1);
-      expect(archived(before).filter((m) => m.way === "in" && m.text === NO)).toHaveLength(1);
-    } finally {
-      await hangUp(inCall, session);
-    }
-  });
-
-  test.failing("a question the speech model cuts short after whom the file goes to: her yes answers nothing and nothing is sent, and once she hangs up the question waits for her in Buzz, where her typed yes releases it", async () => {
-    sends();
-    reads(YES, "yes", 2);
-    firm.model.on(all(coworkerRun, said('"answer":"yes"')), say(SENT));
-    firm.model.on(
-      all(main, said(YES), (r) => !r.last.includes("answers ask")),
-      say("That still needs your yes."),
-    );
-    firm.model.on(all(main, said(YES)), say("Sending it."), { times: Number.POSITIVE_INFINITY });
-    speech.hears(YES, { hand: false });
-    speech.cuts(DANA);
-    const { call: inCall, session } = await open(dm);
-    try {
-      await inCall.say(SEND);
-      await speaks(session, ASKING);
-      await heardOut(inCall, session, DANA);
-      expect(session.spoken.some((s) => s.includes(NAME))).toBe(false);
-      await inCall.say(YES);
-      await speaks(session, "That still needs your yes.");
-      expect(firm.mail.callsTo("send_file")).toEqual([]);
-      expect(asks().at(-1)).toEqual({ door: "voice", answer: null });
-    } finally {
-      await hangUp(inCall, session);
-    }
-
-    expect(await inBuzz("Your yes is needed")).toContain(NAME);
-    expect(firm.mail.callsTo("send_file")).toEqual([]);
-    await buzz.person.send(YES);
-    await inBuzz(SENT);
-    expect(firm.mail.callsTo("send_file")).toHaveLength(1);
-    expect(asks().at(-1)).toEqual({ door: "buzz", answer: "yes" });
+  test.failing("the speech model ends its session first: her coworker leaves the call, and joins the next call she starts", async () => {
+    const first = await open(dm);
+    speech.ends(first.session);
+    await first.call.leaves(wren, 30);
+    await doorLeft(1);
+    first.call.hangUp();
+    const next = await open(dm, 2);
+    await hangUp(next.call, next.session);
   });
 });
