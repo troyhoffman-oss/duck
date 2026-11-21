@@ -116,7 +116,7 @@ Then they claim it themselves:
 
 duck claims it for them, and a systemd unit runs `duck install` on the server. No admin needs to be there.
 
-A person who lives in another time zone than the firm's sets theirs once they have claimed the coworker, in the plugin's Preferences tab; duck installs again on its own. Without the plugin, or while duck's channels are off, every coworker is in the firm's zone.
+A person who lives in another time zone than the firm's sets theirs once they have claimed the coworker, in the plugin's Preferences tab or by telling the coworker. Where the setup has Buzz, duck installs again on its own; without it, the coworker's own clock takes the new zone at the next `duck install`.
 
 **For a person with no plugin, or with duck's channels off.** With duck's channels off, run `duck make <coworker> <handle>`. Give the person the key `duck make` printed and these steps, in Buzz's desktop app (the phone app cannot):
 
@@ -130,7 +130,7 @@ Check: the install ends with the lines `<coworker>: started` and `duck: kept` (a
 
 ## 10. The plugin
 
-duck's plugin is `plugin/manifest.json` and `plugin/plugin.js` in this repo, the same files for every firm. In Buzz's desktop app it adds duck as a harness in New agent, which claims a coworker; a To-dos and a Preferences tab on the coworker's page; and, for the community's owners and admins, a Coworkers card in Settings. It talks with duck only in duck's channel, which Buzz lists nowhere. Without it, as on Buzz's phone app, a person claims a coworker only through an admin's `duck claim`, and cannot pause it, set its quiet hours, messages an hour or their time zone, rename it, change its picture or remove it. A person installs it as step 9 says.
+duck's plugin is `plugin/manifest.json` and `plugin/plugin.js` in this repo, the same files for every firm. In Buzz's desktop app it adds duck as a harness in New agent, which claims a coworker; a To-dos and a Preferences tab on the coworker's page; and, for the community's owners and admins, a Coworkers card in Settings. It talks with duck only in duck's channel, which Buzz lists nowhere. Without it, as on Buzz's phone app, a person claims a coworker only through an admin's `duck claim`, pauses it and sets its quiet hours, messages an hour and their time zone only by telling it, and cannot rename it, change its picture or remove it. A person installs it as step 9 says.
 
 Check: in the person's Buzz desktop app, Settings, then Plugins, then Manage plugins lists duck, and New agent offers duck as a harness.
 
