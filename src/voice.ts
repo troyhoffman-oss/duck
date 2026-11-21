@@ -17,6 +17,8 @@ const MARGIN = 30_000;
 const LIMIT = 3600;
 /** How long a hand-off waits for the transcript to pass it. */
 const HEARD = 3000;
+/** How long the speech model may take to begin saying what it is given. */
+const BEGIN = 3000;
 /** The longest pause between the transcript's words inside one line of the person's. */
 const PAUSE = 700;
 /** The longest pause between the transcript's words of one thing the speech model says. */
@@ -111,12 +113,17 @@ export function voiceIn(
     let [out, seq, spoken, lastSaid, seconds] = [Buffer.alloc(0), 0, "", 0, 0];
     let [delegation, leaving, joined] = [null as string | null, false, false];
     /**
-     * When the person was last heard, and the speech model last said anything and began what it says now, by
-     * the clock; and the end of the last line duck took from the transcript itself, in the session's ms.
+     * When the person was last heard, the speech model was last given something to say, last said anything and
+     * began what it says now, by the clock; and the end of the last line duck took from the transcript itself,
+     * in the session's ms.
      */
-    let [lastIn, lastOut, spokenFrom, ownTo] = [0, 0, 0, -1];
+    let [lastIn, lastGiven, lastOut, spokenFrom, ownTo] = [0, 0, 0, 0, -1];
     let own: Timer | undefined;
-    /** duck's question it is saying: when it was given, whether its words have begun, and their first message. */
+    /**
+     * duck's questions waiting to be asked, and the one being asked: when it was given, whether its words have
+     * begun, and their first message.
+     */
+    const questions: string[] = [];
     let question: { given: number; begun: boolean; first?: number } | undefined;
     const closed = Promise.withResolvers<void>();
     const live = (event: object) =>
@@ -127,7 +134,7 @@ export function voiceIn(
       spoken = "";
       if (!text) return undefined;
       const id = told(c.db, door, c.conversation() ?? null, text, []);
-      if (question && question.first === undefined && spokenFrom >= question.given) question.first = id;
+      if (question?.begun && question.first === undefined) question.first = id;
       return id;
     };
     const end = () => {
@@ -163,23 +170,21 @@ export function voiceIn(
       return true;
     };
     /** Has the speech model say `text` from the coworker, about the last line handed on. */
-    const say = (text: string) =>
+    const say = (text: string) => {
+      lastGiven = Date.now();
       live({
         type: "session.commentary.append",
         event_id: `said-${Date.now()}`,
         delegation_id: delegation,
         content: text,
       });
+    };
     /**
      * Has the speech model ask the person duck's question `text`, word for word, and then say only "One moment"
-     * until it is given what happened. The question is asked once the last of what it said for it has played.
+     * until it is given what happened: once it has said all it was given before, so that what it says next is
+     * the question's. The question is asked once the last of that has played.
      */
-    const ask = (text: string) => {
-      question = { given: Date.now(), begun: false };
-      say(
-        `Ask ${personOf(c.setup, c.name).name} this, word for word, then wait for their answer:\n${text}\nWhen they answer, say only "One moment" until you are given what happened.`,
-      );
-    };
+    const ask = (text: string) => questions.push(text);
     /** Takes the line the person finished, as the transcript gives it, as their message. */
     const ownLine = () => {
       const words = heard.splice(0);
@@ -234,7 +239,7 @@ export function voiceIn(
         if (e.start_ms - lastSaid >= BREATH) keep();
         if (!spoken) spokenFrom = Date.now();
         [spoken, lastSaid, lastOut] = [spoken + e.delta, e.end_ms, Date.now()];
-        if (question) question.begun = true;
+        if (question && spokenFrom >= question.given) question.begun = true;
       } else if (e.type === "session.output_audio.delta") {
         out = Buffer.concat([out, Buffer.from(e.delta, "base64")]);
         lastOut = Date.now();
@@ -292,12 +297,23 @@ export function voiceIn(
     room.onclose = end;
     // The coworker's sound goes out a 20 ms frame at a time, as a phone sends it.
     const pace = setInterval(() => {
-      // Once the last of what was said for duck's question has played, the question is asked there.
-      if (question?.begun && out.length === 0 && Date.now() - lastOut >= BREATH) {
+      // Quiet: all it was given has begun, or never will, and the last of what it said has played.
+      const now = Date.now();
+      const quiet =
+        out.length === 0 && now - lastOut >= BREATH && (lastOut >= lastGiven || now - lastGiven >= BEGIN);
+      if (quiet && question?.begun) {
+        // The last of what was said for duck's question has played: the question is asked there.
         const kept = keep();
         const first = question.first ?? kept;
-        if (first !== undefined) asked(c.db, door, first, new Date().toISOString());
+        const given = new Date(question.given).toISOString();
+        if (first !== undefined) asked(c.db, door, given, first, new Date(now).toISOString());
         question = undefined;
+      } else if (quiet && question) question = undefined;
+      else if (quiet && questions.length > 0) {
+        question = { given: now, begun: false };
+        say(
+          `Ask ${personOf(c.setup, c.name).name} this, word for word, then wait for their answer:\n${questions.shift()}\nWhen they answer, say only "One moment" until you are given what happened.`,
+        );
       }
       if (room.readyState !== WebSocket.OPEN || out.length === 0) return;
       const pcm = new Uint8Array(FRAME);

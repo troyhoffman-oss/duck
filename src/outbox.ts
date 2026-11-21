@@ -68,13 +68,14 @@ export const asking = (db: Database, door: string) =>
     .get(door) !== null;
 
 /**
- * The asks sent to voice door `door` and not yet said in full there, asked at `at`: the time the last of their
- * words played, in the archive's message `message`, where what was said for them starts (SPEC part 9).
+ * The asks sent to voice door `door` by `given`, when the speech model was given them, and not yet said in full
+ * there, asked at `at`: the time the last of their words played, in the archive's message `message`, where
+ * what was said for them starts (SPEC part 9).
  */
-export const asked = (db: Database, door: string, message: number, at: string) =>
+export const asked = (db: Database, door: string, given: string, message: number, at: string) =>
   db.run(
-    "update outbox set message = ?, sent_at = ? where kind = 'ask' and state = 'sent' and answer is null and message is null and door = ?",
-    [message, at, door],
+    "update outbox set message = ?, sent_at = ? where kind = 'ask' and state = 'sent' and answer is null and message is null and door = ? and sent_at <= ?",
+    [message, at, door, given],
   );
 
 /**
